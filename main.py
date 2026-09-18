@@ -824,15 +824,10 @@ ACT_PUBKEY = (
     "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDCAdf/EyIbLBxjGqmh7qLU6/CPCzru+75+82OSPZ+nf4BFvg88drpZ6KigNW0J8TNgxe6Yms1irCZNVDyu+RXsl4y/7c2KOHc4OGTzHB5fUMiMasFUvcEs2P70e6yA/sKHZfBLG1XPhlb84Ibs3nhD3W5e2SuC+4EuVkaqzN08LQIDAQAB\n"
     "-----END PUBLIC KEY-----"
 )
-# پشتڕاستکراو — سکان ی تەواو (٢٦ لە ٢٨ کار دەکەن)
-ACT_MODELS = [
-    "claude-opus-5", "claude-sonnet-5", "claude-opus-4-6", "claude-sonnet-4-6",
-    "gpt-5.5", "gpt-5.2", "gpt-5", "gpt-4.1", "o3", "o4-mini",
-    "gpt-5.6-luna", "gpt-5.6-sol",
-    "gemini-3.8-flash", "gemini-3-pro", "gemini-3.1-pro", "gemini-2.5-pro", "gemini-2.5-flash",
-    "grok-4.6", "grok-4", "deepseek-v4", "deepseek-r1",
-    "qwen3.8-max", "qwen3-max", "kimi-k2.6", "glm-5.3", "llama-4-maverick",
-]
+# ڕاستکراوە: API ەکەیان هەر ناوێک قبوڵ دەکات بەڵام هەمووی فەڵباکە بۆ یەک مۆدێڵ
+# (پشکنین: ناوی درۆش وەڵام دەداتەوە + هەموو ناوەکان «made by OpenAI» دەڵێن)
+# تەنها ناوی ڕەسمی ڕاییگەی ماڵپەڕەکە دەمێنێتەوە — gpt-5.6-luna
+ACT_MODELS = ["gpt-5.6-luna"]
 ACT_UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
