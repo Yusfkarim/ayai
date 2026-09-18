@@ -991,6 +991,154 @@ def fla_chat(messages, timeout=110):
         raise EMError(f"fla: {str(e)[:60]}")
 
 
+# ════════════════════════════════════════════════════════════
+# ٢.١١) zerotwo.ai — gemini-2.5-flash-lite (ڕاییگە: ١٥ نامە/ڕۆژ/هەژمار)
+#      supabase signup (mail.tm) → csrf → /api/ai/chat/stream
+# ════════════════════════════════════════════════════════════
+
+Z02_API = "https://api.zerotwo.ai"
+Z02_SB = "https://jdbcevjbqaoxrxxwqwux.supabase.co"
+Z02_KEY = ("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+           "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpkYmNldmpicWFveHJ4eHdxd3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgyNDcyMzUsImV4cCI6MjA3MzgyMzIzNX0."
+           "UcUJUjMocwijFTtYFKYuTgIODYWc4uxDByu2tI6XGQg")
+
+_Z02_CACHE = {"token": None, "exp": 0.0}
+
+
+def z02_servers():
+    return [{"id": "z02-gemini-flash-lite", "name": "Gemini Flash Lite (ZeroTwo)",
+             "model_id": "gemini-2.5-flash-lite", "kind": "z02"}]
+
+
+def _z02_new_account():
+    """هەژماری نوێ: mail.tm → supabase signup → confirm → access_token"""
+    import uuid as _uuid
+    ms = requests.Session()
+    ms.headers.update({"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))]})
+    r = ms.get("https://api.mail.tm/domains", timeout=(15, 30))
+    dom = r.json()["hydra:member"][0]["domain"]
+    email = f"z02x{int(time.time())}{random.randrange(100, 999)}@{dom}"
+    pw = "Xk9!mQ2#vLp8$zRw"
+    r = ms.post("https://api.mail.tm/accounts", json={"address": email, "password": pw}, timeout=(15, 30))
+    if r.status_code not in (200, 201):
+        raise EMError(f"z02 mail: {r.status_code}")
+    r = ms.post("https://api.mail.tm/token", json={"address": email, "password": pw}, timeout=(15, 30))
+    mtok = r.json()["token"]
+    h = {"apikey": Z02_KEY, "Authorization": f"Bearer {Z02_KEY}", "Content-Type": "application/json"}
+    r = requests.post(f"{Z02_SB}/auth/v1/signup", json={"email": email, "password": pw},
+                      headers=h, timeout=(15, 40))
+    if r.status_code != 200:
+        raise EMError(f"z02 signup: {r.status_code}")
+    # چاوەڕوانی نامەی confirm (SendGrid — quoted-printable decode)
+    link = None
+    import quopri as _qp
+    for _ in range(8):
+        time.sleep(3.5)
+        try:
+            r = ms.get("https://api.mail.tm/messages", headers={"Authorization": f"Bearer {mtok}"},
+                       timeout=(15, 30))
+            msgs = r.json().get("hydra:member", [])
+            if not msgs:
+                continue
+            mid = msgs[0]["id"]
+            r = ms.get(f"https://api.mail.tm/messages/{mid}",
+                       headers={"Authorization": f"Bearer {mtok}"}, timeout=(15, 30))
+            d = r.json()
+            html = d.get("html")
+            html = html[0] if isinstance(html, list) else str(html)
+            try:
+                html = _qp.decodestring(html.encode()).decode("utf-8", "replace")
+            except Exception:
+                pass
+            m = re.search(r'https://u[0-9a-z]+\.ct\.sendgrid\.net/ls/click\?[^"\'\s<>]+', html)
+            if m:
+                link = m.group(0)
+                break
+        except Exception:
+            continue
+    if not link:
+        raise EMError("z02: نامەی confirm نەگەیشت")
+    r = requests.get(link, allow_redirects=True, timeout=(15, 40),
+                     headers={"User-Agent": ACT_UAS[0]})
+    m = re.search(r'access_token=(eyJ[A-Za-z0-9_.-]+)', r.url)
+    if not m:
+        raise EMError("z02: access_token لە ڕیدایرێکت نییە")
+    return m.group(1)
+
+
+def _z02_token():
+    """access_token ی زیندوو — ئەگەر کۆن بوو یان مردوو بوو نوێی دروست دەکات"""
+    if _Z02_CACHE["token"] and time.time() < _Z02_CACHE["exp"]:
+        return _Z02_CACHE["token"]
+    tok = _z02_new_account()
+    _Z02_CACHE["token"] = tok
+    _Z02_CACHE["exp"] = time.time() + 3300  # JWT = 1 کاتژمێر
+    return tok
+
+
+def z02_chat(messages, timeout=110):
+    """چاتی zerotwo — gemini-2.5-flash-lite؛ ١٥ نامە/ڕۆژ → هەژماری نوێ خۆکار"""
+    try:
+        token = _z02_token()
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"z02: {str(e)[:60]}")
+    h = {
+        "User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+        "Origin": "https://app.zerotwo.ai", "Referer": "https://app.zerotwo.ai/",
+        "X-ZeroTwo-Platform": "web", "Content-Type": "application/json",
+    }
+    msgs = [{"role": m["role"], "content": m["content"]}
+            for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+    for attempt in (0, 1):
+        if attempt == 1:
+            try:
+                token = _z02_new_account()
+                _Z02_CACHE["token"], _Z02_CACHE["exp"] = token, time.time() + 3300
+            except Exception as e:
+                raise EMError(f"z02 هەژمار: {str(e)[:50]}")
+        try:
+            s = requests.Session()
+            s.headers.update(h)
+            r = s.get(Z02_API + "/api/auth/csrf-token", timeout=(15, 30))
+            tok = r.json()["token"]
+            r = s.post(Z02_API + "/api/ai/chat/stream",
+                       headers={**h, "X-CSRF-Token": tok, "Authorization": f"Bearer {token}"},
+                       json={"messages": msgs, "provider": "gemini", "model": "gemini-2.5-flash-lite"},
+                       timeout=(15, timeout))
+        except Exception as e:
+            if attempt == 0:
+                continue
+            raise EMError(f"z02: {str(e)[:60]}")
+        text, err = [], ""
+        for line in r.content.decode("utf-8", "replace").splitlines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                d = json.loads(line[6:])
+            except Exception:
+                continue
+            if d.get("entity") == "message.content" and d.get("status") == "delta":
+                t = (d.get("v", {}).get("delta") or {}).get("text")
+                if t:
+                    text.append(t)
+            if d.get("status") == "error":
+                v = d.get("v", {})
+                err = v.get("code") or v.get("message") or "error"
+        ans = "".join(text).strip()
+        if ans:
+            return ans
+        if "LIMIT" in err.upper() or "429" in str(err):
+            if attempt == 0:
+                continue  # هەژماری نوێ
+            raise EMError("z02: کواتی ڕۆژانە تەواو")
+        if attempt == 0:
+            continue
+        raise EMError(f"z02: {str(err)[:60] or 'وەڵام نەگەڕایەوە'}")
+    raise EMError("z02: وەڵام نەگەڕایەوە")
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -1287,6 +1435,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = act_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 elif kind == "fla":
                     content = fla_chat(history + [{"role": "user", "content": q}])
+                elif kind == "z02":
+                    content = z02_chat(history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1315,6 +1465,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = act_chat(nsrv["model_id"], nmsgs)
                     elif k == "fla":
                         content = fla_chat(nmsgs)
+                    elif k == "z02":
+                        content = z02_chat(nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1453,6 +1605,10 @@ def detect_brain(allow_fallback=True):
         servers += fla_servers()
     except Exception as e:
         print(f"[BRAIN] fla fail: {e}", flush=True)
+    try:
+        servers += z02_servers()
+    except Exception as e:
+        print(f"[BRAIN] z02 fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -1695,6 +1851,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "fla"
+            if k == "z02":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = z02_chat(msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "z02"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -1729,6 +1891,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "fla"
+                if k == "z02":
+                    a = z02_chat(nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "z02"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

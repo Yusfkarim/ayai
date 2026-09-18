@@ -160,3 +160,12 @@
 - fla_chat لە هەر ٥ dispatch + detect_brain؛ multipart files= تەکنیک
 - deploy #36 ✅ → /health ٩٧؛ تاقیکراوە لە Fly: flatai-glm «مرحبا! 👋»
 - پرۆبەکان: /tmp/flatai_*.mjs — ناسنامە: GLM by Z.ai
+
+## #37 — zerotwo.ai (Gemini Flash Lite) — deploy ✅ ٩٨
+- سەرچاوەی نوێ: z02 — api.zerotwo.ai/api/ai/chat/stream (SSE: entity message.content/delta، v.delta.text)
+- یەک مۆدێڵی ڕاییگە: gemini-2.5-flash-lite (هەموو ئەوانی تر PREMIUM_MODEL_REQUIRED)
+- ئۆتۆئەنتیکەیشن: mail.tm → supabase signup → SendGrid confirm (quopri decode!) → access_token لە ڕیدایرێکت (١ کاتژمێر) → CSRF token → stream
+- کوات: ١٥ نامە/ڕۆژ/هەژمار (DAILY_FREE_LIMIT_EXCEEDED) + ڕێژە-لیمێتی خێرا → هەژماری نوێی خۆکار
+- سیستەم پرۆمپت ✅ — دکتۆر التعافي وەڵامی داودەتەوە
+- deploy #37 ✅ → /health ٩٨؛ Fly تاقیکراوە: «أنا آسف لسماع أنك تشعر بالحزن…»
+- تێبینی: ڕێژە-لیمێت ٤ چرکە لە نێوان نامەکان
