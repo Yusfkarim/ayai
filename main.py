@@ -658,9 +658,56 @@ def cbc_chat(messages, model=None, timeout=120):
 # ════════════════════════════════════════════════════════════
 
 RWD_BASE = "https://api.rewind.ai"
-_RWD_STATE = {"sess": None, "t": 0.0}
-# ئەوانەی بە دڵنیاییەوە تاقیکرانەوە و لە بودجەی میواندا جێگیرن
+# ناسنامەی میوان = User-Agent — هەر UA یەی نوێ = ٢٥٠٠ تۆکنی نوێ (خۆکارانە دەگۆڕدرێت)
+_RWD_UAS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Fedora; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0",
+    "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 OPR/112.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Windows NT 10.0; WOW64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
+]
+_RWD_STATE = {"i": 0}
+# پشتڕاستکراو — فلاشەکان + بەقوەتەکان (هەموویان تاقیکرانەوە)
 _RWD_VERIFIED = [
+    # بەقوەتەکان (تاقیکرانەوەی ڕاستەقینە — لە بودجەی ٢٥٠٠ ێکن)
+    "deepseek/deepseek-v4-pro",
+    "deepseek/deepseek-r1",
+    "qwen/qwen3.7-max",
+    "qwen/qwen3-max",
+    "z-ai/glm-5.3",
+    "z-ai/glm-5.2",
+    "moonshotai/kimi-k2.6",
+    "thinkingmachines/inkling",
+    "mistralai/mistral-large",
+    "microsoft/phi-4",
+    "amazon/nova-pro-v1",
+    "inception/mercury-2.5",
+    # فلاشە پێشتر پشتڕاستکراوەکان
     "google/gemini-3.8-flash",
     "x-ai/grok-4.3",
     "deepseek/deepseek-v4-flash",
@@ -689,7 +736,7 @@ def rwd_models_live(timeout=15):
 
 
 def rwd_servers(timeout=15):
-    """سێرڤەرەکانی rewind — پشتڕاستکراوەکان + ئەوانەی ناویان کەم‌خوارەیە (لە بودجە)"""
+    """سێرڤەرەکانی rewind — بەقوەتەکان + فلاشەکان (بە ڕیزبەندی پشتڕاستکراو)"""
     try:
         live = rwd_models_live(timeout)
     except Exception:
@@ -701,53 +748,69 @@ def rwd_servers(timeout=15):
             segs = tail.split("-")
             if any(any(s == h or s.startswith(h) for h in _RWD_FREE_HINTS) for s in segs) and mid not in chosen:
                 chosen.append(mid)
-            if len(chosen) >= 24:
+            if len(chosen) >= 32:
                 break
     return [{"id": mid, "name": mid, "model_id": mid, "kind": "rwd"} for mid in chosen]
 
 
 def _rwd_session(timeout=15):
-    """سێشنی rewind — GET ی سەرەتا کوکییەی anon_token دەگرێت (پێویستە بۆ POST)"""
-    if _RWD_STATE["sess"] is None:
-        _RWD_STATE["sess"] = requests.Session()
-    if time.time() - _RWD_STATE["t"] > 2000000:
-        try:
-            _RWD_STATE["sess"].get(RWD_BASE + "/v1/models",
-                                   headers={"User-Agent": UA}, timeout=timeout)
-            _RWD_STATE["t"] = time.time()
-        except Exception:
-            pass
-    return _RWD_STATE["sess"]
+    """سێشن بە UA ی ئێستا — GET ی سەرەتا کوکییەی anon_token دەگرێت"""
+    s = requests.Session()
+    ua = _RWD_UAS[_RWD_STATE["i"] % len(_RWD_UAS)]
+    s.headers["User-Agent"] = ua
+    try:
+        s.get(RWD_BASE + "/v1/models", headers={"User-Agent": ua}, timeout=timeout)
+    except Exception:
+        pass
+    return s
+
+
+def _rwd_next_identity():
+    """گۆڕینی ناسنامە — UA ی داهاتوو = بودجەی تازەی ٢٥٠٠ تۆکن"""
+    _RWD_STATE["i"] = (_RWD_STATE["i"] + 1) % len(_RWD_UAS)
 
 
 def rwd_chat(model_id, messages, timeout=110):
-    """پرسیار بۆ rewind — OpenAI-جۆر، بێ کلیل (تۆکنی نەناسراو خۆکارانە)"""
-    s = _rwd_session()
-    h = {"User-Agent": UA, "Content-Type": "application/json"}
-    r = s.post(RWD_BASE + "/v1/chat/completions/", headers=h,
-               json={"model": model_id, "messages": messages}, timeout=(15, timeout))
-    if r.status_code == 400:
-        # کوکییەکە کۆن/نییە — نوێی بکەوە و دووبارە هەوڵ بدە
-        _RWD_STATE["t"] = 0.0
-        s2 = _rwd_session()
-        r = s2.post(RWD_BASE + "/v1/chat/completions/", headers=h,
-                    json={"model": model_id, "messages": messages}, timeout=(15, timeout))
-    if r.status_code == 429:
-        raise EMError("rwd: ڕێژە زۆرە — چاوەڕێ بکە")
-    try:
-        j = r.json()
-    except Exception:
-        raise EMError(f"rwd: {r.status_code}")
-    if isinstance(j.get("error"), dict):
-        code = str(j["error"].get("code") or "")[:60]
-        if code == "INSUFFICIENT_TOKENS":
-            raise EMError("rwd: تۆکنی میوان تەواو بوو")
-        raise EMError("rwd: " + (code or str(j["error"])[:50]))
-    ch = (j.get("choices") or [{}])[0]
-    ans = ((ch.get("message") or {}).get("content") or "").strip()
-    if not ans:
-        raise EMError("rwd: وەڵامی بەتاڵ")
-    return ans
+    """پرسیار بۆ rewind — خۆکارانە ناسنامە دەگۆڕێت کاتێک تۆکن تەواو دەبێت"""
+    for attempt in (0, 1):
+        s = _rwd_session()
+        ua = s.headers["User-Agent"]
+        try:
+            r = s.post(RWD_BASE + "/v1/chat/completions/",
+                       headers={"User-Agent": ua, "Content-Type": "application/json"},
+                       json={"model": model_id, "messages": messages}, timeout=(15, timeout))
+        except Exception as e:
+            if attempt == 0:
+                _rwd_next_identity()
+                continue
+            raise EMError(f"rwd: {str(e)[:60]}")
+        if r.status_code == 400:
+            # ناسنامەی ئەم UA یە بەکارهاتووە — گۆڕی بدەر بۆ ئەوی تر
+            _rwd_next_identity()
+            continue
+        if r.status_code == 429:
+            raise EMError("rwd: ڕێژە زۆرە — چاوەڕێ بکە")
+        try:
+            j = r.json()
+        except Exception:
+            _rwd_next_identity()
+            continue
+        err = j.get("error")
+        if isinstance(err, dict):
+            code = str(err.get("code") or "")
+            if code == "INSUFFICIENT_TOKENS":
+                # تۆکنەکانی ئەم ناسنامەیە تەواو بوون — UA ی نوێ = ٢٥٠٠ی نوێ
+                if attempt == 0:
+                    _rwd_next_identity()
+                    continue
+                raise EMError("rwd: هەموو ناسنامەکان تەواو بوون")
+            raise EMError("rwd: " + (code or str(err)[:50])[:60])
+        ch = (j.get("choices") or [{}])[0]
+        ans = ((ch.get("message") or {}).get("content") or "").strip()
+        if ans:
+            return ans
+        _rwd_next_identity()
+    raise EMError("rwd: نەگەڕایەوە")
 
 
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
