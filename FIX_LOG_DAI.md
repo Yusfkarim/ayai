@@ -140,3 +140,13 @@
 - **دیل ی خۆکار نموونە:** gemini-3.5-flash مرد → gemini-3.8-flash (نوێترین). deepseek-v4-flash مرد → v4.1-flash.
 - تاقیکرایەوە: /health=70 ✅، چات ئاسایی ✅، nova-2-lite ✅، qwen-2.5-7b ✅ (ڕاستەوخۆ).
 - تێبینی: مۆدێڵی نەناسراو (لە /v1/models) هێشتا 400 دەدات — دروستە چونکە بەهیچ شێوەیەک دیل بۆ نەناسراو بێ‌خێزان ناکرێت.
+
+## #35 — aichatting.net + ٢٦ مۆدێڵی نوێ (deploy ئەاراستەیە)
+- سەرچاوەی نوێ: act — aga-api.aichatting.net (vToken = RSA-PKCS1v1.5 of visitorId؛ base64 خاو لە header، percent-encoded لە کوکی aichatting.website.visitorId)
+- ٢٦ مۆدێڵ پشتڕاستکراو: claude-opus-5/sonnet-5/4-6، gpt-5.5/5.2/5/4.1، o3، o4-mini، gpt-5.6-luna/sol، gemini-3.8-flash/3-pro/3.1-pro/2.5-pro/2.5-flash، grok-4.6/4، deepseek-v4/r1، qwen3.8-max/qwen3-max، kimi-k2.6، glm-5.3، llama-4-maverick
+- کوات: ٢ پرسیار/ناسنامە → ناسنامەی نوێ خۆکار (MD5 → RSA) — بێ سنوور
+- SSE: data: بەشەکان؛ "-=- --"=بۆشایی، "-=-n--"=هێڵی نوێ، "--@DONE@--"=کۆتایی؛ decode بە r.content (UTF-8)
+- messages: [{role, content:[{type:"text",text}]}] — فۆرماتی pro
+- act_chat لە هەر ٤ dispatch (TG/API + smart_rebind)؛ cryptography بۆ requirements زیادکرا
+- dispatch چاککرا: عەرەبی + بۆشایی پاک (یەکەم هەوڵ — موژ)
+- nۆت: gpt-5.6-terra و gpt-4o پارەدارن — نەهاتنە ناو لیست

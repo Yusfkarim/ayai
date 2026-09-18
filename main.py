@@ -813,6 +813,109 @@ def rwd_chat(model_id, messages, timeout=110):
     raise EMError("rwd: نەگەڕایەوە")
 
 
+# ════════════════════════════════════════════════════════════
+# ٢.٩) مێشکی aichatting.net — gpt-5.6/claude-opus-5/grok-4.6 (خۆکار)
+#      visitorId = RSA-encrypted fingerprint — هەر ناسنامەیەک = کواتی نوێ
+# ════════════════════════════════════════════════════════════
+
+ACT_BASE = "https://aga-api.aichatting.net"
+ACT_PUBKEY = (
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDCAdf/EyIbLBxjGqmh7qLU6/CPCzru+75+82OSPZ+nf4BFvg88drpZ6KigNW0J8TNgxe6Yms1irCZNVDyu+RXsl4y/7c2KOHc4OGTzHB5fUMiMasFUvcEs2P70e6yA/sKHZfBLG1XPhlb84Ibs3nhD3W5e2SuC+4EuVkaqzN08LQIDAQAB\n"
+    "-----END PUBLIC KEY-----"
+)
+# پشتڕاستکراو — سکان ی تەواو (٢٦ لە ٢٨ کار دەکەن)
+ACT_MODELS = [
+    "claude-opus-5", "claude-sonnet-5", "claude-opus-4-6", "claude-sonnet-4-6",
+    "gpt-5.5", "gpt-5.2", "gpt-5", "gpt-4.1", "o3", "o4-mini",
+    "gpt-5.6-luna", "gpt-5.6-sol",
+    "gemini-3.8-flash", "gemini-3-pro", "gemini-3.1-pro", "gemini-2.5-pro", "gemini-2.5-flash",
+    "grok-4.6", "grok-4", "deepseek-v4", "deepseek-r1",
+    "qwen3.8-max", "qwen3-max", "kimi-k2.6", "glm-5.3", "llama-4-maverick",
+]
+ACT_UAS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+]
+_ACT_STATE = {"i": 0}
+
+
+def act_servers():
+    """سێرڤەرەکانی aichatting — هەموو مۆدێلە پشتڕاستکراوەکان"""
+    return [{"id": "act-" + m, "name": m, "model_id": m, "kind": "act"} for m in ACT_MODELS]
+
+
+def _act_identity():
+    """ناسنامەی نوێ — visitorId نوێ = RSA encrypt
+    → (visitorId, vTokenی خاو base64, کوکی percent-encoded)"""
+    import urllib.parse as _up
+    visitor_id = hashlib.md5(f"fp{time.time()}{random.random()}".encode()).hexdigest()
+    from cryptography.hazmat.primitives import serialization as _s, asymmetric as _a
+    try:
+        pub = _s.load_pem_public_key(ACT_PUBKEY.encode())
+        enc = pub.encrypt(visitor_id.encode(), _a.padding.PKCS1v15())
+        raw = base64.b64encode(enc).decode()
+    except Exception:
+        raw = visitor_id
+    return visitor_id, raw, _up.quote(raw, safe="")
+
+
+def act_chat(model_id, messages, timeout=110):
+    """چات بۆ aichatting — SSE، ناسنامەی خۆکار (کوات تەواو بوو → نوێی دەکاتەوە)"""
+    for attempt in (0, 1):
+        visitor_id, raw_token, cookie_token = _act_identity()
+        ua = ACT_UAS[_ACT_STATE["i"] % len(ACT_UAS)]
+        h = {
+            "User-Agent": ua, "source": "web", "lang": "en",
+            "Content-Type": "application/json",
+            "Cookie": "aichatting.website.visitorId=" + cookie_token,
+            "vToken": raw_token,
+            "Origin": "https://www.aichatting.net",
+            "Referer": "https://www.aichatting.net/free-chatgpt/",
+            "Accept": "text/event-stream,application/json",
+        }
+        msgs = [{"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
+                for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+        payload = {"spaceHandle": True, "roleId": None, "messages": msgs,
+                   "conversationId": None, "model": model_id}
+        try:
+            r = requests.post(ACT_BASE + "/aigc/chat/v2/askai/stream",
+                              headers=h, json=payload, timeout=(15, timeout))
+        except Exception as e:
+            if attempt == 0:
+                continue
+            raise EMError(f"act: {str(e)[:60]}")
+        if r.status_code == 401 and attempt == 0:
+            continue  # ناسنامەی نوێ
+        if r.status_code != 200:
+            if attempt == 0:
+                continue
+            raise EMError(f"act: {r.status_code}")
+        # SSE — data: بەشەکان، "--@DONE@--" کۆتایی (UTF-8 — r.text عەرەبی تێکدەدات)
+        # ئاماژەکانی ئەوان: "-=- --" = بۆشایی، "-=-n--" = هێڵی نوێ (لە c3.js)
+        out = []
+        for line in r.content.decode("utf-8", "replace").splitlines():
+            if line.startswith("data:"):
+                part = line[5:]
+                if part.startswith(" "):
+                    part = part[1:]
+                part = part.rstrip("\r")
+                if part and part != "--@DONE@--":
+                    out.append(part)
+        ans = "".join(out).replace("-=- --", " ").replace("-=-n--", "\n").strip()
+        if ans:
+            return ans
+        if attempt == 0:
+            continue
+    raise EMError("act: وەڵام نەگەڕایەوە")
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -1105,6 +1208,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = cbc_chat(history)
                 elif kind == "rwd":
                     content = rwd_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                elif kind == "act":
+                    content = act_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1129,6 +1234,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = cbc_chat(nmsgs)
                     elif k == "rwd":
                         content = rwd_chat(nsrv["model_id"], nmsgs)
+                    elif k == "act":
+                        content = act_chat(nsrv["model_id"], nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1259,6 +1366,10 @@ def detect_brain(allow_fallback=True):
         servers += rwd_servers()
     except Exception as e:
         print(f"[BRAIN] rwd fail: {e}", flush=True)
+    try:
+        servers += act_servers()
+    except Exception as e:
+        print(f"[BRAIN] act fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -1489,6 +1600,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "rwd"
+            if k == "act":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = act_chat(cand["model_id"], msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "act"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -1513,6 +1630,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "rwd"
+                if k == "act":
+                    a = act_chat(nsrv["model_id"], nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "act"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
