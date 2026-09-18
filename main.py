@@ -1115,6 +1115,27 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 last_err = e
                 print(f"[API] {cand.get('kind')} هەڵە: {str(e)[:90]}", flush=True)
         if not content:
+            # ═══ دیلی نەوە (API): مۆدێڵی داواکراو مردووە → نوێترین نەوەی هەمان خێزان ═══
+            try:
+                up = smart_rebind(API_BRAIN["servers"], srv["id"])
+                if up and up != srv["id"]:
+                    nsrv = next(x for x in API_BRAIN["servers"] if x["id"] == up)
+                    print(f"[API] 🔄 دیلی نەوە: {srv['id']} → {up}", flush=True)
+                    k = nsrv.get("kind")
+                    nmsgs = history + [{"role": "user", "content": q}]
+                    if k == "em":
+                        content = em_chat(nmsgs, nsrv["model_id"])
+                    elif k == "cbc":
+                        content = cbc_chat(nmsgs)
+                    elif k == "rwd":
+                        content = rwd_chat(nsrv["model_id"], nmsgs)
+                    else:
+                        content = pol_chat(nsrv["id"], nmsgs)
+                    if content:
+                        print(f"[API] ✅ نەوەی نوێ وەڵامی دا: {up}", flush=True)
+            except Exception as e2:
+                print(f"[API] دیلی نەوە شکستی هێنا: {str(e2)[:90]}", flush=True)
+        if not content:
             return self._send(502, {"error": str(last_err) if last_err else "هیچ سەرچاوەیەک وەڵام نەدایەوە"})
 
         cid = "chatcmpl-" + "".join(random.choices("abcdef0123456789", k=12))
@@ -1265,13 +1286,23 @@ def auto_refresh():
                            [x["id"] for x in new["servers"]] != [x["id"] for x in BRAIN["servers"]])
                 BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
                 valid = {x["id"] for x in new["servers"]}
+                reborn = 0
                 for s in sessions.values():
                     if s["server"] not in valid:
-                        # بگەڕێ بۆ هەمان مۆدێڵ لە سەرچاوەیەکی تر — هەرگیز مۆدێڵی تر جێگرەوە مەکە
+                        # ١. هەمان مۆدێڵ لە سەرچاوەیەکی تر
                         mk = s.get("mkey") or norm_model(s["server"])
                         rebind = next((x["id"] for x in new["servers"] if norm_model(x["id"]) == mk), None)
                         if rebind:
                             s["server"] = rebind
+                            continue
+                        # ٢. دیلی نەوە — مۆدێڵەکە لابرا → نوێترین نەوەی هەمان خێزان
+                        up = smart_rebind(new["servers"], s["server"])
+                        if up:
+                            s["server"] = up
+                            s["mkey"] = norm_model(up)
+                            reborn += 1
+                if reborn:
+                    print(f"[REFRESH] 🔄 {reborn} سێشن بۆ نەوەی نوێتر نەقڵکران", flush=True)
             if changed:
                 print(f"[REFRESH] ✨ لیستەکە نوێکرایەوە — {new['mode']} ({len(new['servers'])} سێرڤەر)", flush=True)
         except Exception as e:
@@ -1305,6 +1336,98 @@ def dedupe_servers(servers):
         seen.add(k)
         uniq.append(x)
     return uniq
+
+
+# ════════════════════════════════════════════════════════════
+# ٢.٨) نەوەکان — دەزانی «نوێترین» ی هەر خێزانێک کامەیە
+#      بۆ دیل ی خۆکاری: مۆدێڵی نامۆ → نوێترین نەوەی هەمان خێزان
+# ════════════════════════════════════════════════════════════
+
+import re as _re
+
+# خشتەی نەوە — بەرزتر = نوێتر (خێزان → لیستی دوایینی بەشەکانی ژمارە)
+_GEN_VERSIONS = {
+    "gemini": [("3.8", [3, 8]), ("3.6", [3, 6]), ("3.5", [3, 5]), ("3.1", [3, 1]), ("3", [3]), ("2.5", [2, 5]), ("2", [2]), ("1.5", [1, 5])],
+    "claude": [("5", [5]), ("4.8", [4, 8]), ("4.7", [4, 7]), ("4.6", [4, 6]), ("4.5", [4, 5]), ("4.1", [4, 1]), ("4", [4]), ("3.7", [3, 7]), ("3.5", [3, 5])],
+    "gpt": [("5.6", [5, 6]), ("5.5", [5, 5]), ("5.4", [5, 4]), ("5.2", [5, 2]), ("5.1", [5, 1]), ("5", [5]), ("4.1", [4, 1]), ("4o", [4]), ("4", [4])],
+    "grok": [("4.6", [4, 6]), ("4.5", [4, 5]), ("4.3", [4, 3]), ("4", [4]), ("3", [3])],
+    "deepseek": [("v4.1", [4, 1]), ("v4", [4]), ("v3.2", [3, 2]), ("r1", [1]), ("v3", [3])],
+    "qwen": [("3.8", [3, 8]), ("3.7", [3, 7]), ("3.6", [3, 6]), ("3.5", [3, 5]), ("3", [3]), ("2.5", [2, 5])],
+    "glm": [("5.3", [5, 3]), ("5.2", [5, 2]), ("5.1", [5, 1]), ("5", [5]), ("4.7", [4, 7]), ("4.5", [4, 5])],
+    "kimi": [("k2.6", [2, 6]), ("k2.5", [2, 5]), ("k2", [2])],
+    "llama": [("4", [4]), ("3.3", [3, 3]), ("3.2", [3, 2]), ("3.1", [3, 1]), ("3", [3])],
+    "nova": [("2", [2]), ("1", [1])],
+    "phi": [("4", [4]), ("3", [3])],
+    "hy3": [("4", [4]), ("3", [3])],
+    "gemma": [("4", [4]), ("3", [3]), ("2", [2])],
+}
+
+
+def _gen_key(mid):
+    """(خێزان، ژمارەی نەوە) — بۆ ڕیزکردن. بۆ نموونە gemini-3.8 → ('gemini', 3.8)"""
+    s = str(mid).lower()
+    fam = _model_family(s)
+    ver = None
+    if fam in _GEN_VERSIONS:
+        nums = _re.findall(r"(\d+(?:\.\d+)?)", s)
+        if nums:
+            try:
+                ver = float(nums[0])
+            except ValueError:
+                ver = None
+    return (fam, ver if ver is not None else 0.0)
+
+
+def _same_gen(a, b):
+    """ئایا ئەم دوو مۆدێڵە هەمان نەوەن؟ (خێزان + ژمارەی سەرەکی یەکسان)"""
+    fa, va = _gen_key(a)
+    fb, vb = _gen_key(b)
+    if fa != fb:
+        return False
+    if va == vb:
+        return True
+    # 3 و 3.0 و 3.8 → بەراوردی ژمارەی سەرەکی
+    return int(va) == int(vb)
+
+
+def _newest_in_family(servers, fam, exclude_id=None):
+    """نوێترین مۆدێڵی زیندووی خێزانێک (کار دەکات + ئێستا لە لیستەکەدا هەیە)"""
+    best, best_v = None, -1.0
+    for x in servers:
+        if exclude_id and x["id"] == exclude_id:
+            continue
+        f, v = _gen_key(x["id"])
+        if f == fam and v > best_v:
+            best, best_v = x, v
+    return best
+
+
+def _gen_upgrade_candidates(servers, dead_id):
+    """کاندیدەکانی دیل بۆ مۆدێڵێکی مردوو: هەمان نەوە یان نوێتر، لە هەمان خێزان،
+       ڕیزکراو بە نوێترین. هەرگیز مۆدێڵی کۆنتر نادات."""
+    fam, dead_v = _gen_key(dead_id)
+    cands = []
+    for x in servers:
+        f, v = _gen_key(x["id"])
+        if f == fam and v >= dead_v:
+            if x["id"] != dead_id and x not in cands:
+                cands.append(x)
+    cands.sort(key=lambda x: _gen_key(x["id"])[1], reverse=True)
+    if not cands:
+        nx = _newest_in_family(servers, fam)
+        if nx:
+            cands.append(nx)
+    return cands
+
+
+def smart_rebind(servers, dead_id):
+    """دیلی زیرەک: مۆدێڵێکی نامۆ → نوێترین هەمان نەوە/نوێتر لە هەمان خێزان.
+       ئەگەر هیچ نەبوو → None (پاشان فەڵباکی ئاسایی)."""
+    if not dead_id:
+        return None
+    for c in _gen_upgrade_candidates(servers, dead_id):
+        return c["id"]
+    return None
 
 
 def get_session(user_id):
@@ -1371,6 +1494,29 @@ def ask(session, question):
         except Exception as e:
             last = e
             print(f"[BRAIN] {cand.get('kind', '?')} ({cand.get('id', '?')}) هەڵە: {str(e)[:80]}", flush=True)
+    # ═══ دیلی نەوە: هەموو زنجیرەکە بۆ ئەم مۆدێڵە مردووە → نوێترین نەوە بپشکنە ═══
+    if BRAIN["servers"] and question:
+        try:
+            dead_id = session.get("server") or ""
+            up = smart_rebind(BRAIN["servers"], dead_id)
+            if up and up != dead_id:
+                nsrv = next(x for x in BRAIN["servers"] if x["id"] == up)
+                print(f"[BRAIN] 🔄 دیلی نەوە: {dead_id} → {up}", flush=True)
+                k = nsrv.get("kind")
+                nmsgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                if k == "em":
+                    return em_chat(nmsgs, nsrv["model_id"]), "em"
+                if k == "cbc":
+                    return cbc_chat(nmsgs), "cbc"
+                if k == "rwd":
+                    a = rwd_chat(nsrv["model_id"], nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "rwd"
+                return pol_chat(nsrv["id"], nmsgs), "pol"
+        except Exception as e2:
+            print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
+            last = e2
     raise last or RuntimeError("هیچ مێشکێک بەردەست نییە")
 
 
