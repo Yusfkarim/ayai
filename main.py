@@ -916,6 +916,81 @@ def act_chat(model_id, messages, timeout=110):
     raise EMError("act: وەڵام نەگەڕایەوە")
 
 
+# ════════════════════════════════════════════════════════════
+# ٢.١٠) flatai.org — GLM (Z.ai) بێ تۆمار — کواتی ڕۆژانە بۆ هەر IP
+#      session → history(save) → my_chatbot (SSE)
+# ════════════════════════════════════════════════════════════
+
+FLA_AJAX = "https://flatai.org/wp-admin/admin-ajax.php"
+
+
+def fla_servers():
+    return [{"id": "flatai-glm", "name": "GLM (flatai)", "model_id": "glm", "kind": "fla"}]
+
+
+def fla_chat(messages, timeout=110):
+    """چاتی flatai — یەک مۆدێڵی سێرڤەری (GLM)؛ کواتی ڕۆژانە تەواو → EMError"""
+    import uuid as _uuid
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+        "Origin": "https://flatai.org",
+        "Referer": "https://flatai.org/free-ai-chatbot-no-registration/",
+    })
+
+    def F(**kv):
+        return {k: (None, v) for k, v in kv.items()}
+
+    try:
+        s.get("https://flatai.org/free-ai-chatbot-no-registration/", timeout=(15, 30))
+        r = s.post(FLA_AJAX, files=F(action="chatbot2_session"), timeout=(15, 30))
+        sess = r.json()["data"]
+        r = s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
+                                     history_nonce=sess["history_nonce"], operation="load"),
+                   timeout=(15, 30))
+        ld = r.json()["data"]
+        chat_id = str(_uuid.uuid4())
+        chats = json.loads(ld["values"].get("allChats", "{}"))
+        chats[chat_id] = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+                          "title": "New conversation", "messages": []}
+        s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
+                                 history_nonce=sess["history_nonce"], operation="save",
+                                 values=json.dumps({**ld["values"], "allChats": json.dumps(chats)}),
+                                 revision=str(ld["revision"])), timeout=(15, 30))
+        msgs = [{"role": m["role"], "content": m["content"]}
+                for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+        sys_txt = ""
+        if msgs and msgs[0]["role"] == "system":
+            sys_txt = msgs.pop(0)["content"]
+        r = s.post(FLA_AJAX, files=F(action="my_chatbot", nonce=sess["nonce"],
+                                     history_nonce=sess["history_nonce"],
+                                     request_id=str(_uuid.uuid4()), chat_id=chat_id,
+                                     messages=json.dumps(msgs),
+                                     system_message_content=sys_txt),
+                   timeout=(15, timeout))
+        if r.status_code == 429:
+            raise EMError("fla: کواتی ڕۆژانە تەواو (IP)")
+        ct = r.headers.get("content-type", "")
+        if r.status_code != 200 or "event-stream" not in ct:
+            raise EMError(f"fla: {r.status_code}")
+        text = ""
+        for line in r.content.decode("utf-8", "replace").splitlines():
+            if line.startswith("data: "):
+                try:
+                    d = json.loads(line[6:])
+                    if isinstance(d, dict) and isinstance(d.get("text"), str) and d["text"]:
+                        text = d["text"]  # کۆتا (done) دەباتەوە
+                except Exception:
+                    pass
+        if text.strip():
+            return text.strip()
+        raise EMError("fla: وەڵام نەگەڕایەوە")
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"fla: {str(e)[:60]}")
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -1210,6 +1285,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = rwd_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 elif kind == "act":
                     content = act_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                elif kind == "fla":
+                    content = fla_chat(history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1236,6 +1313,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = rwd_chat(nsrv["model_id"], nmsgs)
                     elif k == "act":
                         content = act_chat(nsrv["model_id"], nmsgs)
+                    elif k == "fla":
+                        content = fla_chat(nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1370,6 +1449,10 @@ def detect_brain(allow_fallback=True):
         servers += act_servers()
     except Exception as e:
         print(f"[BRAIN] act fail: {e}", flush=True)
+    try:
+        servers += fla_servers()
+    except Exception as e:
+        print(f"[BRAIN] fla fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -1606,6 +1689,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "act"
+            if k == "fla":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = fla_chat(msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "fla"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -1635,6 +1724,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "act"
+                if k == "fla":
+                    a = fla_chat(nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "fla"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

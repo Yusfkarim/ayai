@@ -152,3 +152,11 @@
 - nۆت: gpt-5.6-terra و gpt-4o پارەدارن — نەهاتنە ناو لیست
 - vToken = base64ی خاو لە header؛ کوکی percent-encoded (quote safe="") — پێچەوانەکەی ٤٠١
 - deploy #35 ✅ (machine e820e2db600678) → /health ٩٦؛ /v1/models ٢٦ی act؛ تاقیکراوە لە Fly: claude-opus-5، gpt-5.5، grok-4.6، gemini-3-pro — هەموو عەرەبی پاک
+
+## #36 — flatai.org (GLM) زیادکرا — deploy ✅ ٩٧
+- سەرچاوەی نوێ: fla — flatai.org بێ تۆمار: chatbot2_session → chatbot2_history(load/save) → my_chatbot (SSE: event delta/done)
+- یەک مۆدێڵ: GLM (Z.ai) — ڕاژەکار خۆی هەڵدەبژێرێت (flatai-glm)؛ system_message_content کاری پێدەکات
+- ⚠️ کواتی ڕۆژانە بۆ هەر IP (≈١ نامە/ڕۆژ) → 429 LIMIT_REACHED → EMError → فەڵباکی ئاسایی زنجیرە
+- fla_chat لە هەر ٥ dispatch + detect_brain؛ multipart files= تەکنیک
+- deploy #36 ✅ → /health ٩٧؛ تاقیکراوە لە Fly: flatai-glm «مرحبا! 👋»
+- پرۆبەکان: /tmp/flatai_*.mjs — ناسنامە: GLM by Z.ai
