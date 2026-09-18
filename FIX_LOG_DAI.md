@@ -193,7 +193,7 @@
 - LEAK_RE: quillbot|کویل زیادکرا (سێرڤەرەکە خۆی «Quillbot» دەڵێت)
 - qb_chat لە ٥ dispatch + detect_brain؛ deploy #40 ✅ → ٧٦ سێرڤەر
 
-## #41 — duck.ai (DuckDuckGo AI) — ٥ مۆدێڵی نوێ + چاککردنی qb — deploy ⏳
+## #41 — duck.ai (DuckDuckGo AI) — ٥ مۆدێڵی نوێ + چاککردنی qb — deploy ✅ ٨١
 - سەرچاوەی نوێ: duck — duck.ai/duckchat/v1/chat (SSE: data:{action:success,message})
 - دیواری نوێ: x-vqd-hash-1 = چەلەنجەی JS ی obfuscated (v4: DOM fingerprint, iframe, webdriver)
 - چارەسەر: py-mini-racer (V8) + stubs.js (DOM mock) + wrapper ی FE: client_hashes→SHA256+b64، meta{origin:"https://duck.ai", stack, duration}
@@ -204,3 +204,6 @@
 - LEAK_RE: duckai|duck.ai|داک زیادکرا
 - qb: <editor-content> strip زیادکرا (ئەرکی پەنجەرەی #40)
 - Dockerfile: requirements.txt (requests, cryptography, py-mini-racer)
+- deploy #41 ✅ → /health ٨١ (٧٦+٥)؛ Fly هەر ٥ مۆدێڵەکە تاقیکراوە: OK×٤ + 7+5→"12"
+- API پێرسۆنا ✅: Captain Sparrow → «Arrr! Paris» (duck-claude-haiku-4-5)
+- commit 848499a
