@@ -192,3 +192,15 @@
 - کوات: limit=١ بەڵام دوای ~٢٠ چرکە دەگەڕێتەوە (تاقیکرا: A/B بە پشووی ٢١s ✅)؛ ٤ نامەی خێرا → 403 چەلەنجە
 - LEAK_RE: quillbot|کویل زیادکرا (سێرڤەرەکە خۆی «Quillbot» دەڵێت)
 - qb_chat لە ٥ dispatch + detect_brain؛ deploy #40 ✅ → ٧٦ سێرڤەر
+
+## #41 — duck.ai (DuckDuckGo AI) — ٥ مۆدێڵی نوێ + چاککردنی qb — deploy ⏳
+- سەرچاوەی نوێ: duck — duck.ai/duckchat/v1/chat (SSE: data:{action:success,message})
+- دیواری نوێ: x-vqd-hash-1 = چەلەنجەی JS ی obfuscated (v4: DOM fingerprint, iframe, webdriver)
+- چارەسەر: py-mini-racer (V8) + stubs.js (DOM mock) + wrapper ی FE: client_hashes→SHA256+b64، meta{origin:"https://duck.ai", stack, duration}
+- زانیاری گرنگ: /status چەلەنجە دەدات → V8 حل دەکات → POST لەگەڵ x-vqd-hash-1 + x-fe-signals + x-fe-version + x-ddg-journey-id
+- مۆدێڵە خۆڕاییەکان (لە bundle): gpt-5.4-mini ✅، claude-haiku-4-5 ✅، mistral-small-2603 ✅، tinfoil/gpt-oss-120b ✅، tinfoil/gemma4-31b ✅ — gpt-5.6-luna نەهێنرا (دووبارەی z02/act — dedup)
+- تاقیکراوە لە sandbox: mini="4"، haiku="OK"، gemma="OK" — system role ڕەت دەکرێتەوە (400) → پێرسۆنا بە پێشگری «ئاراستەی سیستەم» (شێوازی qb)
+- لیمتی IP: داواکاری خێرا → ٤١٨ ERR_BN_LIMIT/ERR_CHALLENGE (کاتی) → duck_chat ٢ هەوڵ + فەڵباکی زنجیرە
+- LEAK_RE: duckai|duck.ai|داک زیادکرا
+- qb: <editor-content> strip زیادکرا (ئەرکی پەنجەرەی #40)
+- Dockerfile: requirements.txt (requests, cryptography, py-mini-racer)

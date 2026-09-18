@@ -1210,9 +1210,461 @@ def qb_chat(messages, timeout=110):
         elif d.get("type") == "error":
             raise EMError(f"qb: {str(d.get('message', 'error'))[:60]}")
     ans = "".join(text).strip()
+    ans = re.sub(r"</?editor-content[^>]*>", "", ans).strip()
     if ans:
         return ans
     raise EMError("qb: وەڵام نەگەڕایەوە")
+
+
+
+# ════════════════════════════════════════════════════════════
+# ٢.١٣) duck.ai (DuckDuckGo AI) — ٥ مۆدێڵی خۆڕایی بێ تۆمار
+#      چەلەنجەی JS (x-vqd-hash-1) لە V8 (py-mini-racer) + DOM stubs چارە دەکرێت
+#      لیمتی IP: هەندێجە ٤١٨ → فەڵباکی زنجیرە هەڵی دەگرێت
+# ════════════════════════════════════════════════════════════
+
+DUCK_STUBS_JS = r'''var __ua = __DDG_REAL_UA__;
+var __HTML_LOOKUP = __DDG_HTML_LOOKUP__;
+
+function __makeHtmlElement(tag) {
+  var state = { _innerHTML: '', _qsaCount: 0, _cssText: '' };
+  var styleObj = {};
+  Object.defineProperty(styleObj, 'cssText', {
+    get: function(){ return state._cssText; },
+    set: function(v){ state._cssText = String(v||''); },
+    enumerable: true, configurable: true
+  });
+  var el = {
+    tagName: String(tag).toUpperCase(),
+    nodeName: String(tag).toUpperCase(),
+    nodeType: 1,
+    children: [], childNodes: [], classList: [],
+    style: styleObj, dataset: {},
+    offsetWidth: 100, offsetHeight: 20, scrollHeight: 20,
+    offsetTop: 100, offsetLeft: 0, offsetParent: null,
+    clientWidth: 100, clientHeight: 20,
+    getBoundingClientRect: function(){
+      return { width: 100, height: 20, top: 100, left: 0, right: 100, bottom: 120, x: 0, y: 100 };
+    },
+    getClientRects: function(){
+      return [{ width: 100, height: 20, top: 100, left: 0, right: 100, bottom: 120 }];
+    },
+    setAttribute: function(){}, removeAttribute: function(){},
+    getAttribute: function(a){ if(a==='srcdoc') return state._srcdoc||''; return null; },
+    hasAttribute: function(){ return false; },
+    appendChild: function(c){ return c; },
+    removeChild: function(c){ return c; },
+    addEventListener: function(){}, removeEventListener: function(){},
+    querySelector: function(){ return null; },
+    querySelectorAll: function(s){
+      if (s === '*') {
+        var arr = []; arr.length = state._qsaCount; return arr;
+      }
+      return [];
+    },
+    cloneNode: function(){ return __makeHtmlElement(tag); },
+    _getState: function(){ return state; }
+  };
+  Object.defineProperty(el, 'innerHTML', {
+    get: function(){ return state._innerHTML; },
+    set: function(v){
+      var key = String(v);
+      var entry = __HTML_LOOKUP && __HTML_LOOKUP[key];
+      if (entry) { state._innerHTML = String(entry.html); state._qsaCount = entry.count|0; }
+      else { state._innerHTML = key; state._qsaCount = 0; }
+    },
+    enumerable: true, configurable: true
+  });
+  Object.defineProperty(el, 'outerHTML', { get: function(){ return '<' + tag + '>' + state._innerHTML + '</' + tag + '>'; }, enumerable: true });
+  Object.defineProperty(el, 'srcdoc', { get: function(){ return state._srcdoc||''; }, set: function(v){ state._srcdoc = String(v); }, enumerable: true });
+  Object.defineProperty(el, 'contentWindow', { get: function(){
+    var w = {};
+    w.document = __ifDoc;
+    w.Proxy = Proxy;
+    w.self = w;
+    w.top = w;
+    w.parent = w;
+    w.window = w;
+    return w;
+  }, enumerable: true });
+  Object.defineProperty(el, 'contentDocument', { get: function(){ return __ifDoc; }, enumerable: true });
+  return el;
+}
+
+function __mkObj(name, base) {
+  base = base || {};
+  return new Proxy(base, {
+    get: function(t, k) {
+      if (k in t) return t[k];
+      if (k === Symbol.toPrimitive) return function(){ return ''; };
+      if (k === Symbol.iterator) return undefined;
+      if (k === 'then' || k === 'catch' || k === 'finally') return undefined;
+      if (k === 'constructor') return Object;
+      if (k === 'toString' || k === 'valueOf') return function(){ return '[object ' + name + ']'; };
+      if (k === 'length') return 0;
+      if (k === 'nodeType') return 1;
+      if (k === 'tagName' || k === 'nodeName') return 'DIV';
+      if (k === 'innerHTML' || k === 'outerHTML' || k === 'textContent' || k === 'innerText' || k === 'value') return '';
+      if (k === 'children' || k === 'childNodes' || k === 'classList') return [];
+      if (typeof k === 'string' && (k.indexOf('get') === 0 || k.indexOf('query') === 0 || k.indexOf('find') === 0)) {
+        return function(arg){
+          if (k === 'querySelectorAll' || k === 'getElementsByTagName' || k === 'getElementsByClassName') return [];
+          return null;
+        };
+      }
+      return function(){ return __mkObj(name + '.' + String(k)); };
+    },
+    has: function(t, k){ return k in t; },
+    set: function(t, k, v){ t[k] = v; return true; }
+  });
+}
+
+var __ifMeta = __mkObj('meta', {
+  getAttribute: function(a){ return a==='content' ? "default-src 'none'; script-src 'unsafe-inline';" : null; },
+  hasAttribute: function(a){ return a==='content'; },
+  tagName: 'META', nodeName: 'META'
+});
+var __ifDoc;
+__ifDoc = __mkObj('iframeDoc', {
+  querySelector: function(s){
+    if (s && s.indexOf('Content-Security-Policy') !== -1) return __ifMeta;
+    if (s === 'meta') return __ifMeta;
+    return null;
+  },
+  querySelectorAll: function(s){
+    if (s && s.indexOf('Content-Security-Policy') !== -1) return [__ifMeta];
+    if (s === 'meta') return [__ifMeta];
+    return [];
+  },
+  getElementsByTagName: function(t){ return t && t.toLowerCase()==='meta' ? [__ifMeta] : []; },
+  body: __mkObj('iframeBody', {
+    querySelector: function(s){ return s && s.indexOf('Content-Security-Policy')!==-1 ? __ifMeta : null; },
+    querySelectorAll: function(s){ return s && s.indexOf('Content-Security-Policy')!==-1 ? [__ifMeta] : []; },
+    appendChild: function(){}, removeChild: function(){}
+  }),
+  head: __mkObj('iframeHead', {
+    querySelector: function(s){ return s && s.indexOf('Content-Security-Policy')!==-1 ? __ifMeta : null; },
+    querySelectorAll: function(s){ return s && s.indexOf('Content-Security-Policy')!==-1 ? [__ifMeta] : []; },
+    appendChild: function(){}, removeChild: function(){}
+  }),
+  documentElement: __mkObj('iframeRoot'),
+  createElement: function(){ return __mkObj('elem', {setAttribute:function(){}, appendChild:function(){}, removeChild:function(){}, getAttribute:function(){return null;}, hasAttribute:function(){return false;}}); },
+  cookie: '', readyState: 'complete'
+});
+
+var __iframeEl = __mkObj('iframe', {
+  contentDocument: __ifDoc,
+  contentWindow: __mkObj('iframeWin', { document: __ifDoc, top: undefined, parent: undefined }),
+  document: __ifDoc,
+  getAttribute: function(a){
+    if (a==='sandbox') return 'allow-scripts allow-same-origin';
+    if (a==='srcdoc') return '';
+    if (a==='id') return 'jsa';
+    return null;
+  },
+  hasAttribute: function(a){ return a==='sandbox'||a==='id'; },
+  tagName: 'IFRAME', nodeName: 'IFRAME', id: 'jsa'
+});
+
+var document = __mkObj('document', {
+  querySelector: function(s){
+    if (s === '#jsa') return __iframeEl;
+    if (s && s.indexOf('Content-Security-Policy') !== -1) return __ifMeta;
+    return null;
+  },
+  querySelectorAll: function(s){
+    if (s === '#jsa') return [__iframeEl];
+    if (s && s.indexOf('Content-Security-Policy') !== -1) return [__ifMeta];
+    return [];
+  },
+  getElementById: function(id){ return id==='jsa' ? __iframeEl : null; },
+  getElementsByTagName: function(t){ if(t&&t.toLowerCase()==='iframe') return [__iframeEl]; return []; },
+  getElementsByClassName: function(){ return []; },
+  body: __mkObj('body', {appendChild:function(){}, removeChild:function(){}, querySelector:function(s){return s==='#jsa'?__iframeEl:null;}, querySelectorAll:function(s){return s==='#jsa'?[__iframeEl]:[];}}),
+  head: __mkObj('head', {appendChild:function(){}, removeChild:function(){}, querySelector:function(){return null;}, querySelectorAll:function(){return [];}}),
+  documentElement: __mkObj('root'),
+  createElement: function(tag){ return __makeHtmlElement(tag||'div'); },
+  createTextNode: function(t){ return {nodeType:3, nodeValue:String(t||''), textContent:String(t||'')}; },
+  cookie: '', readyState: 'complete', title: '',
+  addEventListener: function(){}, removeEventListener: function(){}
+});
+
+var window;
+window = __mkObj('window', {
+  document: document,
+  __DDG_BE_VERSION__: 1, __DDG_FE_CHAT_HASH__: 1,
+  navigator: __mkObj('navigator', { userAgent: __ua, webdriver: false, language: 'en-US', languages: ['en-US','en'], platform: 'MacIntel', vendor: 'Apple Computer, Inc.', appVersion: '5.0', cookieEnabled: true, onLine: true, hardwareConcurrency: 8, deviceMemory: 8 }),
+  innerWidth: 1280, innerHeight: 800, outerWidth: 1280, outerHeight: 800, devicePixelRatio: 1,
+  screen: __mkObj('screen', { width:1920, height:1080, availWidth:1920, availHeight:1080, colorDepth:24, pixelDepth:24 }),
+  location: __mkObj('location', { href:'https://duckduckgo.com/', origin:'https://duckduckgo.com', host:'duckduckgo.com', hostname:'duckduckgo.com', protocol:'https:', pathname:'/', search:'', hash:'', port:'' }),
+  performance: __mkObj('perf', { now: function(){ return 0; }, timeOrigin: 0 }),
+  history: __mkObj('history', { length: 1, state: null }),
+  localStorage: __mkObj('ls', { getItem:function(){return null;}, setItem:function(){}, removeItem:function(){}, clear:function(){}, length:0, key:function(){return null;} }),
+  sessionStorage: __mkObj('ss', { getItem:function(){return null;}, setItem:function(){}, removeItem:function(){}, clear:function(){}, length:0, key:function(){return null;} }),
+  addEventListener: function(){}, removeEventListener: function(){}, dispatchEvent: function(){return true;},
+  getComputedStyle: function(el){
+    var css = (el && el.style && el.style.cssText) || '';
+    return {
+      getPropertyValue: function(p){
+        var m = css.match(new RegExp(p + '\\s*:\\s*([^;]+)', 'i'));
+        if (m) return m[1].trim();
+        if (p === 'display') return 'block';
+        return '';
+      },
+      display: (css.match(/display\s*:\s*([^;]+)/i)||[])[1]||'block'
+    };
+  },
+  setTimeout: function(fn){ try{fn();}catch(e){} return 0; }, clearTimeout: function(){},
+  setInterval: function(){ return 0; }, clearInterval: function(){},
+  requestAnimationFrame: function(fn){ try{fn();}catch(e){} return 0; }, cancelAnimationFrame: function(){},
+  matchMedia: function(){ return __mkObj('mq', {matches:false, media:'', addListener:function(){}, removeListener:function(){}, addEventListener:function(){}, removeEventListener:function(){}}); },
+  hasOwnProperty: function(k){
+    if (k==='__DDG_BE_VERSION__'||k==='__DDG_FE_CHAT_HASH__') return true;
+    return Object.prototype.hasOwnProperty.call(this,k);
+  },
+  alert: function(){}, confirm: function(){return true;}, prompt: function(){return '';},
+  open: function(){return null;}, close: function(){}, focus: function(){}, blur: function(){}
+});
+window.top = window; window.self = window; window.window = window; window.parent = window; window.globalThis = window;
+var top = window, self = window, parent = window;
+var navigator = window.navigator;
+var location = window.location;
+var screen = window.screen;
+var performance = window.performance;
+var history = window.history;
+var localStorage = window.localStorage;
+var sessionStorage = window.sessionStorage;
+var getComputedStyle = function(el){ return window.getComputedStyle(el); };
+var __R = null, __E = null;
+function __HTMLClass(name){ var c = function(){}; c.prototype = __mkObj(name+'.proto'); return c; }
+var HTMLElement = __HTMLClass('HTMLElement');
+var HTMLDivElement = __HTMLClass('HTMLDivElement');
+var HTMLIFrameElement = __HTMLClass('HTMLIFrameElement');
+var HTMLDocument = __HTMLClass('HTMLDocument');
+var Document = __HTMLClass('Document');
+var Element = __HTMLClass('Element');
+var Node = __HTMLClass('Node');
+var Window = __HTMLClass('Window');
+var Event = __HTMLClass('Event');
+var MouseEvent = __HTMLClass('MouseEvent');
+var KeyboardEvent = __HTMLClass('KeyboardEvent');
+var TouchEvent = __HTMLClass('TouchEvent');
+var XMLHttpRequest = __HTMLClass('XMLHttpRequest');
+var WebSocket = __HTMLClass('WebSocket');
+var Image = __HTMLClass('Image');
+var FormData = __HTMLClass('FormData');
+var Blob = __HTMLClass('Blob');
+var File = __HTMLClass('File');
+var FileReader = __HTMLClass('FileReader');
+var URL = __HTMLClass('URL');
+var URLSearchParams = __HTMLClass('URLSearchParams');
+var Headers = __HTMLClass('Headers');
+var Request = __HTMLClass('Request');
+var Response = __HTMLClass('Response');
+var fetch = function(){ return Promise.resolve(__mkObj('resp', {ok:true, status:200, json:function(){return Promise.resolve({});}, text:function(){return Promise.resolve('');}})); };
+'''
+
+DUCK_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+DUCK_FE_VERSION = "serp_20260917_083005_ET-742796f26a61a81dbee67db3e7dd403a0e16294e"
+DUCK_SESSION = None
+DUCK_WARMED = [False]
+DUCK_LOCK = threading.Lock()
+DUCK_JWK = [None]
+
+
+def duck_servers():
+    return [
+        {"id": "duck-gpt-5.4-mini", "name": "GPT 5.4 Mini (Duck)",
+         "model_id": "gpt-5.4-mini", "kind": "duck"},
+        {"id": "duck-claude-haiku-4-5", "name": "Claude Haiku 4.5 (Duck)",
+         "model_id": "claude-haiku-4-5", "kind": "duck"},
+        {"id": "duck-mistral-small", "name": "Mistral Small (Duck)",
+         "model_id": "mistral-small-2603", "kind": "duck"},
+        {"id": "duck-gpt-oss-120b", "name": "GPT OSS 120B (Duck)",
+         "model_id": "tinfoil/gpt-oss-120b", "kind": "duck"},
+        {"id": "duck-gemma-4-31b", "name": "Gemma 4 31B (Duck)",
+         "model_id": "tinfoil/gemma4-31b", "kind": "duck"},
+    ]
+
+
+def _duck_b64u(b):
+    import base64 as _b
+    return _b.urlsafe_b64encode(b).decode().rstrip("=")
+
+
+def _duck_jwk():
+    if DUCK_JWK[0] is None:
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        k = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        n = k.public_key().public_numbers().n
+        nb = n.to_bytes((n.bit_length() + 7) // 8, "big")
+        DUCK_JWK[0] = {"alg": "RSA-OAEP-256", "e": _duck_b64u((65537).to_bytes(3, "big")),
+                       "ext": True, "key_ops": ["encrypt"], "kty": "RSA",
+                       "n": _duck_b64u(nb), "use": "enc"}
+    return DUCK_JWK[0]
+
+
+def _duck_session():
+    global DUCK_SESSION
+    if DUCK_SESSION is None:
+        DUCK_SESSION = requests.Session()
+        DUCK_SESSION.headers.update({
+            "User-Agent": DUCK_UA, "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://duck.ai/", "Origin": "https://duck.ai",
+            "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin"})
+    return DUCK_SESSION
+
+
+def _duck_b64sha(s):
+    import base64 as _b, hashlib as _h
+    return _b.b64encode(_h.sha256(s.encode("utf-8")).digest()).decode("ascii")
+
+
+def _duck_solve(challenge_b64):
+    """چەلەنجەی JS ی سێرڤەر لە V8 چارە دەکات + wrapper ی FE (origin/stack/duration)"""
+    import base64 as _b, json as _j, random as _r
+    from py_mini_racer import MiniRacer
+    js = _b.b64decode(challenge_b64).decode("utf-8", errors="replace")
+    with DUCK_LOCK:
+        ctx = MiniRacer()
+        try:
+            ctx.eval(DUCK_STUBS_JS.replace("__DDG_REAL_UA__", _j.dumps(DUCK_UA))
+                                    .replace("__DDG_HTML_LOOKUP__", "{}"))
+            ctx.eval("(%s).then(function(v){__R=v;}).catch(function(e){__E=String((e&&e.stack)||e);});" % js)
+            for _ in range(100):
+                if ctx.execute("__R !== null || __E !== null"):
+                    break
+                time.sleep(0.02)
+            err = ctx.execute("__E")
+            if err:
+                raise RuntimeError(str(err)[:120])
+            res = ctx.execute("__R")
+        finally:
+            try:
+                del ctx
+            except Exception:
+                pass
+    if not isinstance(res, dict) or not res.get("client_hashes"):
+        raise RuntimeError("duck: چەلەنجە بەتاڵ")
+    ch = list(res["client_hashes"])
+    ch[0] = DUCK_UA
+    res["client_hashes"] = [_duck_b64sha(x) for x in ch]
+    res.setdefault("meta", {})
+    res["meta"]["origin"] = "https://duck.ai"
+    res["meta"]["stack"] = "Error\n    at https://duck.ai/dist/duckai-dist/entry.duckai.js:2:123456"
+    res["meta"]["duration"] = str(_r.randint(40, 250))
+    return _b.b64encode(_j.dumps(res, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _duck_signals():
+    import base64 as _b, json as _j, random as _r
+    now = int(time.time() * 1000)
+    t = _r.randint(80, 180)
+    ev = [{"name": "onboarding_impression_1", "delta": t}]
+    t += _r.randint(120, 260)
+    ev.append({"name": "onboarding_impression_2", "delta": t})
+    t += _r.randint(200, 500)
+    ev.append({"name": "startNewChat", "delta": t})
+    for _ in range(_r.randint(6, 14)):
+        t += _r.randint(40, 180)
+        ev.append({"name": "user_input", "delta": t})
+    t += _r.randint(120, 350)
+    ev.append({"name": "user_submit", "delta": t})
+    p = {"start": now - 8000, "events": ev, "end": t + _r.randint(20, 90)}
+    return _b.b64encode(_j.dumps(p, separators=(",", ":")).encode("utf-8")).decode("ascii")
+
+
+def _duck_warm():
+    if DUCK_WARMED[0]:
+        return
+    with DUCK_LOCK:
+        if DUCK_WARMED[0]:
+            return
+        try:
+            _duck_session().get("https://duck.ai/", headers={
+                "Accept": "text/html", "Upgrade-Insecure-Requests": "1"}, timeout=(15, 20))
+        except Exception:
+            pass
+        DUCK_WARMED[0] = True
+
+
+def _duck_attempt(model_id, msgs, timeout):
+    import json as _j, random as _r, uuid as _u
+    s = _duck_session()
+    _duck_warm()
+    r = s.get("https://duck.ai/duckchat/v1/status", headers={
+        "x-vqd-accept": "1", "Cache-Control": "no-store", "Accept": "*/*"},
+        timeout=(15, 25))
+    if r.status_code != 200:
+        raise EMError(f"duck: status {r.status_code}")
+    ch = r.headers.get("x-vqd-hash-1")
+    if not ch:
+        raise EMError("duck: چەلەنجە نەگەڕایەوە")
+    h1 = _duck_solve(ch)
+    m = [{"role": x.get("role"), "content": [{"type": "text", "text": x.get("content", "")}]}
+         for x in msgs]
+    payload = {
+        "model": model_id,
+        "metadata": {"toolChoice": {"NewsSearch": False, "VideosSearch": False,
+                                    "LocalSearch": False, "WeatherForecast": False}},
+        "messages": m,
+        "canUseTools": False,
+        "reasoningEffort": "none",
+        "canUseApproxLocation": None,
+        "canDelegateImageGeneration": None,
+        "canShowGreeting": False,
+        "durableStream": {"messageId": str(_u.uuid4()), "conversationId": str(_u.uuid4()),
+                          "publicKey": _duck_jwk()},
+    }
+    hdrs = {"Content-Type": "application/json", "Accept": "text/event-stream",
+            "x-vqd-hash-1": h1, "x-fe-signals": _duck_signals(),
+            "x-fe-version": DUCK_FE_VERSION, "x-ddg-journey-id": _u.uuid4().hex}
+    r2 = s.post("https://duck.ai/duckchat/v1/chat", data=_j.dumps(payload),
+                headers=hdrs, timeout=(15, timeout))
+    if r2.status_code != 200:
+        raise EMError(f"duck: {r2.status_code}")
+    text = []
+    for line in r2.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data: "):
+            continue
+        d = line[6:].strip()
+        if d == "[DONE]":
+            break
+        try:
+            j = _j.loads(d)
+        except Exception:
+            continue
+        if j.get("action") == "success" and isinstance(j.get("message"), str):
+            text.append(j["message"])
+        elif j.get("action") == "error":
+            raise EMError(f"duck: {str(j.get('type', 'error'))[:50]}")
+    ans = "".join(text).strip()
+    if not ans:
+        raise EMError("duck: وەڵام نەگەڕایەوە")
+    return ans
+
+
+def duck_chat(model_id, messages, timeout=110):
+    """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + ٢ هەوڵ"""
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    rest = [m for m in messages if m.get("role") != "system"][-21:]
+    if rest and rest[0].get("role") == "user" and sys_txt:
+        rest[0] = dict(rest[0])
+        rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
+    elif sys_txt:
+        rest = [{"role": "user", "content": f"[ئاراستەی سیستەم: {sys_txt}]"}] + rest
+    last = None
+    for i in range(2):
+        try:
+            return _duck_attempt(model_id, rest, timeout)
+        except EMError as e:
+            last = e
+            if "418" not in str(e) and "429" not in str(e):
+                raise
+            time.sleep(1.5 + i)
+    raise last or EMError("duck: شکست")
 
 
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
@@ -1515,6 +1967,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = z02_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "qb":
                     content = qb_chat(history + [{"role": "user", "content": q}])
+                elif kind == "duck":
+                    content = duck_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1547,6 +2001,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = z02_chat(nmsgs, nsrv["model_id"])
                     elif k == "qb":
                         content = qb_chat(nmsgs)
+                    elif k == "duck":
+                        content = duck_chat(nsrv["model_id"], nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1640,7 +2096,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -1693,6 +2149,10 @@ def detect_brain(allow_fallback=True):
         servers += qb_servers()
     except Exception as e:
         print(f"[BRAIN] qb fail: {e}", flush=True)
+    try:
+        servers += duck_servers()
+    except Exception as e:
+        print(f"[BRAIN] duck fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -1947,6 +2407,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "qb"
+            if k == "duck":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = duck_chat(cand["model_id"], msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "duck"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -1991,6 +2457,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "qb"
+                if k == "duck":
+                    a = duck_chat(nsrv["model_id"], nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "duck"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
