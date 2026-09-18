@@ -1006,8 +1006,25 @@ _Z02_CACHE = {"token": None, "exp": 0.0}
 
 
 def z02_servers():
-    return [{"id": "z02-gemini-flash-lite", "name": "Gemini Flash Lite (ZeroTwo)",
-             "model_id": "gemini-2.5-flash-lite", "kind": "z02"}]
+    return [
+        {"id": "z02-gemini-flash-lite", "name": "Gemini Flash Lite (ZeroTwo)",
+         "model_id": "gemini-2.5-flash-lite", "kind": "z02"},
+        {"id": "z02-grok-4.1-fast", "name": "Grok 4.1 Fast (ZeroTwo)",
+         "model_id": "grok-4-1-fast-non-reasoning", "kind": "z02"},
+        {"id": "z02-gpt-5.6-luna", "name": "GPT 5.6 Luna (ZeroTwo)",
+         "model_id": "gpt-5.6-luna", "kind": "z02"},
+        {"id": "z02-venice-roleplay", "name": "Venice Roleplay (ZeroTwo)",
+         "model_id": "venice-uncensored-role-play", "kind": "z02"},
+    ]
+
+
+# model_id → provider ی zerotwo
+_Z02_PROVIDERS = {
+    "gemini-2.5-flash-lite": "gemini",
+    "grok-4-1-fast-non-reasoning": "xai",
+    "gpt-5.6-luna": "openai",
+    "venice-uncensored-role-play": "venice",
+}
 
 
 def _z02_new_account():
@@ -1076,8 +1093,9 @@ def _z02_token():
     return tok
 
 
-def z02_chat(messages, timeout=110):
-    """چاتی zerotwo — gemini-2.5-flash-lite؛ ١٥ نامە/ڕۆژ → هەژماری نوێ خۆکار"""
+def z02_chat(messages, model_id="gemini-2.5-flash-lite", timeout=110):
+    """چاتی zerotwo — ٤ مۆدێڵی ڕاییگە؛ ١٥ نامە/ڕۆژ → هەژماری نوێ خۆکار"""
+    provider = _Z02_PROVIDERS.get(model_id, "gemini")
     try:
         token = _z02_token()
     except EMError:
@@ -1105,7 +1123,7 @@ def z02_chat(messages, timeout=110):
             tok = r.json()["token"]
             r = s.post(Z02_API + "/api/ai/chat/stream",
                        headers={**h, "X-CSRF-Token": tok, "Authorization": f"Bearer {token}"},
-                       json={"messages": msgs, "provider": "gemini", "model": "gemini-2.5-flash-lite"},
+                       json={"messages": msgs, "provider": provider, "model": model_id},
                        timeout=(15, timeout))
         except Exception as e:
             if attempt == 0:
@@ -1436,7 +1454,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 elif kind == "fla":
                     content = fla_chat(history + [{"role": "user", "content": q}])
                 elif kind == "z02":
-                    content = z02_chat(history + [{"role": "user", "content": q}])
+                    content = z02_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1466,7 +1484,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     elif k == "fla":
                         content = fla_chat(nmsgs)
                     elif k == "z02":
-                        content = z02_chat(nmsgs)
+                        content = z02_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1560,7 +1578,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -1853,7 +1871,7 @@ def ask(session, question):
                 return a, "fla"
             if k == "z02":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
-                a = z02_chat(msgs)
+                a = z02_chat(msgs, cand["model_id"])
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "z02"
@@ -1892,7 +1910,7 @@ def ask(session, question):
                         raise EMError("identity leak")
                     return a, "fla"
                 if k == "z02":
-                    a = z02_chat(nmsgs)
+                    a = z02_chat(nmsgs, nsrv["model_id"])
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "z02"

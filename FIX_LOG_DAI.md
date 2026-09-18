@@ -169,3 +169,10 @@
 - سیستەم پرۆمپت ✅ — دکتۆر التعافي وەڵامی داودەتەوە
 - deploy #37 ✅ → /health ٩٨؛ Fly تاقیکراوە: «أنا آسف لسماع أنك تشعر بالحزن…»
 - تێبینی: ڕێژە-لیمێت ٤ چرکە لە نێوان نامەکان
+
+## #38 — zerotwo: ٣ مۆدێڵی نوێی ڕاییگە + دژە-دزە — deploy ✅ ١٠١
+- سکان ی تەواوی app.js: ١٤٠+ مۆدێڵ → تاقیکردنەوەی ٤٤ → تەنها ٤ی ڕاییگە: gemini-2.5-flash-lite، xai/grok-4-1-fast-non-reasoning، openai/gpt-5.6-luna، venice/venice-uncensored-role-play
+- z02_chat(messages, model_id) + _Z02_PROVIDERS؛ هەر ٤ dispatch model_id دەگۆڕێت
+- LEAK_RE: zerotwo|zero two|زێرۆتۆ زیادکرا (سێرڤەرەکە خۆی ناسنامەی ZeroTwo تێدەهێنێت)
+- سکانەکە: /tmp/z02_scan.py — premium هەڵە خێرا = کوات ناوەستێت
+- deploy #38 ✅ → ١٠١ سێرڤەر (٩٨+٣)؛ grok تاقیکرایەوە لە Fly
