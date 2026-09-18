@@ -183,3 +183,12 @@
 - ACT_MODELS → ["gpt-5.6-luna"] تەنها (ناوی ڕەسمی ڕاییگەی ماڵپەڕەکە)
 - ئەنجام: زانیاری ڕاستەقینە بۆ بەکارهێنەر — هیچ ناوی درۆ لە مینیو
 - deploy #39 ✅ → /health ٧٥
+
+## #40 — QuillBot AI Chat (gpt-4.1-mini) — deploy ✅ ٧٦
+- سەرچاوەی نوێ: qb — quillbot.com/api/ai-chat/chat/conversation/{uuid} (NDJSON: type=content/usage/status)
+- پەڕەکە Cloudflare چەلەنجەیە بەڵام API ڕاستەوخۆ کار دەکات (بێ تۆمار، بێ کوکی)
+- Payload: {message:{content,files:[]}, context:{}, tools:{}, origin:{name:"ai-chat.chat", url}}
+- مۆدێڵ: gpt-4.1-mini (usage دەیگەیەنێت)؛ سیستەم پرۆمپت لەناو نامەکە تێکەڵ دەکرێت (context/prompt کار ناکات)
+- کوات: limit=١ بەڵام دوای ~٢٠ چرکە دەگەڕێتەوە (تاقیکرا: A/B بە پشووی ٢١s ✅)؛ ٤ نامەی خێرا → 403 چەلەنجە
+- LEAK_RE: quillbot|کویل زیادکرا (سێرڤەرەکە خۆی «Quillbot» دەڵێت)
+- qb_chat لە ٥ dispatch + detect_brain؛ deploy #40 ✅ → ٧٦ سێرڤەر

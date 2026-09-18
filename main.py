@@ -1152,6 +1152,69 @@ def z02_chat(messages, model_id="gemini-2.5-flash-lite", timeout=110):
     raise EMError("z02: وەڵام نەگەڕایەوە")
 
 
+# ════════════════════════════════════════════════════════════
+# ٢.١٢) quillbot.com AI Chat — gpt-4.1-mini بێ تۆمار
+#      POST /api/ai-chat/chat/conversation/{uuid} — NDJSON stream
+#      کوات: ١ نامە/~٢٠ چرکە (دوای ناوەستێت بەردەوام دەبێتەوە)
+# ════════════════════════════════════════════════════════════
+
+QB_URL = "https://quillbot.com/api/ai-chat/chat/conversation/"
+
+
+def qb_servers():
+    return [{"id": "qb-gpt-4.1-mini", "name": "GPT 4.1 Mini (QuillBot)",
+             "model_id": "gpt-4.1-mini", "kind": "qb"}]
+
+
+def qb_chat(messages, timeout=110):
+    """چاتی quillbot — مێژووی وەک یەک نامەی یەکگیراو؛ NDJSON: type=content/usage"""
+    import uuid as _uuid
+    # مێژوو بۆ یەک پرسیار کۆبکەوە (سیستەم لە سەرەتا + دوا نامەی بەکارهێنەر)
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    user_txt = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_txt = m["content"]
+            break
+    if not user_txt:
+        user_txt = " ".join(m.get("content", "") for m in messages)[-2000:]
+    if sys_txt:
+        user_txt = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{user_txt}"
+    body = {"message": {"content": user_txt, "files": []}, "context": {}, "tools": {},
+            "origin": {"name": "ai-chat.chat", "url": "https://quillbot.com"}}
+    try:
+        r = requests.post(QB_URL + str(_uuid.uuid4()), json=body, timeout=(15, timeout),
+                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                                   "Origin": "https://quillbot.com",
+                                   "Referer": "https://quillbot.com/ai-chat",
+                                   "Accept": "text/event-stream",
+                                   "platform-type": "webapp"}, stream=True)
+    except Exception as e:
+        raise EMError(f"qb: {str(e)[:60]}")
+    if r.status_code == 403:
+        raise EMError("qb: چەلەنجەی Cloudflare (ڕێژە)")
+    if r.status_code != 200:
+        raise EMError(f"qb: {r.status_code}")
+    text = []
+    for line in r.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        if d.get("type") == "content":
+            c = d.get("content", "")
+            if c:
+                text.append(c)
+        elif d.get("type") == "error":
+            raise EMError(f"qb: {str(d.get('message', 'error'))[:60]}")
+    ans = "".join(text).strip()
+    if ans:
+        return ans
+    raise EMError("qb: وەڵام نەگەڕایەوە")
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -1450,6 +1513,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = fla_chat(history + [{"role": "user", "content": q}])
                 elif kind == "z02":
                     content = z02_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "qb":
+                    content = qb_chat(history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -1480,6 +1545,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = fla_chat(nmsgs)
                     elif k == "z02":
                         content = z02_chat(nmsgs, nsrv["model_id"])
+                    elif k == "qb":
+                        content = qb_chat(nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -1573,7 +1640,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -1622,6 +1689,10 @@ def detect_brain(allow_fallback=True):
         servers += z02_servers()
     except Exception as e:
         print(f"[BRAIN] z02 fail: {e}", flush=True)
+    try:
+        servers += qb_servers()
+    except Exception as e:
+        print(f"[BRAIN] qb fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -1870,6 +1941,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "z02"
+            if k == "qb":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = qb_chat(msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "qb"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -1909,6 +1986,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "z02"
+                if k == "qb":
+                    a = qb_chat(nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "qb"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
