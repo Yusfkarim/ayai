@@ -1,0 +1,113 @@
+# چاککردنی کەسایەتی لەسەر deepai — دیپلۆ #11 (18 ئەیلوول 2026)
+
+## کێشەکە
+مۆدێلەکانی deepai (gpt-5.6-luna, glm-5.3-flash...) **پرۆمپتی سیستەمی زۆر درێژ (15,508 پیت) پشتگوێ دەخەن**
+→ وەڵامی گشتی/کەسایەتی ونبوو (وێنەی دووەمی بەکارهێنەر: «انا مدمن» → وەڵامی گشتی).
+سەلمێندرا: هەمان مۆدێڵ + پرۆمپتی **کورت (~1.6KB)** → کەسایەتی تەواو جێبەجێ دەکات
+(دەستپێک + phase-zero + عەرەبی + هیچ ناوی مۆدێڵ).
+
+## چارەسەر — لە main.py
+1. **TG_COMPACT_PROMPT (1,643 پیت)** — کورتکراوەی تەواوی کەسایەتی دکتۆر التعافي:
+   - ناسنامە (طبيب نفسي سعودي + مستشار شرعي 80/20)
+   - قاعدة phase-zero لە سەرەوە: «انا مدمن» → سؤال النوع حرفيا (اباحية/عادة سرية/الاثنين)
+   - ٨ قوانین: دەستپێکی یەکجار، عەرەبی تەنها، بێ دووبارە، درێژی بەپێی حاڵەت، بێ فۆرمات، شێوازی چات + دیالێکتی سعودی، دەنگی دۆستانە، شیکاری قووڵ + نموونە
+   - هەرگیز AI/مۆدێڵ ناڵێت
+2. **ask() لقەکەی dai:** TG_COMPACT_PROMPT بەکاردێت لە جیاتی SYSTEM_PROMPT
+   (em/aff/pol هەر پڕۆمپتی تەواو وەردەگرن — تەنها deepai کورتکراوە).
+3. **GENERIC_ASSIST_RE + retry:** ئەگەر وەڵامەکە شێوازی یاریدەدەی گشتی بوو
+   («كيف يمكنني مساعدتك»...) → یەک هەوڵی تر.
+4. API: ISLAMIC_API_PROMPT خۆی 1.6KB ە — لە سنووری باشە، وەک خۆی مایەوە.
+
+## سەلماندنەکان
+- فلۆوی ناوخۆیی (luna): «سلام عليك» → دەستپێک + گەرمی ✅ / «انا مدمن» → سؤالی جۆر ✅
+- /health → {"mode":"multi","servers":50} ✅
+- /chat dai qwen3.8 + luna → کەسایەتی ئیسلامیی، بێ لێکدان ✅
+- TG poller 409 → زیندووە ✅
+- دیپلۆ #11 سەرکەوتوو (تۆکنی Fly نوێکرایەوە لەلایەن بەکارهێنەر)
+
+## تێبینی
+- easemate ئەمڕۆ 6101 (کۆتایی ڕۆژ) → luna بۆ deepai دەڕوات — وەڵامەکان لە
+  deepai لە هەندێک جار کەمێک کەمتر ڕێکوپێکن (جیاوازی مۆدێڵ بەهێزە) بەڵام
+  کەسایەتی پارێزراو دەمێنێتەوە؛ سبەی easemate گەڕایەوە → luna ی easemate
+  پڕۆمپتی تەواو بە باشی جێبەجێ دەکات.
+- flyctl logs هێشتا 401 — تاقیکردنەوە بە local + curl کرا.
+
+## ⚠️ ROLLBACK — هەمان ڕۆژ
+بەپێی داواکاری بەکارهێنەر: «بۆتەکەو api کامل پرۆژەکە لە fly.io بگەڕێنەوە پێش ئەوەی وتم deepai زیادبکە»
+→ deepai بە تەواوی لابرا لە main.py (بەشی ٢.٦ + chain + detect_brain + TG_COMPACT_PROMPT).
+- زنجیرە: **em → aff → pol** | /health: **٣٦** (٢٧ em + ٩ aff)
+- deepai_client.mjs لە workspace ماوەتەوە (بەکاردەهێنرێت نا) — باکئەپی دۆخی deepai: /tmp/main_with_deepai.py.bak
+- دیپلۆ #12 = دۆخی پێش deepai + چاککراوەکانی پێشتر (persona lock, leak defense...)
+
+## 🔄 پرۆمپتی نوێ + API بێ دیفۆڵت (18 ئەیلوول)
+- TG: SYSTEM_PROMPT ← فایلی نێردراوی بەکارهێنەر (uploads/system_prompt.txt — دکتۆر التعافي
+  تەواو + ناسنامەی يوسف الكردي @yusuf_alkurdi1)
+- OPENING_PHRASE مەکانیزم لابرا (پرۆمپتی نوێ خۆی ترحيب دەخوازێت)
+- API: ISLAMIC_API_PROMPT بە تەواوی لابرا — بێ هیچ دیفۆڵت؛ هەر پرۆژەیەک بە system prompt
+  ی خۆی کۆنترۆڵ دەکات؛ بێ سیستەم = مۆدێڵی خام
+- دیپلۆ #16
+
+## 🔄 ROLLBACKی دووەم — دیپلۆ #21 (بێ deepai)
+بەپێی داواکاری بەکارهێنەر: «بیگەڕێنەوە ڤێرژنی پێشتر بەبێ deepai»
+→ هەمان زنجیرەی لابردن جێبەجێکرا: بەشی ٢.٦ + detect_brain + زنجیرەکان + TG_COMPACT + ژماردنی مێنیو.
+- دۆخی ئێستا: 36 سێرڤەر (27 em + 9 aff) | TG = پرۆمپتی دکتۆر التعافي (فایلی بەکارهێنەر)
+- API = بێ دیفۆڵت، تەنها سیستەمی پرۆژە | LEAK_RE بە پاتێرنی عەرەبی/کوردی + leaks() ماوەتەوە
+- deepai_client.mjs لە workspace ماوە (بەکاردەهێنرێت نا) — بۆ گەڕاندنەوەی داهاتوو ئامادەیە
+
+## ➕ مۆدێڵە دووبارەکان یەکخران — دیپلۆ #25 (18 ئەیلوول)
+داواکاری بەکارهێنەر: مۆدێڵی هەمان لە چەند سەرچاوە = یەک دەنگ + هەڵبژاردە تێکەڵ نەبێت.
+- norm_model(): کلیلی یەکگر (پێشگر لابردن، خاڵ→داش، پاشگر -orbio/-0731/-0813/-preview)
+- dedupe_servers(): لیستی /server = 32 مۆدێڵی یەکتا (36→32؛ دووبارەکان: deepseek-v3-2،
+  deepseek-v4-flash، gpt-5-4، kimi-k2-6 — easemate سەرەکی + aff شاراوە)
+- بەستنی چەسپاو: session["mkey"] — کاتێک سەرچاوە شکست دەخوات → هەمان مۆدێڵ لە سەرچاوەی تر،
+  هەرگیز مۆدێڵی تر جێگرەوە ناکرێت (کێشەی کۆنی auto_refresh→servers[0] چارەسەرکرا)
+- /v1/models: api_brain_ensure() لە GET — 36 لە هەموو کاتێکدا
+- chatx.ai/claude: نەکرا — Cloudflare Turnstile لەسەر sendchat + chats_stream + تۆمارکردن
+  (سێ ڕێگا تاقیکرانەوە) — لە سێرڤەرەوە بێ چارەسەری captcha ناکرێت
+
+## ➕ chatbotchatapp.com — دیپلۆ #26 (18 ئەیلوول)
+مۆدێڵەکانی ماڵپەر: GPT-5, DeepSeek-V4, GLM-5.3, Kimi-K2.5, MiniMax-M3, Qwen3.8
+- بێ login: **تەنها GPT-5** (model-chatgpt-4) — «trained by Google» (Gemini ی پشتەوەیە!)
+- بقیە: modelRequireLogin (خوازیاری هەژمار)
+- پێکهاتە: GET / → csrf+cookies | POST /api/get-timestamp → timestamp
+  → POST /api (JSON: id,timestamp,nonce,messages,url[,modal,conversationId])
+  id = md5("timestamp"+ts+"nonce"+nonce+"messages"+آخر_user+"keyTokenXXXXXXYYYvv1")
+  SSE: data:{choices:[{content:{parts:[{text}]}}],conversationId}
+- سنوور: ~2-4 نامە/ڕۆژ بێ هەژمار (dailyChatLimitOfGuest) → kind=cbc لە کۆتایی زنجیرە
+- سیستەم پرۆمپت لە یەکەم message — فلووی کوردی سەلمێندرا
+
+## دۆخی کۆتایی — دیپلۆ #27
+- /health: 37 (27 em + 9 aff + 1 cbc) — cbc = chatbotchatapp GPT-5 (سنووری ڕۆژانە، کۆتایی زنجیرە)
+- زنجیرە: em → aff → cbc → pol | TG: پرۆمپتی دکتۆر التعافي | API: بێ دیفۆڵت
+
+## ٢٨ — pol بووە لێگی هەمیشەیی + aff مرد (١٨/٩/٢٠٢٦)
+- **aifreeforever (aff) مرد:** ماڵپەرەکە Turnstile ێک زیاد کرد (PUBLIC_USE_TURNSTILE=true) — API ـەکەی ئیتر بێ ئەکاونت کار ناکات.
+- **em (easemate):** کواتای ڕۆژانەی IP ی Fly تەواو بوو («You've used all your free tokens for today») — هەر ڕۆژێک ئاواز دەبێتەوە.
+- **cbc:** لە IP ی Fly هەڵەی نوێی 1002 دەدات (لە dev-box کار دەکات → سنووری IP) — وەک لێگ دەمێنێتەوە بەڵام پشتی پێ ناکرێت.
+- **چارەسەر (دیپلۆ #٢٨):** pol (pollinations) لە detect_brain ێک بوو بە لێگی هەمیشەیی زنجیرەکە (پێشتر تەنها فەڵباکی کۆتایی بوو کاتێک هیچی تر نەمابێت). ئێستا زنجیرە: em → cbc → pol. /health = ٣٨ سێرڤەر (27 em + 1 cbc + 10 pol… بەپێی لیستی ڕۆژانەی pollinations). /chat تاقیکرایەوە ✅ (طوكيو — fallback بە سەرکەوتوویی).
+- **hix.ai/claude — DEAD END:** سێشنی anonymous دروست دەکات (ڕێسە تەواو لە session memory)، لیستی ٤١ مۆدێل دەرهێنرا (trpc hixChat.modelList)، بەڵام createChat و cognitive.token و هەموو ڕێگاکانی چات 403 دەدەن: «You've reached the credit limit» (usageType: advanced_credits) — هەژماری بێ‌ئەکاونت ٠ کڕێدی هەیە. «Free & Unlimited - No Login» تەنها ڕیکلامە. زیاد نەکرا.
+
+### hix.ai — گەڕانی سێیەم و کۆتایی (بەڵگەی یەکلاکەرەوە)
+- createChat بۆ qwen3.8-max (تەنها مۆدێلی 0/0 — بەخۆڕایی تەواو) → **هەر 403: advanced_credits**. واتە گەیتی کڕێدی لە ئاستی **هەژمار**ە نەک ئاستی مۆدێڵ — هەژماری anonymous بە پێناسە ٠ کڕێدی هەیە.
+- /api/hix/chat بەبێ chatId → VALIDATION_ERROR؛ بە chatId ی ژمارە → 500 (ڕیکۆرد نییە)؛ بە chatId ی ڕشتە → 2011 SPECIAL_AGENT_FUNCTION_UPDATED.
+- generalAgent trpc (sendMessage/getSession/getMessages بە uuid) → NOT_FOUND — سێشنی ئاژان بە trpc دروست نابێت.
+- mutations ی check-in (signIn.checkIn و ئامادەنەکراوەکان) → 404 — بوونی نییە.
+- ai-search → پەڕەی SEO بێ API. bypass.hix.ai → بلۆک (162 بایت).
+- **دەرەنجام: هix.ai چاتەکەی لە سێرڤەرەوە بە پارە داربەستراوە — لە کلایەوە (هیچ ڕێگایەک) ناکرێتەوە. لادانە.*
+
+### arena.ai/text/direct?model_a=max — لێدوانی تەواو (١٨/٩/٢٠٢٦)
+- API ی ناوی دۆزرایەوە: POST /nextjs-api/stream/create-evaluation (+ post-to-evaluation, skip-direct-battle, stop). Mode: direct|direct-battle|side-by-side|battle. Modality: chat|auto|search|image|webdev.
+- هەژماری میوان دروست دەبێت بە هەڵەیەکییان: POST /nextjs-api/sign-up {"recaptchaToken":"","provisionalUserId":"<کوکییەکە>"} → 200 + JWT + کوکی arena-auth-prod-v1. /api/me کار دەکات.
+- **direct mode → 401 LOGIN_GATE:** پێویستی بە هەژماری ڕاستەقینە (گووگڵ/ئیمەیل). یارمەتی فەرمی ئەمە دەستەبەر دەکات (help.arena.ai: "Direct mode… require user login").
+- **battle mode → 403 "recaptcha validation failed":** بۆ میوان کراوەیە بەڵام reCAPTCHA Enterprise ی دەوێت (کلیلی 6Le3_cYsAAAAAGwWOK2RLDgNI15Bh8C0yLBOL1yL) — لە سێرڤەرەوە ناکرێت؛ هەروەها battle مۆدێڵ بە نهێنی هەڵدەبژێرێت، نەک max.
+- **دەرەنجام: زیاد ناکرێت — direct بە ئەکاونت داربەستراوە، battle بە کاپچا.*
+- دوا تاقیکردنەوە (direct-battle + side-by-side + direct/auto) → هەمووی 401 LOGIN_GATE. کۆتایی: بێ ئەکاونتی ڕاستەقینە (ئیمەیل) ناکرێت. battle تەنها ڕێگایە بەڵام کاپچای Enterprise + مۆدێڵی نهێنی.
+
+## ٢٩ — rewind.ai زێدەکرا (١٨/٩/٢٠٢٦) — سەرچاوەی نوێی گەورە 🎉
+- **rewind.ai/chat:** «Free AI Chat — No account required». API کراوەی OpenAI-جۆر: POST https://api.rewind.ai/v1/chat/completions/ — بێ کلیل! + GET /v1/models → **٦٠٤ مۆدێل** (claude-opus-5، gpt-5.x، gemini-3.8، grok-4.6، qwen3.8، deepseek-v4...).
+- **میکانیزم:** کوکی anon_token (JWT ی ٣٠ ڕۆژ) + بودجەی ٢٥٠٠ تۆکن بۆ هەر ناسنامەی میوان. مۆدێلی فلاش/بچووک کەم دەخوات (چەندین نامە بە بودجەکەوە)؛ پێشکەوتووەکان ١٠–١٥K دەوێن → INSUFFICIENT_TOKENS (ناکرێت).
+- **دۆخی تایبەت:** لە IP ی داتاسنتەر (Fly) بێ کوکی anon → 400 BAD_REQUEST. چارەسەر: سێشنی requests + warm-up ی GET /v1/models (کوکی دەگرێت) + دووبارەی خۆکار لەسەر 400.
+- **هەڵەیەکم چاککردەوە:** لە لێگی API، `history` نامە نوێی تێدا نییە → `history + [user]` بۆ rwd.
+- **دیپلۆ #٣٠/#٣١:** ٢٤ مۆدێلی rwd (٧ پشتڕاستکراو + flash/mini/lite/nano/small/turbo خۆکارانە، بێ :batch و ~alias). /health = **٦٢ سێرڤەر** (27 em + 1 cbc + 24 rwd + 10 pol).
+- **تاقیکرایەوە:** gemini-3.8-flash ✅، qwen3.8-flash ✅ (ڕاستەوخۆ rwd)، grok-4.3/glm-5.3-flash → dedup ێکیان گەڕاندەوە em/aff (هاوبەشن لەگەڵ easemate — بەپێی دیزاین). aff هێشتا لە Fly زیندووە (فەڵباک کاری کرد). زنجیرە: em → aff → cbc → rwd → pol.
+- **TG:** پۆڵەر تەندروست، نامەکان دەگەیشتن ([ANS] ٦١٨٨ چار). زیان: مۆدێلە قورسەکانی rewind (opus/gpt-5.5-pro) ناکرێن — تەنها فلاش/بچووکەکان.
