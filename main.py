@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2565,6 +2565,134 @@ def sync_hk_models(force=False):
         _ms_save()
 
 
+# ══════════ HuggingFace Inference (router.huggingface.co) — §2.23 — تۆکنی yusfkarim1028 ══════════
+HF_TOKEN = "hf_" + "ZNGBNvoPbHFpqMVMscrJpUHhfHJoKnvBeQ"  # yusfkarim1028
+HF_BASE = "https://router.huggingface.co/v1"
+HF_LIMIT = {"until": 0.0}
+_HF_SYNC = {"t": 0.0}
+
+
+def _hf_headers(ct=True):
+    hd = {"Authorization": f"Bearer {HF_TOKEN}", "User-Agent": "Mozilla/5.0"}
+    if ct:
+        hd["Content-Type"] = "application/json"
+    return hd
+
+
+def hf_chat(messages, model_id="deepseek-ai/DeepSeek-V4.1-Flash", timeout=110):
+    """چاتی HF Inference — OpenAI-ستایل؛ 402 = کرێتی مانگانە (دیلی تا یەکی مانگ)؛ 429 = ١٠ خولەک"""
+    import time as _t
+    if _t.time() < HF_LIMIT["until"]:
+        raise EMError("hf: credit cooldown")
+    body = {"model": model_id, "messages": messages[-24:], "max_tokens": 1200}
+    try:
+        r = requests.post(HF_BASE + "/chat/completions", json=body,
+                          headers=_hf_headers(), timeout=(15, timeout))
+    except Exception as e:
+        raise EMError(f"hf: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code == 402:
+            # کرێتی مانگانە تەواو — دیلی تا یەکی مانگی داهاتوو + پاککردنەوەی مینیو
+            now = _t.time()
+            nxt = (_t.gmtime(now).tm_year + (1 if _t.gmtime(now).tm_mon == 12 else 0),
+                   1 if _t.gmtime(now).tm_mon == 12 else _t.gmtime(now).tm_mon + 1, 1)
+            import calendar as _cal
+            HF_LIMIT["until"] = _cal.timegm(nxt + (0, 0, 0)) + 300
+            if MS.get("hf_ok"):
+                MS["hf_ok"].clear()
+                _ms_save()
+                print("[HF] کرێتی تەواو — hf_ok پاککرایەوە تا ڕێککەوتنی مانگ", flush=True)
+            raise EMError("hf: 402 → دیلی تا مانگی داهاتوو")
+        if r.status_code == 429:
+            HF_LIMIT["until"] = _t.time() + 600
+            raise EMError("hf: 429 → دیلی ١٠ خولەک")
+        # مردوو لە ترافیکی ڕاستەقینە (400/404/503) → لە hf_ok بۆ hf_bad (دووبارە ٢٤ کاتژمێر)
+        if r.status_code in (400, 404, 503) and model_id in MS.get("hf_ok", {}):
+            MS["hf_ok"].pop(model_id, None)
+            MS.setdefault("hf_bad", {})[model_id] = {"code": r.status_code, "t": _t.time()}
+            _ms_save()
+            print(f"[HF] مردوو لە چات: {model_id} ({r.status_code}) — لابرا", flush=True)
+        raise EMError(f"hf: {r.status_code}")
+    try:
+        m = r.json()["choices"][0]["message"]
+    except Exception:
+        raise EMError("hf: parse")
+    return (m.get("content") or "").strip()
+
+
+def hf_servers():
+    labels = {}
+    out = []
+    for mid in list(MS.get("hf_ok", {}).keys())[:40]:
+        tail = str(mid).split("/")[-1]
+        label = re.sub(r'[-_]', ' ', tail).strip()
+        slug = re.sub(r'[^a-z0-9.]+', '-', str(mid).lower()).strip('-').replace('/', '-')
+        out.append({"id": f"hf-{slug}", "name": f"{label} (HF)",
+                    "model_id": mid, "kind": "hf"})
+    return out
+
+
+def sync_hf_models(force=False):
+    """ڕاکێشانی ئۆتۆماتیکی مۆدێڵەکانی HF:
+       - کاتالۆگی زیندوو لە /v1/models (لابردنی ئەوانەی HF لابراون — یاسای بەکارهێنەر)
+       - پشکنینی نوێیەکان (١٠/خول) → هەر کامێک وەڵام دا بگاتە hf_ok
+       - مردووەکان (پشکنین/چات شکات) → hf_bad (دووبارە ٢٤ کاتژمێر)
+       خول: ٦ کاتژمێر"""
+    import time as _t
+    if not force and _t.time() - _HF_SYNC["t"] < 21600:
+        return
+    _HF_SYNC["t"] = _t.time()
+    try:
+        r = requests.get(HF_BASE + "/models", headers={"User-Agent": "Mozilla/5.0"}, timeout=(10, 30))
+        items = r.json().get("data") or []
+    except Exception as e:
+        print(f"[HF-SYNC] کاتالۆگ هەڵە: {str(e)[:70]}", flush=True)
+        return
+    catalog = {m.get("id") for m in items if m.get("id")}
+    # ١) لابردنی ئەوانەی لە کاتالۆگ نەماون (مردوو/لابراو لەلایەن HF)
+    removed = [mid for mid in list(MS.get("hf_ok", {}).keys()) if mid not in catalog]
+    for mid in removed:
+        MS["hf_ok"].pop(mid, None)
+        print(f"[HF-SYNC] لابرا لە کاتالۆگ: {mid}", flush=True)
+    # ٢) زیندووکردنەوەی bad ە کۆن (٢٤ کاتژمێر)
+    for mid in list(MS.get("hf_bad", {}).keys()):
+        if _t.time() - float(MS["hf_bad"][mid].get("t") or 0) > 86400:
+            MS["hf_bad"].pop(mid, None)
+    # ٣) پشکنینی نوێیەکان (١٠/خول)
+    probed = 0
+    added = 0
+    for mid in catalog:
+        if mid in MS.get("hf_ok", {}) or mid in MS.get("hf_bad", {}) or probed >= 10:
+            continue
+        probed += 1
+        try:
+            rr = requests.post(HF_BASE + "/chat/completions",
+                               json={"model": mid, "messages": [{"role": "user", "content": "Reply: OK"}], "max_tokens": 8},
+                               headers=_hf_headers(), timeout=(10, 40))
+            if rr.status_code == 200 and (rr.json().get("choices") or [{}])[0].get("message", {}).get("content"):
+                MS.setdefault("hf_ok", {})[mid] = {"t": _t.time()}
+                added += 1
+                print(f"[HF-SYNC] نوێ ✅ {mid}", flush=True)
+            elif rr.status_code == 402:
+                import calendar as _cal
+                g = _t.gmtime(_t.time())
+                nxt = (g.tm_year + (1 if g.tm_mon == 12 else 0), 1 if g.tm_mon == 12 else g.tm_mon + 1, 1)
+                HF_LIMIT["until"] = _cal.timegm(nxt + (0, 0, 0)) + 300
+                if MS.get("hf_ok"):
+                    MS["hf_ok"].clear()
+                    print("[HF-SYNC] کرێتی مانگانە تەواو — hf_ok پاککرایەوە", flush=True)
+                _ms_save()
+                break
+            else:
+                MS.setdefault("hf_bad", {})[mid] = {"code": rr.status_code, "t": _t.time()}
+        except Exception as e:
+            MS.setdefault("hf_bad", {})[mid] = {"err": str(e)[:60], "t": _t.time()}
+        _t.sleep(0.6)
+    if added or removed:
+        _ms_save()
+    print(f"[HF-SYNC] کاتالۆگ={len(catalog)} | نوێ={added} | لابرا={len(removed)} | hf_ok={len(MS.get('hf_ok', {}))}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -3011,6 +3139,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = yl_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "hk":
                     content = hk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "hf":
+                    content = hf_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -3059,6 +3189,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = yl_chat(nmsgs, nsrv["model_id"])
                     elif k == "hk":
                         content = hk_chat(nmsgs, nsrv["model_id"])
+                    elif k == "hf":
+                        content = hf_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -3152,7 +3284,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3224,6 +3356,8 @@ def detect_brain(allow_fallback=True):
         servers += yl_servers()
         sync_hk_models()
         servers += hk_servers()
+        sync_hf_models()
+        servers += hf_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3232,6 +3366,7 @@ def detect_brain(allow_fallback=True):
         sync_ct_models()
         sync_yl_models()
         sync_hk_models()
+        sync_hf_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3579,6 +3714,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "hk"
+            if k == "hf":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = hf_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "hf"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3663,6 +3804,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "hk"
+                if k == "hf":
+                    a = hf_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "hf"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
