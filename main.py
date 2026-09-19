@@ -1810,6 +1810,12 @@ def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
     if r.status_code != 200:
         if r.status_code in (429, 402):
             L7_LIMIT["until"] = _t.time() + 600
+        elif r.status_code in (400, 401, 404) and model_id in MS.get("l7_ok", {}):
+            # مۆدێڵ لە ترافیکی ڕاستەقینەدا مردووە (نەک ڕێگری کاتی) — لە ok بۆ bad بیبە (٢٤ کاتژمێر دووبارە)
+            MS["l7_ok"].pop(model_id, None)
+            MS.setdefault("l7_bad", {})[model_id] = {"code": r.status_code, "t": _t.time()}
+            _ms_save()
+            print(f"[L7] مردوو لە چاتی ڕاستەقینە: {model_id} ({r.status_code}) — لە ok لابرا", flush=True)
         raise EMError(f"l7: {r.status_code}")
     try:
         m = r.json()["choices"][0]["message"]
