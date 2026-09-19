@@ -471,3 +471,11 @@
 - sync ی ٦ کاتژمێر (نشستی نوێ پێش پشکنین)
 - سەرەکی: CF لە Fly هەندێ جار 403 ی یەکەم — دووبارەکردنەوە لە کۆددا هەیە (attempt ٢ بە نشستی نوێ)
 - **#62 Fly-verified:** /health **119** | /v1/models **91** (+`pi-pi-chat`) | چات لە Fly: «PI-62-FLY» ✅ | head **0a36eb1** | requirements: +curl_cffi
+
+## #63 — ChatbotApp ✅ (§2.29) — ٤٣ مۆدێڵ + حەوزی ئەکاونت + خۆکار-ساینئەپ
+- داواکاری: chat.chatbotapp.ai + هەموو مۆدێڵەکان + بێ لیمیت + ئۆتۆئەپدێت؛ ئەکاونت: komex82398@duidir.com (پاسۆرد=ئیمێڵ)
+- **فلۆو:** Firebase REST signInWithPassword (key AIzaSyBQLxwsoGGyo0DOI-P8IdRWDAE401me8E8) ← idToken (1h) ← uid لە JWT claims ← **POST api.chatbotapp.ai/api/v2/chat {botId, sessionId:20hex, userPseudoId:"rand.ts", hubxId:uuid, message:{prompt, messageId:uuid}, actions:{webSearch:createImage:deepSearch:privateSearch:false}} + سەرەکان بە ژێرهەڵمەت: x_token, x_user_id, x_platform:web, x_model:<botId> + accept:text/event-stream** ← SSE `data_content` ← content.parts[].text → یەکخستن (modelVersion=ناوی agent)
+- **نەخشەی botId لە کاتالۆگی webcms (/api/ai-models — فیلدی botId):** gpt=104-122, gemini=200-207, deepseek=301-303, grok=403-409, claude=501-511, codex=700, kimi=1100... — ٤٣ دەقی تۆمارکراو؛ sync ی ٦ کاتژمێر
+- **کوانتا:** کرێدیت بۆ هەر ئەکاونت (~٥ بەیسی) → «Insufficient chat credit» (1001) → حەوزی ئەکاونت (cb_accounts.json) → تەواو بوونی هەموو ← **خۆکارانە ئەکاونتی نوێ signUp** (komex82400+@duidir.com، سەقاتی ٢٠/ڕۆژ، زۆرترین ٤٠) = بێسنووری پراکتیکی
+- «No agent mapping» → مۆدێڵ دەبردرێت (کاتالۆگ دەگۆڕدرێت لەلایەنیان)
+- مێژوو فلێت: [Instructions]/[User]/[Assistant] — ١٢ ترە
