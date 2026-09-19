@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0, "al": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad", "al_ok", "al_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -4586,6 +4586,176 @@ def sync_nv_models(force=False):
         print(f"[NV-SYNC] {str(e)[:80]}", flush=True)
 
 
+# ══════════ AllChatBots (allchatbots.ai) — §2.33 — Supabase + کوکی سێشن ══════════
+# تێبینی: سایتەکە پارەدارە — بێ سەبسکریپشن 402 دەدات → tier=x (فەیلئۆڤەری خۆکار بۆ هەمان مۆدێڵ لە سەرچاوەکانی تر)
+# ئەگەر ئەکاونتەکە سەبسکریپشی هەبوو → tier بگۆڕە بۆ f و هەموو ٤٨ مۆدێڵ ڕاستەوخۆ کار دەکەن
+AL_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlbHpxd2R4Zml0YXprcmt0eWtlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNTQ0OTMsImV4cCI6MjA5MjczMDQ5M30.3xKzSovrFhxu-ptma0-u_5QweO0QHjeBqWoLTbRasY0"
+AL_SB = "https://felzqwdxfitazkrktyke.supabase.co"
+AL_BASE = "https://allchatbots.ai"
+AL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+AL_COOKIE = "sb-felzqwdxfitazkrktyke-auth-token"
+AL_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "al_accounts.json")
+AL_ST = {"sess": None, "sess_t": 0.0, "idx": 0,
+         "accounts": [{"email": "pimeyax560@dreameg.com", "password": "pimeyax560@dreameg.com"}]}
+_AL_SYNC = {"t": 0.0}
+AL_MODELS = {
+    "gpt-6-astra": "GPT-6 Astra", "gpt-5.6-sol": "GPT-5.6 Sol", "gpt-5.6-terra": "GPT-5.6 Terra",
+    "gpt-5.6-luna": "GPT-5.6 Luna", "gpt-5.5": "GPT-5.5", "gpt-5.4": "GPT-5.4",
+    "gpt-5.4-mini": "GPT-5.4 mini", "gpt-5.4-nano": "GPT-5.4 nano", "gpt-5": "GPT-5",
+    "gpt-5-mini": "GPT-5 mini", "gpt-5-nano": "GPT-5 nano", "gpt-4.1": "GPT-4.1",
+    "claude-opus-5": "Claude Opus 5", "claude-opus-4-8": "Claude Opus 4.8", "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-opus-4-6": "Claude Opus 4.6", "claude-opus-4-5": "Claude Opus 4.5", "claude-sonnet-5": "Claude Sonnet 5",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6", "claude-sonnet-4-5": "Claude Sonnet 4.5",
+    "claude-haiku-4-5": "Claude Haiku 4.5", "claude-fable-5-1": "Claude Fable 5.1", "claude-fable-5": "Claude Fable",
+    "gemini-3.1-pro": "Gemini 3.1 Pro", "gemini-2.5-pro": "Gemini 2.5 Pro", "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "gemini-3.7-flash": "Gemini 3.7 Flash", "gemini-3.6-flash": "Gemini 3.6 Flash", "gemini-3.5-flash": "Gemini 3.5 Flash",
+    "gemini-2.5-flash": "Gemini 2.5 Flash", "gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
+    "grok-4.6": "Grok 4.6", "grok-4.5": "Grok 4.5", "grok-4": "Grok 4", "grok-3": "Grok 3", "grok-3-mini": "Grok 3 mini",
+    "deepseek-v4-pro": "DeepSeek V4 Pro", "deepseek-v4-flash": "DeepSeek V4 Flash",
+    "deepseek-chat": "DeepSeek V3", "deepseek-reasoner": "DeepSeek R1",
+    "openrouter-auto": "OpenRouter Auto", "kimi-k3": "Kimi K3", "moonshot-32k": "Moonshot v1 32k",
+    "moonshot-128k": "Moonshot v1 128k", "mistral-large": "Mistral Large", "mistral-medium": "Mistral Medium",
+    "mistral-small": "Mistral Small", "auto": "Auto"}
+
+
+def _al_load_acc():
+    import json as _j
+    try:
+        d = _j.load(open(AL_ACC_FILE, encoding="utf-8"))
+        if d.get("accounts"):
+            AL_ST["accounts"] = d["accounts"]
+        AL_ST["idx"] = int(d.get("idx") or 0)
+    except Exception:
+        pass
+
+
+def _al_save_acc():
+    import json as _j
+    try:
+        _j.dump({"accounts": AL_ST.get("accounts") or [], "idx": AL_ST["idx"]},
+                open(AL_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_al_load_acc()
+
+
+def _al_login(force=False):
+    """چوونەژوورەوەی Supabase — سێشن (~٥٠ خولەک کاش)"""
+    import time as _t
+    if not force and AL_ST.get("sess") and _t.time() - AL_ST.get("sess_t", 0) < 2700:
+        return AL_ST["sess"]
+    accs = AL_ST.get("accounts") or []
+    if not accs:
+        raise EMError("al: هیچ ئەکاونت")
+    acc = accs[AL_ST["idx"] % len(accs)]
+    try:
+        r = requests.post(AL_SB + "/auth/v1/token?grant_type=password",
+                          headers={"apikey": AL_KEY, "Content-Type": "application/json"},
+                          json={"email": acc["email"], "password": acc["password"]}, timeout=(10, 25))
+    except Exception as e:
+        raise EMError(f"al: {str(e)[:60]}")
+    if r.status_code != 200 or not (r.json() or {}).get("access_token"):
+        raise EMError("al: چوونەژوورەوە شکست")
+    AL_ST["sess"] = r.json()
+    AL_ST["sess_t"] = _t.time()
+    _al_save_acc()
+    return AL_ST["sess"]
+
+
+def al_chat(messages, model_id, timeout=110):
+    """چاتی AllChatBots — کوکی سێشن + /api/chat — 402 → فەیلئۆڤەر"""
+    sess = _al_login()
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if role == "system":
+            lines.append("[Instructions] " + c)
+        elif role == "user":
+            lines.append("[User] " + c)
+        else:
+            lines.append("[Assistant] " + c)
+    if not lines:
+        raise EMError("al: هیچ نامە")
+    lines.append("[Assistant]")
+    prompt = "\n".join(lines)[-6000:]
+    H = {"User-Agent": AL_UA, "Content-Type": "application/json",
+         "Origin": "https://allchatbots.ai", "Referer": "https://allchatbots.ai/"}
+    ck = {AL_COOKIE: json.dumps(sess)}
+    body = {"messages": [{"role": "user", "content": prompt}], "modelId": model_id, "stream": False}
+    for attempt in range(2):
+        try:
+            r = requests.post(AL_BASE + "/api/chat", json=body, headers=H, cookies=ck, timeout=(15, timeout))
+        except Exception as e:
+            raise EMError(f"al: {str(e)[:60]}")
+        if r.status_code in (401, 403) and attempt == 0:
+            sess = _al_login(force=True)
+            ck = {AL_COOKIE: json.dumps(sess)}
+            continue
+        if r.status_code == 402:
+            raise EMError("al: پرێمیۆمی-قورس — بە پارە بەردەستە")  # → فەیلئۆڤەری هەمان مۆدێڵ
+        if r.status_code == 429:
+            raise EMError("al: لیمیت")
+        if r.status_code != 200:
+            raise EMError(f"al: HTTP{r.status_code}")
+        ct = (r.headers.get("content-type") or "")
+        if "text/event" in ct:
+            parts = []
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    d = json.loads(line[5:].strip())
+                except Exception:
+                    continue
+                for k in ("content", "text", "delta"):
+                    v = d.get(k)
+                    if isinstance(v, str):
+                        parts.append(v)
+                        break
+            ans = "".join(parts).strip()
+        else:
+            try:
+                j = r.json()
+            except Exception:
+                raise EMError("al: وەڵامی نەناسراو")
+            ans = ""
+            for cand in (j.get("content"), j.get("message"), j.get("text"),
+                         (j.get("choices") or [{}])[0].get("message", {}).get("content") if isinstance(j.get("choices"), list) else None):
+                if isinstance(cand, str) and cand.strip():
+                    ans = cand.strip()
+                    break
+        if ans:
+            return ans
+        raise EMError("al: بەتاڵ")
+    raise EMError("al: شکست")
+
+
+def al_servers():
+    out = []
+    for k, lbl in sorted(AL_MODELS.items()):
+        slug = re.sub(r"[^a-z0-9]+", "-", str(k).lower()).strip("-") or "model"
+        out.append({"id": f"al-{slug}", "name": f"{lbl} (AL)", "model_id": k, "kind": "al"})
+    return out
+
+
+def sync_al_models(force=False):
+    """تۆمارکردنی کاتالۆگی AL — ٦ کاتژمێر (لیستی ناو-کۆد — لە چانکەکانی فرۆنتئێند دەرهێنراوە)"""
+    import time as _t
+    if not force and _t.time() - _AL_SYNC["t"] < 21600:
+        return
+    _AL_SYNC["t"] = _t.time()
+    ok = {k: {"label": lbl, "tier": "x"} for k, lbl in AL_MODELS.items()}
+    if ok:
+        MS["al_ok"] = ok
+        _ms_save()
+        print(f"[AL-SYNC] تۆمارکراو {len(ok)}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -5052,6 +5222,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = ac_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "nv":
                     content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "al":
+                    content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -5120,6 +5292,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = ac_chat(nmsgs, nsrv["model_id"])
                     elif k == "nv":
                         content = nv_chat(nmsgs, nsrv["model_id"])
+                    elif k == "al":
+                        content = al_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -5213,7 +5387,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|novaapp|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|novaapp|allchatbots|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -5305,6 +5479,8 @@ def detect_brain(allow_fallback=True):
         servers += ac_servers()
         sync_nv_models()
         servers += nv_servers()
+        sync_al_models()
+        servers += al_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -5323,6 +5499,7 @@ def detect_brain(allow_fallback=True):
         sync_ca_models()
         sync_ac_models()
         sync_nv_models()
+        sync_al_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -5730,6 +5907,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "nv"
+            if k == "al":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = al_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "al"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -5864,6 +6047,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "nv"
+                if k == "al":
+                    a = al_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "al"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
