@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2264,6 +2264,139 @@ def sync_ct_models(force=False):
     if added:
         _ms_save()
     print(f"[CT-SYNC] chattide: {len(found)} دۆزرا، {added} زیادکرا، ct_ok={len(MS.get('ct_ok', {}))}", flush=True)
+
+
+# ══════════ Yollo AI (yollo.ai) — §2.21 — بێ لیمیت بۆ دەق (پارە لە وێنە/ڤیدیۆ) ══════════
+YL_BASE = "https://www.yollo.ai"
+YL_BOT = 147747
+YL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+_YL = {"tok": "", "sid": "", "finger": "", "t": 0.0}
+
+
+def _yl_headers(finger, tok=None, ct=True):
+    hd = {"User-Agent": YL_UA, "x-platform": "web", "x-version": "999.0.0",
+          "x-finger": finger, "x-language": "en", "Origin": YL_BASE,
+          "Referer": YL_BASE + "/ar/chat"}
+    if ct:
+        hd["Content-Type"] = "application/json"
+    if tok:
+        hd["x-auth-token"] = tok
+    return hd
+
+
+def _yl_identity(force=False):
+    """میوانی نوێ: createGuest → loginByGuest (JWT ٣٠ ڕۆژ) → createSession — بێ captcha"""
+    import time as _t
+    import hashlib as _hl
+    if not force and _YL["tok"] and _YL["sid"] and _t.time() - _YL["t"] < 4 * 86400:
+        return
+    finger = _hl.md5(("yl" + str(_t.time_ns()) + str(random.random())).encode()).hexdigest()
+    g = requests.post(YL_BASE + "/api/auth/createGuest", headers=_yl_headers(finger, ct=False), timeout=(10, 20)).json()
+    d = g.get("data") or {}
+    if not d.get("guestUid"):
+        raise EMError(f"yl: createGuest {str(g)[:60]}")
+    r2 = requests.post(YL_BASE + "/api/auth/loginByGuest", headers=_yl_headers(finger), json=d, timeout=(10, 20)).json()
+    tok = (r2.get("data") or {}).get("idToken")
+    if not tok:
+        raise EMError(f"yl: login {str(r2)[:60]}")
+    r3 = requests.post(YL_BASE + "/api/msg/createSession", params={"botId": YL_BOT},
+                       headers=_yl_headers(finger, tok=tok, ct=False), timeout=(10, 20)).json()
+    sid = (r3.get("data") or {}).get("id")
+    if not sid:
+        raise EMError(f"yl: session {str(r3)[:60]}")
+    _YL.update(tok=tok, sid=str(sid), finger=finger, t=_t.time())
+
+
+def yl_chat(messages, model_id="yollo-chat", timeout=120):
+    """چاتی yollo.ai — مێژوو لە کلایەنتەوە (سیستەم-پرۆمپتی خۆمان) — دەق بێ لیمیت"""
+    import time as _t
+    if not messages:
+        raise EMError("yl: هیچ نامە")
+    last = ""
+    for m in reversed(messages):
+        if m.get("role") == "user" and m.get("content"):
+            last = m["content"]
+            break
+    if not last:
+        last = messages[-1].get("content") or ""
+    hist = [{"role": m.get("role", "user"), "content": m.get("content") or ""}
+            for m in messages if m.get("content")]
+    if hist and hist[-1]["role"] == "user" and hist[-1]["content"] == last:
+        hist = hist[:-1]
+    lasterr = None
+    for attempt in range(2):
+        try:
+            _yl_identity(force=(attempt == 1))
+        except Exception as e:
+            lasterr = e
+            continue
+        body = {"message": last, "sessionId": _YL["sid"], "conversationHistory": hist[-21:],
+                "userToken": _YL["tok"], "userLocale": "en", "isRegenerate": False,
+                "isSafeMode": False, "generateType": 0}
+        try:
+            r = requests.post(YL_BASE + "/chat-stream", json=body,
+                              headers=_yl_headers(_YL["finger"]), timeout=(15, timeout), stream=True)
+        except Exception as e:
+            lasterr = EMError(f"yl: {str(e)[:60]}")
+            continue
+        if r.status_code != 200:
+            lasterr = EMError(f"yl: {r.status_code}")
+            _YL["tok"] = ""
+            continue
+        out = []
+        bad = None
+        for line in r.text.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            p = line[5:].strip()
+            if not p:
+                continue
+            try:
+                j = json.loads(p)
+            except Exception:
+                continue
+            ty = j.get("type")
+            if ty == "content":
+                out.append(j.get("content") or "")
+            elif ty == "end":
+                break
+            elif ty in ("error", "errorMsg") or j.get("error") or "error" in str(ty or "").lower():
+                bad = str(j.get("message") or j)[:80]
+                break
+        ans = "".join(out).strip()
+        if ans:
+            return ans
+        lasterr = EMError(f"yl: {bad or 'وەڵام بەتاڵ'}")
+        _YL["sid"] = ""
+    raise lasterr or EMError("yl: شکست")
+
+
+def yl_servers():
+    out = []
+    for mid in list(MS.get("yl_ok", {}).keys())[:3] or ["yollo-chat"]:
+        out.append({"id": "yl-yollo-chat", "name": "Yollo Chat",
+                    "model_id": mid, "kind": "yl"})
+    return out
+
+
+def sync_yl_models(force=False):
+    """ئۆتۆ-ئەپدێتی yollo: پشکنینی زیندووی فلۆوی میوان (٦ کاتژمێر) — مۆدێڵی چات لە سێرڤەرەوە شاراوەیە"""
+    import time as _t
+    if not force and _t.time() - MS_T.get("yl", 0.0) < 21600:
+        return
+    MS_T["yl"] = _t.time()
+    try:
+        r = requests.get(YL_BASE + f"/api/bot?botId={YL_BOT}",
+                         headers={"User-Agent": YL_UA}, timeout=(10, 20))
+        if r.status_code != 200:
+            print(f"[YL-SYNC] بۆت ڕێک نەگەیشت: {r.status_code}", flush=True)
+            return
+        MS.setdefault("yl_ok", {})["yollo-chat"] = {"t": _t.time()}
+        _ms_save()
+        print("[YL-SYNC] yollo زیندووە — yollo-chat ئامادە", flush=True)
+    except Exception as e:
+        print(f"[YL-SYNC] هەڵە: {str(e)[:80]}", flush=True)
 
 
 def _ms_dup(servers, model_id):
@@ -2708,6 +2841,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "ct":
                     content = ct_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "yl":
+                    content = yl_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2752,6 +2887,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = g4f_chat(nmsgs, nsrv["model_id"])
                     elif k == "ct":
                         content = ct_chat(nmsgs, nsrv["model_id"])
+                    elif k == "yl":
+                        content = yl_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2845,7 +2982,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2913,12 +3050,15 @@ def detect_brain(allow_fallback=True):
         servers += _g4f_models()
         sync_ct_models()
         servers += ct_servers()
+        sync_yl_models()
+        servers += yl_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
     try:
         sync_l7_models()
         sync_ct_models()
+        sync_yl_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3254,6 +3394,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "ct"
+            if k == "yl":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = yl_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "yl"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3328,6 +3474,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "ct"
+                if k == "yl":
+                    a = yl_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "yl"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

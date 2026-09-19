@@ -360,3 +360,18 @@
   - l7 ساختە (zz-fake-model-xyz) → 400 → خۆکارانە لابرا + چووە bad ✅
   - دیوارەکەی (Windows: Syntax error) لە وێنەکە = تەنها هەڵەی ڕووکاری فەرمانی داگرتن بوو — هیچ کاریگەری نەبوو
 - deploy #53 ✅
+
+## #54 — Yollo AI (yollo.ai) زیادکرا (§2.21) + chatx.ai داخرا ❌
+- داواکاری بەکارهێنەر: «یەکەم جار yollo.ai زیادکە فەقەت مۆدێلی چات، بزانە چی بەکاردێنێ، بێ لیمیت بێ و ئۆتۆئەپدێت بێ… دواتر chatx.ai/gpt بپشکنە و زیادی کە»
+- **✅ Yollo — کرێکردنەوەی تەواو:**
+  - فلۆو: POST /api/auth/createGuest (x-finger ڕاندۆم) → /api/auth/loginByGuest ← JWT (٣٠ ڕۆژ!) → /api/msg/createSession?botId=147747 ← sessionId → **POST /chat-stream** ← SSE `data:{"type":"content","content":…}` + `type:"end"`
+  - **مێژوو لە کلایەنتەوە دێت** — سیستەم-پرۆمپتی خۆمان لە conversationHistory کار دەکات (سەلمێندرا بە کوردی سۆرانی) — `msg/send` پێویست نییە
+  - **مۆدێڵەکەی:** لە سێرڤەرەوە شاراوەیە (تۆماری بۆت بێ فیدی مۆدێڵ) — یەک مۆدێڵی چات: «Yollo Chat» (id: yollo-chat)
+  - **لیمیت:** ١٤+ چات لەسەر هەمان میوان — هیچ کوانتایەک بۆ دەق نییە (پارەیان لە وێنە/ڤیدیۆیە)؛ پاشبنەما: ڕۆتەیشنی میوان (بێ captcha) + ڕۆتەیشنی سێشن — لە yl_chat: هەوڵی دووەم بە ناسنامەی نوێ
+  - **§2.21:** kind "yl" + _YL cache (JWT/سێشن ٤ ڕۆژ) + yl_chat + yl_servers + sync_yl_models (٦ کاتژمێر — پشکنینی زیندووی فلۆو) + زنجیرە ×٢ (TG/API) + LEAK_RE (\byollo\b)
+  - **تاقیکراوە:** ٣/٣ چات ✅ + فرە-خول ✅ | تەنها مۆدێڵی چات زیادکرا (وێنە/ڤیدیۆ نەکراون — داواکاری «فەقەت مۆدێلی چات»)
+- **❌ chatx.ai/gpt — داخرا بە Turnstile:**
+  - کاتالۆگەکەی دەوڵەمەندە: GPT-5.5/5.3، o3/o1، GPT-5 nano (ئازاد)، Gemini/Pro، Claude Haiku/Sonnet/Opus/Fable، DeepSeek Flash/Pro — ئازاد: ١٠k تۆکن/ڕۆژ (ڕیسێت ٠٠:٠٠ بەرلین)
+  - **ناردن بە Cloudflare Turnstile دەپارێزرێت** (sitekey 0x4AAAAAAC_cZtVlrKQgA_T-) — headless: تۆکن هەرگیز نایەت (٤ تاقیکردنەوە: چاوەڕوانی خۆکار، کلیکی iframe، کلیکی کۆوردینات — هەموو بەتاڵ) → `{"turnstile_required":true}`
+  - فۆرماتی sendchat تۆمارکرا بۆ داهاتوو: POST /sendchat {_token CSRF, user_id, chats_id, prompt, current_model, cf-turnstile-response} — ئەگەر چارەسەری Turnstile هەبوو، جێبەجێکردنی ئامادەیە
+  - بڕیار: وەک arena.ai (recaptcha-v3) — بێ چارەسەر دووبارە ناگەڕێیەوە
