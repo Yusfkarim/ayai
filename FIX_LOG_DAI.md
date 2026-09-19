@@ -259,3 +259,13 @@
 - auto_refresh + ask rebind + smart_rebind: هەموو بە srv_key/MODEL_SOURCES — کاتی گۆڕان هیچ دەست لێنادرێت
 - deploy #45 ✅ → /health ٨٨ سەرچاوە | /v1/models ٦٨ مۆدێڵ (luna = یەک دەنگ ✅)
 - Fly: z02-gpt-5.6-luna → «OK45» ✅ | commit 73e2514
+
+## #46 — گەڕانی ئۆتۆماتیکی سەرچاوەی نوێ (بێ deploy) — توێژینەوە
+- **arena.ai (lmarena.ai):** ٩٩٪ کراوە —anon JWT خۆکار (invisible reCAPTCHA پاس دەکات) + زنجیرەی تەواو دۆزرا: POST /nextjs-api/sign-up → cookie arena-auth-prod-v1 → POST /api/me/update-tou-consent → POST /nextjs-api/stream/create-evaluation {id,mode:battle,userMessageId,modelA/BMessageId,userMessage:{content},modality:chat,recaptchaV3Token}
+  - ❌ بەربەست: create-evaluation → 403 {"error":"recaptcha validation failed"} — reCAPTCHA v3 نمرە بۆ datacenter/headless+headed-xvfb نزم؛ مۆداڵی «I'm not a robot» دەردەکەوێت؛ A/B هەتاھەتایە Generating
+  - داخراو تا reCAPTCHA v3 بە متمانە پاس بێت
+- **chat.qwen.ai:** /api/models کراوە (qwen3.7-plus, qwen3.8-max, qwen3.8-omni-flash) بەڵام چات = login-modal (guest بلۆک) + API ڕاستەوخۆ 504 alibaba-ga. داخراو
+- **sdk.vercel.ai:** بووە ai-sdk.dev (دۆک) — /api/generate, /api/prompt چیتر چالاک نییە
+- **monica.im/home:** ئەپی وێب = Sign Up بەربەست (Google/Email/Apple) + reCAPTCHA/geetest — داخراو
+- **poe/mistral/helixmind:** 403 CF | deepseek 202-b0 | typegpt/freegpt/aiwnie: DNS مردوو
+- سیستەم نەگۆڕا — هێشتا #45 (٨٨/٦٨) لەسەرە
