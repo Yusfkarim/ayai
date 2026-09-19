@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -4248,6 +4248,289 @@ def sync_ac_models(force=False):
         print(f"[AC-SYNC] {str(e)[:80]}", flush=True)
 
 
+# ══════════ Nova (chat.novaapp.ai) — §2.32 — Firebase + حەوزی ئەکاونت + خۆکار-ساینئەپ ══════════
+NV_KEY = "AIzaSyAOuqWxL44t4n0_uF00qj7jh8kmb8Ly9s0"
+NV_BASE = "https://api.novaapp.ai"
+NV_CMS = "https://webcms.novaapp.ai/api/ai-models?populate[]=tags&populate[]=examples&populate[]=suggestions&pagination[pageSize]=100"
+NV_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+NV_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nv_accounts.json")
+NV_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82416,
+         "accounts": [{"email": "komex82414@duidir.com", "password": "komex82414@duidir.com"},
+                      {"email": "komex82415@duidir.com", "password": "komex82415@duidir.com"}],
+         "exhausted": {}, "signups": {"date": "", "n": 0}}
+_NV_SYNC = {"t": 0.0}
+# مۆدێڵی هەرزان — بە botId دەناسرێتەوە (کاتالۆگ بە modelKey دەگۆڕدرێت بەڵام botId جێگیرە)
+NV_FREE_BOTS = {0: "4o-mini", 44: "claude-4.5-haiku", 10: "gemini-2.5-flash", 21: "deepSeek"}
+NV_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-search", "superbot", "aiapp", "chatbotapp", "youtube-summarizer", "image-generator", "logo-generator", "tattoo-generator", "nova", "auto"}
+
+
+def _nv_load_acc():
+    import json as _j
+    try:
+        d = _j.load(open(NV_ACC_FILE, encoding="utf-8"))
+        NV_ST["accounts"] = d.get("accounts") or NV_ST["accounts"]
+        NV_ST["idx"] = int(d.get("idx") or 0)
+        NV_ST["next_num"] = int(d.get("next_num") or 82416)
+        NV_ST["exhausted"] = d.get("exhausted") or {}
+        NV_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+    except Exception:
+        pass
+
+
+def _nv_save_acc():
+    import json as _j
+    try:
+        _j.dump({"accounts": NV_ST.get("accounts") or [], "idx": NV_ST["idx"],
+                 "next_num": NV_ST["next_num"], "exhausted": NV_ST.get("exhausted") or {},
+                 "signups": NV_ST.get("signups") or {"date": "", "n": 0}},
+                open(NV_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_nv_load_acc()
+
+
+def _nv_firebase(ep, email, pw):
+    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/accounts:{ep}?key={NV_KEY}",
+                      json={"email": email, "password": pw, "returnSecureToken": True},
+                      headers={"User-Agent": NV_UA}, timeout=(10, 25))
+    if r.status_code != 200:
+        return None
+    j = r.json() or {}
+    tok = j.get("idToken")
+    if not tok:
+        return None
+    return tok, j.get("localId") or ""
+
+
+def _nv_signup_new():
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    sg = NV_ST.get("signups") or {"date": "", "n": 0}
+    if sg.get("date") != today:
+        sg = {"date": today, "n": 0}
+    if sg.get("n", 0) >= 20 or len(NV_ST.get("accounts") or []) >= 40:
+        return None
+    import time as _ts
+    n = NV_ST["next_num"]
+    for attempt in range(2):
+        for _ in range(6):
+            email = f"komex{n}@duidir.com"
+            res = _nv_firebase("signUp", email, email)
+            if res:
+                NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
+                NV_ST["idx"] = len(NV_ST["accounts"]) - 1
+                NV_ST["next_num"] = n + 1
+                sg["n"] = sg.get("n", 0) + 1
+                NV_ST["signups"] = sg
+                NV_ST["tok"] = None
+                _nv_save_acc()
+                print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
+                return res
+            n += 1
+            _ts.sleep(1.5)
+        NV_ST["next_num"] = n
+        if attempt == 0:
+            _ts.sleep(5)  # rate-limit — دووبارە
+    _nv_save_acc()
+    return None
+
+
+def _nv_token():
+    import time as _t
+    if NV_ST.get("tok") and NV_ST.get("uid") and _t.time() - NV_ST.get("tok_t", 0) < 2700:
+        return NV_ST["tok"], NV_ST["uid"]
+    accs = NV_ST.get("accounts") or []
+    if accs:
+        acc = accs[NV_ST["idx"] % len(accs)]
+        res = _nv_firebase("signInWithPassword", acc["email"], acc["password"])
+        if res:
+            NV_ST["tok"], NV_ST["uid"] = res
+            NV_ST["tok_t"] = _t.time()
+            return res
+    resn = _nv_signup_new()
+    if not resn:
+        raise EMError("nv: هیچ ئەکاونت")
+    NV_ST["tok"], NV_ST["uid"] = resn
+    NV_ST["tok_t"] = _t.time()
+    return resn
+
+
+def _nv_rotate():
+    import time as _ts
+    accs = NV_ST.get("accounts") or []
+    if not accs:
+        return bool(_nv_signup_new())
+    ex = NV_ST.get("exhausted") or {}
+    now = _ts.time()
+    for _ in range(len(accs)):
+        NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+        acc = accs[NV_ST["idx"]]
+        if float(ex.get(acc["email"], 0)) > now:
+            continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
+        NV_ST["tok"] = None
+        _nv_save_acc()
+        return True
+    res = _nv_signup_new()
+    if res:
+        return True
+    # فەرموودەی کۆتایی — ئەگەر ساینئەپ شکست خوارد، هەر ئەکاونتێک (تەنانەت ساردبوو)
+    NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+    NV_ST["tok"] = None
+    _nv_save_acc()
+    return True
+
+
+def nv_chat(messages, model_id, timeout=110):
+    """چاتی Nova — هەمان فلۆوی §2.29 + حەوزی ئەکاونت (٥ نامەی خۆڕایی/ئەکاونت)"""
+    import time as _t, uuid as _u
+    meta = (MS.get("nv_ok") or {}).get(model_id)
+    if not meta:
+        raise EMError("nv: مۆدێڵ نییە")
+    bot_id = meta.get("botId") or 0
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if role == "system":
+            lines.append("[Instructions] " + c)
+        elif role == "user":
+            lines.append("[User] " + c)
+        else:
+            lines.append("[Assistant] " + c)
+    if not lines:
+        raise EMError("nv: هیچ نامە")
+    lines.append("[Assistant]")
+    prompt = "\n".join(lines)[-6000:]
+    last_err = ""
+    for attempt in range(min(len(NV_ST.get("accounts") or [1]) + 1, 8)):
+        try:
+            tok, uid = _nv_token()
+        except EMError:
+            if not _nv_rotate():
+                raise
+            continue
+        H = {"User-Agent": NV_UA, "Content-Type": "application/json", "accept": "text/event-stream",
+             "X_Token": tok, "X_User_Id": uid, "X_Platform": "web", "X_Model": str(bot_id),
+             "Origin": "https://chat.novaapp.ai", "Referer": "https://chat.novaapp.ai/"}
+        body = {"botId": bot_id, "sessionId": _u.uuid4().hex[:20],
+                "userPseudoId": f"{_u.uuid4().int % 10 ** 9}.{int(_t.time())}",
+                "hubxId": str(_u.uuid4()),
+                "message": {"prompt": prompt, "messageId": str(_u.uuid4())},
+                "actions": {"webSearch": False, "createImage": False, "deepSearch": False, "privateSearch": False}}
+        try:
+            r = requests.post(NV_BASE + "/api/v2/chat", json=body, headers=H,
+                              timeout=(15, timeout), stream=True)
+        except Exception as e:
+            raise EMError(f"nv: {str(e)[:60]}")
+        if r.status_code != 200:
+            raw = b""
+            try:
+                for ch in r.iter_content(chunk_size=None):
+                    raw += ch
+                    if len(raw) > 300:
+                        break
+            except Exception:
+                pass
+            msg = ""
+            try:
+                msg = (json.loads(raw.decode("utf-8", "replace")).get("data") or {}).get("message", "")
+            except Exception:
+                msg = raw[:60].decode("utf-8", "replace")
+            last_err = msg or str(r.status_code)
+            if "Insufficient chat credit" in msg:
+                accs = NV_ST.get("accounts") or []
+                if accs:
+                    acc = accs[NV_ST["idx"] % len(accs)]
+                    NV_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 600  # کۆڵ ١٠ خولەک
+                if not _nv_rotate():
+                    raise EMError("nv: حەوزی ئەکاونتەکان تەواوە")
+                _t.sleep(1.5)
+                continue
+            if "No agent mapping" in msg:
+                MS.setdefault("nv_bad", {})[model_id] = {"t": _t.time(), "why": "no-mapping"}
+                MS.get("nv_ok", {}).pop(model_id, None)
+                _ms_save()
+                raise EMError("nv: مۆدێڵ نەماوە")
+            raise EMError(f"nv: {last_err[:60]}")
+        parts = []
+        for line in r.iter_lines(decode_unicode=True):
+            if not line.startswith("data:"):
+                continue
+            try:
+                d = json.loads(line[5:].strip())
+            except Exception:
+                continue
+            dd = d.get("data") or {}
+            if isinstance(dd, dict):
+                c = dd.get("content")
+                if isinstance(c, dict) and c.get("parts"):
+                    for p in c["parts"]:
+                        if isinstance(p, dict) and p.get("thought"):
+                            continue  # پارچەی بیرکردنەوە — فڕێدان
+                        parts.append((p or {}).get("text", "") if isinstance(p, dict) else str(p))
+        if not parts:
+            NV_ST["tok"] = None
+            last_err = "بەتاڵ"
+            continue
+        # پترن: دێڵتا زیادەکان + لە کۆتایی ڕووداوی کۆتایی-کۆکراو
+        if len(parts) > 1 and parts[-1].startswith("".join(parts[:-1])):
+            ans = parts[-1].strip()
+        else:
+            ans = "".join(parts).strip()
+        if ans:
+            return ans
+        last_err = "بەتاڵ"
+        NV_ST["tok"] = None
+    raise EMError(f"nv: {last_err[:60] or 'شکست'}")
+
+
+def nv_servers():
+    out = []
+    for k, meta in sorted((MS.get("nv_ok") or {}).items()):
+        out.append({"id": f"nv-{re.sub(r'[^a-z0-9]+', '-', str(k).lower()).strip('-') or 'model'}",
+                    "name": f"{(meta or {}).get('label') or k} (NV)", "model_id": k, "kind": "nv"})
+    return out
+
+
+def sync_nv_models(force=False):
+    """ئۆتۆ-ئەپدێتی Nova: کاتالۆگی webcms — تەنها مۆدێڵی هەرزان (botId ∈ NV_FREE_BOTS)"""
+    import time as _t
+    if not force and _t.time() - _NV_SYNC["t"] < 21600:
+        return
+    _NV_SYNC["t"] = _t.time()
+    try:
+        r = requests.get(NV_CMS, headers={"User-Agent": NV_UA, "Origin": "https://chat.novaapp.ai",
+                                          "Referer": "https://chat.novaapp.ai/"}, timeout=(10, 40))
+        if r.status_code != 200:
+            print(f"[NV-SYNC] catalog {r.status_code}", flush=True)
+            return
+        items = (r.json() or {}).get("data") or []
+        ok = {}
+        for m in items:
+            k = (m or {}).get("modelKey") or ""
+            b = m.get("botId")
+            if not k or k in NV_SKIP_KEYS:
+                continue
+            if (m.get("type") or "") != "text" or m.get("hidden") or m.get("isDeprecated"):
+                continue
+            if b not in NV_FREE_BOTS:
+                continue  # پرێمیۆم — بەبێ پارە ناکرێت
+            lbl = m.get("title") or k
+            if lbl.startswith("models."):
+                lbl = NV_FREE_BOTS[b]
+            ok[k] = {"botId": b, "label": lbl}
+        if ok:
+            MS["nv_ok"] = ok
+            _ms_save()
+            print(f"[NV-SYNC] کاتالۆگ {len(items)} → تۆمارکراو {len(ok)}", flush=True)
+    except Exception as e:
+        print(f"[NV-SYNC] {str(e)[:80]}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -4712,6 +4995,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = ca_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "ac":
                     content = ac_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "nv":
+                    content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -4778,6 +5063,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = ca_chat(nmsgs, nsrv["model_id"])
                     elif k == "ac":
                         content = ac_chat(nmsgs, nsrv["model_id"])
+                    elif k == "nv":
+                        content = nv_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -4871,7 +5158,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|novaapp|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -4961,6 +5248,8 @@ def detect_brain(allow_fallback=True):
         servers += ca_servers()
         sync_ac_models()
         servers += ac_servers()
+        sync_nv_models()
+        servers += nv_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -4978,6 +5267,7 @@ def detect_brain(allow_fallback=True):
         sync_cb_models()
         sync_ca_models()
         sync_ac_models()
+        sync_nv_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -5379,6 +5669,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "ac"
+            if k == "nv":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = nv_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "nv"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -5508,6 +5804,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "ac"
+                if k == "nv":
+                    a = nv_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "nv"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

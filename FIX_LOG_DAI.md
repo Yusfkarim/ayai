@@ -500,3 +500,12 @@
 - **نەخشەی ٢٦ مۆدێڵ لە HTML** (هەمان پارسەری Nuxt) — kimi-k2.6-thinking + gpt-5.4-mini-deep-research زیاترن لە chatbotai.co
 - ساینئەپ پاکی: signUp ← cerebro bootstrap ← حەوز (komex82407+، ٢٠/ڕۆژ، ٤٠ زۆرترین)
 - **#65 Fly-verified:** /health **197** | /v1/models **137** (ac-gpt-5-4-nano = دووەکی لەگەڵ ca-nano → فەڵباکی هەمان-مۆدێڵ) | چات لە Fly: ac-gpt-5-4-nano **«32»** ✅ (٤.١s) | سەندبۆکس: nano «81» (٢s) | head **ecebd5d**
+
+## #68 — §2.32 Nova (chat.novaapp.ai) — 2026-09-19
+- **سەرچاوەی نوێ:** chat.novaapp.ai (خێزانی AiApp — هەمان chatbotapp).
+- **چات:** POST api.novaapp.ai/api/v2/chat — SSE. Headers: X_Token (Firebase idToken) + X_User_Id (uid) + X_Platform:web. Firebase AIzaSyAOuqWxL44t4n0_uF00qj7jh8kmb8Ly9s0.
+- **کاتالۆگ/ئۆتۆ-ئەپدێت:** webcms.novaapp.ai/api/ai-models (76 مۆدێڵ) — هەر ٦ کاتژمێر سینک؛ تەنها ٤ مۆدێڵی خۆڕایی (botId 0/44/10/21 = 4o-mini, claude-4.5-haiku, gemini-2.5-flash, deepSeek V3.2) تۆمار دەکرێن — پرێمیۆمەکان پارەدارن (1001 لەسەر ئەکاونتی نوێش).
+- **١٠٠١ «Insufficient chat credit»: ڕێژەیی-کاتییە نەک هەمیشەیی!** (٧+ نامە لەسەر یەک ئەکاونت). مامەڵە: کۆڵی ٦٠٠ چرکە بۆ ئەکاونت + ڕۆتەیشن + ساینئەپی خۆکار (komexN@duidir.com، ≤٢٠/ڕۆژ، ≤٤٠ حەوز) + فەرموودەی کۆتایی.
+- **پارسەری SSE:** پارچەی thought=True فڕێدەدرێت (بیرکردنەوەی deepSeek/haiku)؛ دێڵتا زیادەکان + ڕووداوی کۆتایی-کۆکراو (parts[-1].startswith(join(parts[:-1])) → تەنها کۆتایی).
+- **چاکەکان:** nv_ok/nv_bad زیادکران بۆ MS/_ms_load؛ ٤ خاڵی وایەر لە زنجیرە؛ ساینئەپ دوو-تووڕ (پشوو ١.٥/٥ چرکە بۆ rate-limit)؛ LEAK_RE += novaapp.
+- **تاقیکردنەوە:** هەر ٤ مۆدێڵ ✅ (3-6s). کۆی مێشک ١٩١ سێرڤەر.
