@@ -556,3 +556,14 @@
 - **داواکاری کۆتایی بەکارهێنەر:** «ئەوانەی ئیش ناکەن بەڕەسەنی لایببە» — AI/ML (aiml-*) و AllChatBots (al-*) بەتەواوی لابران لە مینیو (سینک بەتاڵ + aiml_servers/al_servers = []). ڕیسێپی تەکنیکی لە کۆددا پارێزراوە — بە فەندز/سەبسکریپشن یەکسەر دەگەڕێنەوە.
 - **Nova:** تەنها ١٥ خۆڕایی (بە ڕەسەن) — پرێمیۆم/نەناسراو لادەبرێت. **ChatbotApp:** تەنها ١٠ خۆڕایی (44 تۆمار → فلتەر بە CB_FREE_BOTS لە sync).
 - ئەنجام: مینیو = تەنها مۆدێڵی ڕەسەن-بێسنوور (~٥٥ دەرچەی تێکەڵ).
+
+## #77 (2026-09-20) — arena.ai + چاککردنی CB-filter
+- **arena.ai زیادکرا** (kind="ar"، §2.36): playwright/chromium وەستاو — login بێ captcha، ناردن لەناو
+  براوزەر (recaptcha Enterprise v3 تەنها لەناو خۆی دروست دەبێت)، وەڵام SSE a0/b0.
+  `ar-battle` لە مێنیو + زنجیرە (پێش pol). ٤٢٩ → cooldown ٣٦٠s. براوزەر ٣٠٠s بێ کار → داخستن.
+  تاقیکراوە: '4'، 'ARENA-OK'، 'SECOND' — هەر سێکیان دروست.
+- **Dockerfile**: playwright + chromium-headless (--with-deps). **requirements.txt**: +playwright.
+- ⚠️ Fly scale memory 256MB → 1024MB (بۆ chromium).
+- **چاککردنی بۆگی CB-sync** (#76 پەسەند نەکراو بوو): `CB_FREE_BOTS` ئێستا فلتەر دەکرێت —
+  تەنها ١٠ بۆتی بەخۆڕایی لە مێنیو (پێشتر هەر ٤٤ بوون بە tier f — ٣٤ heavy بە هەڵە لە مێنیو بوون).
+- **nv_accounts.json**: next_num 82426 → 82430 (حەوزی حیجز).
