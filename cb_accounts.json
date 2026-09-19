@@ -1,17 +1,1 @@
-{
- "accounts": [
-  {
-   "email": "komex82398@duidir.com",
-   "password": "komex82398@duidir.com"
-  },
-  {
-   "email": "komex82399@duidir.com",
-   "password": "komex82399@duidir.com"
-  }
- ],
- "next_num": 82400,
- "idx": 1,
- "exhausted": [],
- "signups_today": 0,
- "signups_date": ""
-}
+{"accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"}, {"email": "komex82399@duidir.com", "password": "komex82399@duidir.com"}], "idx": 1, "next_num": 82400, "exhausted": {"komex82399@duidir.com": 1789848025.327313, "komex82398@duidir.com": 1789848029.936306}, "signups": {"date": "", "n": 0}}

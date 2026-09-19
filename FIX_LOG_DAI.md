@@ -523,3 +523,9 @@
 - **kimi-k3 = botId 123** (هاوبەش لەگەڵ gemini-3-pro/youtube-summarizer — لە کاتالۆگدا بوو بەڵام print [:2] شاراندی) → tier x.
 - **gpt-5.6-sol:** لە کاتالۆگی webcms نییە — تەنها لە لیستی plan-compare ی فرۆنتئێنددایە؛ botId نییە = ناکرێت بە /api/v2/chat بانگ بکرێت (سایتەکەش ناتوانێت). کاتێک Nova زیادژی بکات → خۆکار دەکەوێتە مینیو (سینکی ٦کاتژمێر).
 - **سینکی نوێ:** هەموو modelKey ێک-بە-یەک تۆمار دەکرێت (بێ dedupe بە botId) — codex/gemini/o3-mini/5.4-mini/5.2 جیاکرانەوە + هەر botId ێ نوێی نەناسراو → tier x خۆکار. کۆی: **٥٥ مۆدێڵ** (15f + 2p + 38x).
+
+## #71 — chatbotapp بە شێوازی Nova — 2026-09-19
+- **سوێپی CB بە ئەکاونتی تازە:** ensure-credits لەسەر api.chatbotapp.ai هەیە (200) بەڵام پرێمیۆم ناکاتەوە. **١٠ خۆڕایی:** 104(4o-mini) 107(gpt-4.1-mini) 113(gpt-5.1) 117(gpt-5.4-mini) 200(gemini-2.5-flash) 202(gemini-3-flash) 204(gemini-3.1-flash-lite) 301(deepSeek) 302(dsv4-flash) 502(haiku). **٣٢ پرێمیۆمی-قورس** (opus/sonnet/fable×5، grok×4، gpt-5×6، gemini-pro×2، kimi-k3=1100، codex=700، astra، terra…). HTTP400: 115/501/123/14.
+- **سیستەمی tier بۆ CB:** sync = هەموو مۆدێڵەکان بە tier (f/x)؛ cb_chat: x = ١ هەوڵ + هەڵەی جوان (بێ سووتاندنی ئەکاونت). کۆی تۆمارکراو: **٤٤** (10f + 34x).
+- **چاکی پارسەری CB:** هەمان کێشەی Nova (دێڵتا + کۆتایی-کۆکراو → «OKOK») — چاککرا + پارچەی thought فڕێدرا. ca/ac پاکن (snapshot).
+- ساینئەپی CB: ژمارە کۆنەکان EMAIL_EXISTS — ١٢ هەوڵ لە سوێپ.

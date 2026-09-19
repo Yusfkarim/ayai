@@ -3321,7 +3321,11 @@ CB_BASE = "https://api.chatbotapp.ai"
 CB_CMS = "https://webcms.chatbotapp.ai/api/ai-models?populate[]=tags&populate[]=examples&populate[]=suggestions&pagination[pageSize]=100"
 CB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 CB_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cb_accounts.json")
-CB_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82400,
+CB_FREE_BOTS = {104: "4o-mini", 107: "gpt-4.1-mini", 113: "gpt-5.1", 117: "gpt-5.4-mini",
+                200: "gemini-2.5-flash", 202: "gemini-3-flash", 204: "gemini-3.1-flash-lite",
+                301: "deepSeek", 302: "deepseek-v4-flash", 502: "claude-4.5-haiku"}
+CB_HTTP400_BOTS = {115, 501, 123, 14}  # پێویستیان بە پارامەتری جیاواز
+CB_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82412,
          "exhausted": {}, "ensured": {}, "signups": {"date": "", "n": 0}}
 _CB_SYNC = {"t": 0.0}
 # ئامرازەکان کە چاتی دەقی نین — دەرکراو
@@ -3472,6 +3476,11 @@ def cb_chat(messages, model_id, timeout=110):
     if not meta:
         raise EMError("cb: مۆدێڵ نییە")
     bot_id = meta.get("botId") or 120
+    tier = meta.get("tier") or "f"
+    if tier == "x":
+        max_att = 1
+    else:
+        max_att = min(len(CB_ST.get("accounts") or [1]) + 1, 8)
     lines = []
     for m in messages[-12:]:
         role = m.get("role")
@@ -3489,7 +3498,7 @@ def cb_chat(messages, model_id, timeout=110):
     lines.append("[Assistant]")
     prompt = "\n".join(lines)[-6000:]
     last_err = ""
-    for attempt in range(min(len(CB_ST.get("accounts") or [1]) + 1, 8)):
+    for attempt in range(max_att):
         try:
             tok, uid = _cb_token()
         except EMError:
@@ -3525,6 +3534,8 @@ def cb_chat(messages, model_id, timeout=110):
                 msg = raw[:60].decode("utf-8", "replace")
             last_err = msg or str(r.status_code)
             if "Insufficient chat credit" in msg:
+                if tier == "x":
+                    raise EMError("cb: پرێمیۆمی-قورس — بە پارە بەردەستە")
                 import datetime as _dt
                 acc = _cb_cur_acc()
                 if acc:
@@ -3553,8 +3564,15 @@ def cb_chat(messages, model_id, timeout=110):
                     agent = dd["agent_id"]
                 c = dd.get("content")
                 if isinstance(c, dict) and c.get("parts"):
-                    parts.append(c["parts"][0].get("text", ""))
-        ans = "".join(parts).strip()
+                    for p in c["parts"]:
+                        if isinstance(p, dict) and p.get("thought"):
+                            continue  # پارچەی بیرکردنەوە
+                        parts.append((p or {}).get("text", "") if isinstance(p, dict) else str(p))
+        # پترن: دێڵتا زیادەکان + ڕووداوی کۆتایی-کۆکراو (وەک Nova §2.32)
+        if len(parts) > 1 and parts[-1].startswith("".join(parts[:-1])):
+            ans = parts[-1].strip()
+        else:
+            ans = "".join(parts).strip()
         if ans:
             return ans
         last_err = "بەتاڵ"
@@ -3588,15 +3606,16 @@ def sync_cb_models(force=False):
             k = (m or {}).get("modelKey") or ""
             if not k or k in CB_SKIP_KEYS:
                 continue
-            if (m.get("type") or "") != "text" or m.get("hidden") or m.get("isDeprecated"):
+            if (m.get("type") or "") != "text":
                 continue
             b = m.get("botId")
-            if not isinstance(b, int) or b <= 0:
+            if not isinstance(b, int) or b <= 0 or b in CB_HTTP400_BOTS:
                 continue
+            tier = "f" if b in CB_FREE_BOTS else "x"
             lbl = m.get("title") or k
             if lbl.startswith("models."):
                 lbl = k
-            ok[k] = {"botId": b, "label": lbl}
+            ok[k] = {"botId": b, "label": lbl, "tier": tier}
         MS["cb_ok"] = ok
         _ms_save()
         print(f"[CB-SYNC] کاتالۆگ {len(items)} → تۆمارکراو {len(ok)}", flush=True)
