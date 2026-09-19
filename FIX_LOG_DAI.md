@@ -395,3 +395,17 @@
 - **چارەسەری زیرەنگ (probe-gate):** sync_hk_models هەر نیو کاتژمێر (لە کاتی مردوودا) ١ پشکنین — سەرکەوتن → **هەموو ١١ مۆدێڵەکە خۆکارانە دەچنە مینیو**؛ تا ئەوکات مینیو پاکە (هیچ مۆدێڵی مردوو نییە) — parser بە ٣ فۆرمات تاقیکرایەوە ✅
 - deploy #56 ✅ → /health ١٠٢ | /v1/models ٧٦ (hk لە مینیو نییە تاکو کرێکیان پڕ بکەوە — probe-gate دروست)
 - ئەنجامی چالاکی: parser بە سەرکەوتوویی تاقیکرایەوە (Hello world!) — چاوەڕوانی زیندووبوونەوەی کرێتی ئەوان
+
+## #57 — HuggingChat + Perplexity — هەردووکیان پشکنینەوەی ورد؛ ڕێپلەکانیان تۆمارکرا
+- داواکاری بەکارهێنەر: «HF chat + perplexity زیادکە، لیمێتی مەیەڵە، هەموو مۆدێلەکان + ئۆتۆئەپدێت + ڕاکێشانی ئۆتۆماتیکی ئەوانەی ئیش دەکەن و لابردنی مردووەکان»
+- **HuggingChat (huggingface.co/chat):**
+  - ✅ کاتالۆگ گشتی: GET /chat/api/models ← **١٤٤ مۆدێڵ** (id, displayName, description, preprompt, supportsTools/Reasoning) — سەرچاوەی ئۆتۆ-ئەپدێتی ئامادە
+  - ✅ router.huggingface.co/v1/models گشتییە (OpenAI-compatible + providers/status)
+  - ❌ چات: POST /chat/conversation ← **302 بۆ oauth/authorize** (login Required — both JSON and FormData)؛ دوگمەی Submit بەبێ هەژمار ناچالاکە؛ router/v1/chat/completions بێ کلیل ← HTML ی login
+  - بڕیار: داخرا تاکو هەژمار/تۆکن hf_xxx بدرێت — ئەوکات بە یەک داواکاری ١٤٤ مۆدێڵ بە router دەکرێتەوە (زنجیرە + probe-gate بەپێی داواکاری «مردووەکان لەمێنن»)
+- **Perplexity (www.perplexity.ai):**
+  - ✅ کرێکردنەوەی میوان تەواو: POST /rest/sse/perplexity_ask ← {params:{model_preference:"turbo", mode:"copilot", search_focus:"internet", sources:["web"], frontend_uuid…}, query_str} ← SSE؛ وەڵام لە blocks[].diff_block.patches[].value (دیف-پاچ) + status لە workflow_block
+  - ✅ بێ کوکی لە sandbox چەند پرسیارێکی وەڵام دا (PP-57-OK ✅) — ڕێپلەی requests سەرکەوتوو
+  - ❌ **دیواری کوانتا بە IP:** دوای چەند پرسیارێک ← «Sign up and repeat your request» لە stream ەکەدا (کوکی نوێ کاری پێ ناکات)؛ **لە Fly IP ی داتاسەنتەر → دیوار بە یەک جار (4/4)**
+  - بڕیار: پارککرا — ڕێپلەکەی تەواو تۆمارکرا؛ تەنها بە proxy ەی نیشتەجێبوون زیندوو دەبێتەوە (کوانتا بە IP ـە و ڕۆتەیشنی ناسنامە کاری پێ ناکات — بەرزترین پلەی بڵۆک)
+- deploy نەکرا — هیچ گۆڕانکاری لە کۆدا؛ /health هەر ١٠٢/٧٦
