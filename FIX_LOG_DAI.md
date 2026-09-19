@@ -283,7 +283,7 @@
 - deploy #47 ✅ → /health ٩٢ | /v1/models ٧١ (l7 ×٣ + GLM لەژێر دەنگی GLM ەکەی تر)
 - Fly: l7-codestral → «L7-FLY-OK» ✅ | commit ed4dfa9
 
-## #48 — شەپۆلی دووەمی سکان → G4F Space (PoW کیک) زیادکرا — deploy ⏳
+## #48 — شەپۆلی دووەمی سکان → G4F Space (PoW کیک) زیادکرا — deploy ✅ ٩٧/٧٤
 - «بەدوای هی نوێ بگەڕێ» — شەپۆلی ٢: g4f.space دۆزرایەوە (instance ی ئامادەی gpt4free)
 - **سیستەمی کیک (PoW):** /cake/issue → sha256(uuid:salt:nonce) بە ٢٤ بتی سیفر (~٥-١٥ چرکە) → /cake/bake → ٥ کریت/کەیک، ١٠٠/ڕۆژ بە IP؛ چات = ٢ کریت
 - **_g4f_baker_daemon:** پاشبنەما هەر ٩٠ چرکە کریت ≥١٠ ڕابگرێت + لە کاتی چات ئەگەر <٤ بەیک دەکات
@@ -292,4 +292,5 @@
 - **تاقیکراوە:** «G4F-OK» ✅، پێرسۆنای دکتۆر التعافي بە کوردی سۆرانی لە ڕێگای gpt-oss-120b ✅، کریت ٦ ✅
 - ٩ پاچە: بلۆک §2.18 + detect_brain + زنجیرە ×٢ + TG dispatch + TG rebind + API loop + API rebind + LEAK_RE (g4f) + boot daemon
 - **بەک-ئێند: ٩٧ سەرچاوە | مینیو: ٧٤ مۆدێڵ** | anakin sync ئەم جارە کاری کرد (٣٤٤ پشکنرا)
-- deploy #48 ⏳
+- deploy #48 ✅ → /health ٩٧ | /v1/models ٧٤
+- Fly: g4f-nemotron-3-ultra → «G4F-FLY-OK» ✅ | commit 642c4c8
