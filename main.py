@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2852,6 +2852,170 @@ def sync_akash_models(force=False):
     print(f"[AKA-SYNC] کاتالۆگ={len(text_models)} | نوێ={added} | لابرا={len(removed)} | aka_ok={len(MS.get('aka_ok', {}))}", flush=True)
 
 
+# ══════════ Hotbot (www.hotbot.com) — §2.25 — ٤ چات/٥خولەک بە IP (کۆنترۆڵکراو) ══════════
+HB_BASE = "https://www.hotbot.com"
+HB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+HB_LIMIT = {"until": 0.0}
+_HB_SYNC = {"t": 0.0}
+
+
+def hb_chat(messages, model_id="hotbot-chat", timeout=110):
+    """چاتی hotbot — یەک مۆدێڵ؛ ٤ چات بە IP، پاش بەتاڵی 200 → دیلی ٥ خولەک"""
+    import time as _t
+    if _t.time() < HB_LIMIT["until"]:
+        raise EMError("hb: cooldown")
+    last = ""
+    for m in reversed(messages):
+        if m.get("role") == "user" and m.get("content"):
+            last = m["content"]
+            break
+    if not last:
+        raise EMError("hb: هیچ پرسیار")
+    import uuid as _uuid
+    cid = str(_uuid.uuid4())
+    try:
+        requests.get(HB_BASE + "/", headers={"User-Agent": HB_UA}, timeout=(10, 20))
+    except Exception:
+        pass
+    try:
+        rm = requests.post(HB_BASE + "/api/moderate",
+                           json={"text": last[-800:], "imageUrls": [], "chatId": cid, "requestType": "text"},
+                           headers={"User-Agent": HB_UA, "Content-Type": "application/json",
+                                    "Origin": HB_BASE, "Referer": HB_BASE + "/"}, timeout=(10, 20))
+        if rm.status_code == 200 and (rm.json() or {}).get("flagged"):
+            raise EMError("hb: moderate بلۆک")
+    except EMError:
+        raise
+    except Exception:
+        pass
+    hist = [{"role": m.get("role", "user"), "content": m.get("content") or ""}
+            for m in messages if m.get("content")][-12:]
+    try:
+        r = requests.post(HB_BASE + "/api/chat",
+                          json={"messages": hist, "model": "hotbot-chat", "chatId": cid,
+                                "effort": "light", "camp": False},
+                          headers={"User-Agent": HB_UA, "Content-Type": "application/json",
+                                   "Origin": HB_BASE, "Referer": HB_BASE + "/"},
+                          timeout=(15, timeout), stream=True)
+    except Exception as e:
+        raise EMError(f"hb: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code == 429:
+            HB_LIMIT["until"] = _t.time() + 300
+        raise EMError(f"hb: {r.status_code}")
+    try:
+        raw = r.content
+    except Exception:
+        raw = b""
+    t = raw.decode("utf-8", "replace")
+    ans_parts = []
+    for m2 in re.finditer(r'data: (\{"content":".*?"\})', t):
+        try:
+            ans_parts.append(json.loads(m2.group(1)).get("content", ""))
+        except Exception:
+            pass
+    ans = "".join(ans_parts).strip()
+    if not ans:
+        HB_LIMIT["until"] = _t.time() + 300
+        raise EMError("hb: بەتاڵ → دیلی ٥ خولەک (کوانتا)")
+    return ans
+
+
+def hb_servers():
+    out = []
+    if "hotbot-chat" in MS.get("hb_ok", {}) or not MS.get("hb_ok"):
+        out.append({"id": "hb-hotbot-chat", "name": "HotBot Chat", "model_id": "hotbot-chat", "kind": "hb"})
+    return out
+
+
+def sync_hb_models(force=False):
+    """ئۆتۆ-ئەپدێتی hotbot: پشکنینی زیندوو (٦ کاتژمێر) — مۆدێڵی تاک"""
+    import time as _t
+    if not force and _t.time() - _HB_SYNC["t"] < 21600:
+        return
+    _HB_SYNC["t"] = _t.time()
+    try:
+        a = hb_chat([{"role": "user", "content": "Reply with: OK"}], timeout=45)
+        if a:
+            if "hotbot-chat" not in MS.get("hb_ok", {}):
+                MS.setdefault("hb_ok", {})["hotbot-chat"] = {"t": _t.time()}
+                _ms_save()
+            print("[HB-SYNC] hotbot زیندووە ✅", flush=True)
+    except Exception as e:
+        print(f"[HB-SYNC] {str(e)[:70]}", flush=True)
+
+
+# ══════════ GadegetKit (gadegetkit.com) — §2.26 — glm-4-flash، signature-flow، بێ لیمیت دیارکراو ══════════
+GK_BASE = "https://www.gadegetkit.com"
+GK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+GK_LIMIT = {"until": 0.0}
+_GK_SYNC = {"t": 0.0}
+
+
+def gk_chat(messages, model_id="glm-4-flash", timeout=150):
+    """چاتی gadegetkit — generate-signature ← ai-text/chat (سیستەم-پرۆمپت لە messages)"""
+    import time as _t
+    if _t.time() < GK_LIMIT["until"]:
+        raise EMError("gk: cooldown")
+    hist = [{"role": m.get("role", "user"), "content": m.get("content") or ""}
+            for m in messages if m.get("content")][-16:]
+    if not hist:
+        raise EMError("gk: هیچ نامە")
+    try:
+        s = requests.Session()
+        s.headers.update({"User-Agent": GK_UA, "Content-Type": "application/json",
+                          "Origin": GK_BASE, "Referer": GK_BASE + "/ai-tools/chatbot"})
+        s.get(GK_BASE + "/ai-tools/chatbot", timeout=(10, 25))
+        ts = str(int(_t.time() * 1000))
+        rs = s.post(GK_BASE + "/api/internal/generate-signature",
+                    json={"timestamp": int(ts), "path": "/api/ai-text/chat"}, timeout=(10, 25))
+        sig = (rs.json() or {}).get("signature")
+        if not sig:
+            raise EMError("gk: signature نییە")
+        r = s.post(GK_BASE + "/api/ai-text/chat", json={"messages": hist, "locale": "en"},
+                   headers={"x-timestamp": ts, "x-signature": sig}, timeout=(15, timeout))
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"gk: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code == 429:
+            GK_LIMIT["until"] = _t.time() + 600
+        raise EMError(f"gk: {r.status_code}")
+    try:
+        j = r.json()
+    except Exception:
+        raise EMError("gk: parse")
+    ans = (j.get("text") or "").strip()
+    if not ans or not j.get("success"):
+        raise EMError("gk: وەڵام بەتاڵ")
+    return ans
+
+
+def gk_servers():
+    out = []
+    if "glm-4-flash" in MS.get("gk_ok", {}) or not MS.get("gk_ok"):
+        out.append({"id": "gk-glm-4-flash", "name": "GLM 4 Flash (GK)", "model_id": "glm-4-flash", "kind": "gk"})
+    return out
+
+
+def sync_gk_models(force=False):
+    """ئۆتۆ-ئەپدێتی gadegetkit: پشکنینی زیندوو (٦ کاتژمێر)"""
+    import time as _t
+    if not force and _t.time() - _GK_SYNC["t"] < 21600:
+        return
+    _GK_SYNC["t"] = _t.time()
+    try:
+        a = gk_chat([{"role": "user", "content": "Reply with: OK"}], timeout=60)
+        if a:
+            if "glm-4-flash" not in MS.get("gk_ok", {}):
+                MS.setdefault("gk_ok", {})["glm-4-flash"] = {"t": _t.time()}
+                _ms_save()
+            print("[GK-SYNC] gadegetkit زیندووە ✅", flush=True)
+    except Exception as e:
+        print(f"[GK-SYNC] {str(e)[:70]}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -3302,6 +3466,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = hf_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "aka":
                     content = aka_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "hb":
+                    content = hb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "gk":
+                    content = gk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -3354,6 +3522,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = hf_chat(nmsgs, nsrv["model_id"])
                     elif k == "aka":
                         content = aka_chat(nmsgs, nsrv["model_id"])
+                    elif k == "hb":
+                        content = hb_chat(nmsgs, nsrv["model_id"])
+                    elif k == "gk":
+                        content = gk_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -3447,7 +3619,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3523,6 +3695,10 @@ def detect_brain(allow_fallback=True):
         servers += hf_servers()
         sync_akash_models()
         servers += aka_servers()
+        sync_hb_models()
+        servers += hb_servers()
+        sync_gk_models()
+        servers += gk_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3533,6 +3709,8 @@ def detect_brain(allow_fallback=True):
         sync_hk_models()
         sync_hf_models()
         sync_akash_models()
+        sync_hb_models()
+        sync_gk_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3892,6 +4070,18 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "aka"
+            if k == "hb":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = hb_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "hb"
+            if k == "gk":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = gk_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "gk"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3986,6 +4176,16 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "aka"
+                if k == "hb":
+                    a = hb_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "hb"
+                if k == "gk":
+                    a = gk_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "gk"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
