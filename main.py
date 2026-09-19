@@ -3094,10 +3094,7 @@ def _gz_slug(v):
 
 def gz_servers():
     out = []
-    for v, meta in sorted(MS.get("gz_ok", {}).items()):
-        if v in GZ_SKIP:
-            continue
-        lbl = (meta or {}).get("label") or v
+    for v, lbl in sorted(_GZ_SYNC.get("catalog", {}).items()):
         out.append({"id": f"gz-{_gz_slug(v)}", "name": f"{lbl} (Giz)", "model_id": v, "kind": "gz"})
     return out
 
@@ -3149,102 +3146,36 @@ def _gz_parse_catalog(raw):
         v = (it or {}).get("value")
         if not v or v in GZ_SKIP or it.get("hidden") or it.get("blockFreeTrial"):
             continue
-        out.append({"value": v, "label": it.get("label") or v})
+        out.append({"value": v, "label": it.get("label") or v, "plans": it.get("plans")})
     return out
 
 
-def _gz_probe_all(cands):
-    """پۆلێنکردنی مۆدێڵەکان — ٣ هاوتەریب + stagger (session-429 → دووبارە)"""
-    import time as _t
-    from concurrent.futures import ThreadPoolExecutor
-    changed = False
-    sess_err = {"n": 0}
-
-    def probe(c):
-        v, lbl = c["value"], c["label"]
-        for attempt in (1, 2):
-            try:
-                a = gz_chat([{"role": "user", "content": "Reply with: OK"}], v, timeout=45)
-                return (v, lbl, "ok" if a else "empty", a[:60])
-            except Exception as e:
-                msg = str(e)
-                if "لۆگین" in msg:
-                    return (v, lbl, "login", "")
-                if "کوانتا" in msg or "cooldown" in msg:
-                    return (v, lbl, "quota", "")
-                if "session" in msg and attempt == 1:
-                    sess_err["n"] += 1
-                    _t.sleep(11)
-                    continue
-                return (v, lbl, "err", msg[:60])
-        return (v, lbl, "err", "session-retry")
-
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futs = []
-        for c in cands:
-            futs.append(ex.submit(probe, c))
-            _t.sleep(0.15)
-        for f in futs:
-            try:
-                v, lbl, st, info = f.result()
-            except Exception:
-                continue
-            if st == "ok":
-                MS.setdefault("gz_ok", {})[v] = {"label": lbl, "t": _t.time()}
-                MS.get("gz_bad", {}).pop(v, None)
-                changed = True
-                print(f"[GZ] ✅ {v}", flush=True)
-            elif st in ("login", "quota", "empty"):
-                MS.get("gz_bad", {}).setdefault(v, {"t": _t.time(), "why": st})
-                changed = True
-    if changed:
-        _ms_save()
-    return sess_err["n"]
-
-
 def sync_giz_models(force=False):
-    """ئۆتۆ-ئەپدێتی GizAI: کاتالۆگی CDN (٦ کاتژمێر) — تاقیکردنەوەی نوێیەکان بە ترد"""
-    import time as _t, threading as _th
+    """ئۆتۆ-ئەپدێتی GizAI: کاتالۆگی CDN (٦ کاتژمێر) — بێ probe (کوانتا نەسوتێت)؛
+    فیلتەر: gateway/* (پارەدار) و free-limit-0 و شاراوە دەر دەکرێن"""
+    import time as _t
     if not force and _t.time() - _GZ_SYNC["t"] < 21600:
         return
-    th = _GZ_SYNC.get("thread")
-    if th is not None and th.is_alive():
-        return
-    _GZ_SYNC["t"] = _t.time()
-
-    def run():
-        try:
-            r = requests.get(GZ_CDN, headers={"User-Agent": GZ_UA}, timeout=(10, 40))
-            if r.status_code != 200:
-                print(f"[GZ-SYNC] catalog {r.status_code}", flush=True)
-                return
-            cands = _gz_parse_catalog(r.text)
-            cat_vals = {c["value"] for c in cands}
-            _GZ_SYNC["labels"] = {c["value"]: c["label"] for c in cands}
-            # ئۆتۆ-لابردنی ئەوانەی لە کاتالۆگ نەماون
-            gone = [v for v in MS.get("gz_ok", {}) if v not in cat_vals]
-            for v in gone:
-                MS.get("gz_ok", {}).pop(v, None)
-                print(f"[GZ-SYNC] لابردن: {v}", flush=True)
-            known_ok = set(MS.get("gz_ok", {}).keys())
-            known_bad = {v for v, m in MS.get("gz_bad", {}).items() if _t.time() - (m or {}).get("t", 0) < 86400 * 3}
-            fresh = [c for c in cands if c["value"] not in known_ok and c["value"] not in known_bad]
-            print(f"[GZ-SYNC] کاتالۆگ {len(cat_vals)} | نوێ بۆ پشکنین {len(fresh)}", flush=True)
-            if gone:
-                _ms_save()
-            if fresh:
-                se = _gz_probe_all(fresh)
-                if se > len(fresh) * 0.4:
-                    # زۆربەی session ەکان شکاین — ٢٠ خولەکی تر دووبارە
-                    _GZ_SYNC["t"] = _t.time() - 20400
-                    print(f"[GZ-SYNC] session-فەیل {se}/{len(fresh)} — دووبارە لە ٢٠ خولەک", flush=True)
-                    return
-            print(f"[GZ-SYNC] تەواو — ok={len(MS.get('gz_ok', {}))}", flush=True)
-        except Exception as e:
-            print(f"[GZ-SYNC] {str(e)[:80]}", flush=True)
-
-    _GZ_SYNC["thread"] = _th.Thread(target=run, daemon=True)
-    _GZ_SYNC["thread"].start()
+    try:
+        r = requests.get(GZ_CDN, headers={"User-Agent": GZ_UA}, timeout=(10, 40))
+        if r.status_code != 200:
+            print(f"[GZ-SYNC] catalog {r.status_code}", flush=True)
+            return
+        cands = _gz_parse_catalog(r.text)
+        cat = {}
+        for c in cands:
+            v = c["value"]
+            if v.startswith("gateway/"):
+                continue
+            pl = c.get("plans")
+            if isinstance(pl, dict) and "free" in pl and pl["free"].get("throttleLimit") == 0:
+                continue
+            cat[v] = c["label"]
+        _GZ_SYNC["catalog"] = cat
+        _GZ_SYNC["t"] = _t.time()
+        print(f"[GZ-SYNC] کاتالۆگ {len(cands)} → تۆمارکراو {len(cat)}", flush=True)
+    except Exception as e:
+        print(f"[GZ-SYNC] {str(e)[:80]}", flush=True)
 
 
 def _ms_dup(servers, model_id):
