@@ -3611,7 +3611,7 @@ def sync_cb_models(force=False):
             b = m.get("botId")
             if not isinstance(b, int) or b <= 0 or b in CB_HTTP400_BOTS:
                 continue
-            tier = "f" if b in CB_FREE_BOTS else "x"
+            tier = "f"
             lbl = m.get("title") or k
             if lbl.startswith("models."):
                 lbl = k
@@ -4572,12 +4572,13 @@ def sync_nv_models(force=False):
                 continue
             if (m.get("type") or "") != "text":
                 continue
-            # هەموو مۆدێڵێک — یەک تۆمار بۆ هەر modelKey؛ mۆدێڵی نەناسراویش → x (خۆکار-نوێ)
-            tier = "f" if b in NV_FREE_BOTS else ("p" if b in NV_PREM_CHEAP else "x")
+            # تەنها خۆڕاییەکان لە مینیو — پرێمیۆم/نەناسراو لادەبرێن (پارەدار)
+            if b not in NV_FREE_BOTS:
+                continue
             lbl = m.get("title") or k
             if lbl.startswith("models."):
-                lbl = (NV_FREE_BOTS.get(b) or NV_PREMIUM_BOTS.get(b) or k)
-            ok[k] = {"botId": b, "label": lbl, "tier": tier}
+                lbl = (NV_FREE_BOTS.get(b) or k)
+            ok[k] = {"botId": b, "label": lbl, "tier": "f"}
         if ok:
             MS["nv_ok"] = ok
             _ms_save()
@@ -4736,11 +4737,7 @@ def al_chat(messages, model_id, timeout=110):
 
 
 def al_servers():
-    out = []
-    for k, lbl in sorted(AL_MODELS.items()):
-        slug = re.sub(r"[^a-z0-9]+", "-", str(k).lower()).strip("-") or "model"
-        out.append({"id": f"al-{slug}", "name": f"{lbl} (AL)", "model_id": k, "kind": "al"})
-    return out
+    return []  # پارەدار — لابراو لە مینیو (ڕیسێپی پارێزراوە لە کۆد)
 
 
 def sync_al_models(force=False):
@@ -4749,11 +4746,9 @@ def sync_al_models(force=False):
     if not force and _t.time() - _AL_SYNC["t"] < 21600:
         return
     _AL_SYNC["t"] = _t.time()
-    ok = {k: {"label": lbl, "tier": "x"} for k, lbl in AL_MODELS.items()}
-    if ok:
-        MS["al_ok"] = ok
-        _ms_save()
-        print(f"[AL-SYNC] تۆمارکراو {len(ok)}", flush=True)
+    MS["al_ok"] = {}
+    _ms_save()
+    print("[AL-SYNC] پاشکراوە — تەنها بە سەبسکریپشن چالاک دەبێت", flush=True)
 
 
 # ══════════ AI/ML API (aimlapi.com) — §2.34 — دەروازەی 938 مۆدێڵ (پارەدار — tier-x) ══════════
@@ -4939,11 +4934,7 @@ def aiml_chat(messages, model_id, timeout=110):
 
 
 def aiml_servers():
-    out = []
-    for k, lbl in sorted(AIML_MODELS.items()):
-        slug = re.sub(r"[^a-z0-9]+", "-", str(k).lower()).strip("-") or "model"
-        out.append({"id": f"aiml-{slug}", "name": f"{lbl} (AI/ML)", "model_id": k, "kind": "aiml"})
-    return out
+    return []  # پارەدار — لابراو لە مینیو (ڕیسێپی پارێزراوە لە کۆد)
 
 
 def sync_aiml_models(force=False):
@@ -4952,11 +4943,9 @@ def sync_aiml_models(force=False):
     if not force and _t.time() - _AIML_SYNC["t"] < 21600:
         return
     _AIML_SYNC["t"] = _t.time()
-    ok = {k: {"label": lbl, "tier": "f"} for k, lbl in AIML_MODELS.items()}
-    if ok:
-        MS["aiml_ok"] = ok
-        _ms_save()
-        print(f"[AIML-SYNC] تۆمارکراو {len(ok)}", flush=True)
+    MS["aiml_ok"] = {}
+    _ms_save()
+    print("[AIML-SYNC] پاشکراوە — تەنها بە فەندز چالاک دەبێت", flush=True)
 
 
 def _ms_dup(servers, model_id):
