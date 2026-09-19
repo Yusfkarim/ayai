@@ -14,6 +14,7 @@ COPY easemate_client.mjs .
 COPY easemate_sign.wasm .
 COPY anakin_client.mjs .
 COPY anakin_objecthash.js .
+COPY model_sync.json .
 COPY deepai_client.mjs .
 COPY README.md .
 
