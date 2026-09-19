@@ -4260,8 +4260,11 @@ NV_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82416,
          "exhausted": {}, "signups": {"date": "", "n": 0}}
 _NV_SYNC = {"t": 0.0}
 # مۆدێڵی هەرزان — بە botId دەناسرێتەوە (کاتالۆگ بە modelKey دەگۆڕدرێت بەڵام botId جێگیرە)
-NV_FREE_BOTS = {0: "4o-mini", 44: "claude-4.5-haiku", 10: "gemini-2.5-flash", 21: "deepSeek"}
-NV_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-search", "superbot", "aiapp", "chatbotapp", "youtube-summarizer", "image-generator", "logo-generator", "tattoo-generator", "nova", "auto"}
+NV_FREE_BOTS = {0: "4o-mini", 9: "auto", 10: "gemini-2.5-flash", 15: "claude", 21: "deepSeek",
+                26: "gpt-4.1", 44: "claude-4.5-haiku", 49: "gpt-5.1", 100: "gemini-3-flash",
+                108: "gpt-5.6-luna", 111: "deepseek-v4-flash"}
+NV_PREF = {0: "4o-mini", 108: "gpt-5.6-luna"}  # دوو کلیل بۆ هەمان botId — باشترین هەڵدەبژێردرێت
+NV_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-search", "superbot", "aiapp", "chatbotapp", "youtube-summarizer", "image-generator", "logo-generator", "tattoo-generator", "nova"}
 
 
 def _nv_load_acc():
@@ -4509,19 +4512,28 @@ def sync_nv_models(force=False):
             print(f"[NV-SYNC] catalog {r.status_code}", flush=True)
             return
         items = (r.json() or {}).get("data") or []
-        ok = {}
+        by_bot = {}
         for m in items:
             k = (m or {}).get("modelKey") or ""
             b = m.get("botId")
             if not k or k in NV_SKIP_KEYS:
                 continue
-            if (m.get("type") or "") != "text" or m.get("hidden") or m.get("isDeprecated"):
+            if (m.get("type") or "") != "text":
                 continue
             if b not in NV_FREE_BOTS:
-                continue  # پرێمیۆم — بەبێ پارە ناکرێت
-            lbl = m.get("title") or k
+                continue  # پرێمیۆم — بەبێ پارە ناکرێت (سوێپ 2026-09-19)
+            by_bot.setdefault(b, []).append((k, m.get("title") or k))
+        ok = {}
+        for b, lst in by_bot.items():
+            k, lbl = NV_PREF.get(b, lst[0][0]), None
+            for kk, tt in lst:
+                if kk == k:
+                    lbl = tt
+                    break
+            if lbl is None:
+                k, lbl = lst[0]
             if lbl.startswith("models."):
-                lbl = NV_FREE_BOTS[b]
+                lbl = NV_FREE_BOTS.get(b, k)
             ok[k] = {"botId": b, "label": lbl}
         if ok:
             MS["nv_ok"] = ok
