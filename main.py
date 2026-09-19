@@ -3322,7 +3322,7 @@ CB_CMS = "https://webcms.chatbotapp.ai/api/ai-models?populate[]=tags&populate[]=
 CB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 CB_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cb_accounts.json")
 CB_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82400,
-         "exhausted": {}, "signups": {"date": "", "n": 0}}
+         "exhausted": {}, "ensured": {}, "signups": {"date": "", "n": 0}}
 _CB_SYNC = {"t": 0.0}
 # ئامرازەکان کە چاتی دەقی نین — دەرکراو
 CB_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-search", "superbot", "aiapp", "chatbotapp", "youtube-summarizer", "image-generator", "logo-generator", "tattoo-generator"}
@@ -4258,13 +4258,23 @@ NV_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82416,
          "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
                       {"email": "komex82414@duidir.com", "password": "komex82414@duidir.com"},
                       {"email": "komex82415@duidir.com", "password": "komex82415@duidir.com"}],
-         "exhausted": {}, "signups": {"date": "", "n": 0}}
+         "exhausted": {}, "ensured": {}, "signups": {"date": "", "n": 0}}
 _NV_SYNC = {"t": 0.0}
 # مۆدێڵی هەرزان — بە botId دەناسرێتەوە (کاتالۆگ بە modelKey دەگۆڕدرێت بەڵام botId جێگیرە)
 NV_FREE_BOTS = {0: "4o-mini", 9: "auto", 10: "gemini-2.5-flash", 15: "claude", 21: "deepSeek",
                 26: "gpt-4.1", 44: "claude-4.5-haiku", 49: "gpt-5.1", 100: "gemini-3-flash",
                 108: "gpt-5.6-luna", 111: "deepseek-v4-flash"}
-NV_PREF = {0: "4o-mini", 108: "gpt-5.6-luna"}  # دوو کلیل بۆ هەمان botId — باشترین هەڵدەبژێردرێت
+# پرێمیۆم — ensure-credits کرێدیتی دەستپێک دەدات؛ تەنها هەرزانەکان (28/29) بە ڕۆتەیشن دەکرێنەوە
+NV_PREM_CHEAP = {28, 29}
+NV_PREMIUM_BOTS = {14: "deepSeekV4", 28: "gpt-5", 29: "gpt-5-mini", 40: "o3", 46: "claude-4.5-sonnet",
+                   50: "gemini-3.1-pro", 106: "gpt-5.5", 107: "gpt-5.4", 110: "claude-4.6-sonnet",
+                   112: "deepseek-v4-pro", 113: "grok-4.3", 114: "gemini-3.1-flash-lite", 115: "gpt-5.3",
+                   116: "gpt-5.6", 117: "claude-5-sonnet", 119: "claude-5-opus", 120: "grok-4.5",
+                   121: "gemini-3.6-flash", 122: "gpt-5.6-terra", 123: "gemini-3-pro", 125: "claude-4.6-opus",
+                   126: "claude-4.8-opus", 127: "grok-4.20", 128: "claude-5-fable", 136: "gpt-6-astra"}
+NV_HTTP400_BOTS = {5, 23, 45, 201, 403}  # پێویستیان بە پارامەتری جیاواز — هێشتا ناتۆمارکرێن
+NV_PREF = {0: "4o-mini", 108: "gpt-5.6-luna", 14: "deepSeekV4", 107: "gpt-5.4", 110: "claude-4.6-sonnet",
+           115: "gpt-5.3", 123: "gemini-3-pro", 128: "claude-5-fable"}
 NV_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-search", "superbot", "aiapp", "chatbotapp", "youtube-summarizer", "image-generator", "logo-generator", "tattoo-generator", "nova"}
 
 
@@ -4276,6 +4286,7 @@ def _nv_load_acc():
         NV_ST["idx"] = int(d.get("idx") or 0)
         NV_ST["next_num"] = int(d.get("next_num") or 82416)
         NV_ST["exhausted"] = d.get("exhausted") or {}
+        NV_ST["ensured"] = d.get("ensured") or {}
         NV_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
     except Exception:
         pass
@@ -4286,6 +4297,7 @@ def _nv_save_acc():
     try:
         _j.dump({"accounts": NV_ST.get("accounts") or [], "idx": NV_ST["idx"],
                  "next_num": NV_ST["next_num"], "exhausted": NV_ST.get("exhausted") or {},
+                 "ensured": NV_ST.get("ensured") or {},
                  "signups": NV_ST.get("signups") or {"date": "", "n": 0}},
                 open(NV_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
     except Exception:
@@ -4314,7 +4326,7 @@ def _nv_signup_new():
     sg = NV_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 20 or len(NV_ST.get("accounts") or []) >= 40:
+    if sg.get("n", 0) >= 24 or len(NV_ST.get("accounts") or []) >= 60:
         return None
     import time as _ts
     n = NV_ST["next_num"]
@@ -4393,6 +4405,8 @@ def nv_chat(messages, model_id, timeout=110):
     if not meta:
         raise EMError("nv: مۆدێڵ نییە")
     bot_id = meta.get("botId") or 0
+    tier = meta.get("tier") or "f"
+    max_att = 3 if tier == "p" else (1 if tier == "x" else 8)
     lines = []
     for m in messages[-12:]:
         role = m.get("role")
@@ -4410,7 +4424,9 @@ def nv_chat(messages, model_id, timeout=110):
     lines.append("[Assistant]")
     prompt = "\n".join(lines)[-6000:]
     last_err = ""
-    for attempt in range(min(len(NV_ST.get("accounts") or [1]) + 1, 8)):
+    import datetime as _dtm
+    _today = _dtm.datetime.utcnow().strftime("%Y-%m-%d")
+    for attempt in range(max_att):
         try:
             tok, uid = _nv_token()
         except EMError:
@@ -4420,6 +4436,20 @@ def nv_chat(messages, model_id, timeout=110):
         H = {"User-Agent": NV_UA, "Content-Type": "application/json", "accept": "text/event-stream",
              "X_Token": tok, "X_User_Id": uid, "X_Platform": "web", "X_Model": str(bot_id),
              "Origin": "https://chat.novaapp.ai", "Referer": "https://chat.novaapp.ai/"}
+        if tier in ("p", "x"):
+            accs0 = NV_ST.get("accounts") or []
+            em0 = accs0[NV_ST["idx"] % len(accs0)]["email"] if accs0 else ""
+            en = NV_ST.setdefault("ensured", {})
+            if en.get(em0) != _today:
+                try:
+                    requests.get(NV_BASE + "/api/v2/ensure-credits",
+                                 headers={"User-Agent": NV_UA, "X_Token": tok, "X_User_Id": uid,
+                                          "X_Platform": "web", "Origin": "https://chat.novaapp.ai",
+                                          "Referer": "https://chat.novaapp.ai/"}, timeout=(10, 20))
+                except Exception:
+                    pass
+                en[em0] = _today
+                _nv_save_acc()
         body = {"botId": bot_id, "sessionId": _u.uuid4().hex[:20],
                 "userPseudoId": f"{_u.uuid4().int % 10 ** 9}.{int(_t.time())}",
                 "hubxId": str(_u.uuid4()),
@@ -4446,6 +4476,8 @@ def nv_chat(messages, model_id, timeout=110):
                 msg = raw[:60].decode("utf-8", "replace")
             last_err = msg or str(r.status_code)
             if "Insufficient chat credit" in msg:
+                if tier == "x":
+                    raise EMError("nv: پرێمیۆمی-قورس — بە پارە بەردەستە")
                 accs = NV_ST.get("accounts") or []
                 if accs:
                     acc = accs[NV_ST["idx"] % len(accs)]
@@ -4521,21 +4553,23 @@ def sync_nv_models(force=False):
                 continue
             if (m.get("type") or "") != "text":
                 continue
-            if b not in NV_FREE_BOTS:
-                continue  # پرێمیۆم — بەبێ پارە ناکرێت (سوێپ 2026-09-19)
-            by_bot.setdefault(b, []).append((k, m.get("title") or k))
+            tier = "f" if b in NV_FREE_BOTS else ("p" if b in NV_PREM_CHEAP else ("x" if b in NV_PREMIUM_BOTS else ""))
+            if not tier:
+                continue
+            by_bot.setdefault(b, []).append((k, m.get("title") or k, tier))
         ok = {}
         for b, lst in by_bot.items():
+            tier = lst[0][2]
             k, lbl = NV_PREF.get(b, lst[0][0]), None
-            for kk, tt in lst:
+            for kk, tt, _ in lst:
                 if kk == k:
                     lbl = tt
                     break
             if lbl is None:
-                k, lbl = lst[0]
+                k, lbl = lst[0][0], lst[0][1]
             if lbl.startswith("models."):
-                lbl = NV_FREE_BOTS.get(b, k)
-            ok[k] = {"botId": b, "label": lbl}
+                lbl = (NV_FREE_BOTS.get(b) or NV_PREMIUM_BOTS.get(b) or k)
+            ok[k] = {"botId": b, "label": lbl, "tier": tier}
         if ok:
             MS["nv_ok"] = ok
             _ms_save()
