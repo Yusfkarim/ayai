@@ -5816,9 +5816,9 @@ def _ar_worker():
 
     while True:
         try:
-            job = _ARQ["q"].get(timeout=300)
+            job = _ARQ["q"].get(timeout=1500)
         except Exception:
-            kill()  # ٥ خولەک بێ کار — ڕام پاک بکەوە
+            kill()  # ٢٥ خولەک بێ کار — ڕام پاک بکەوە (٤GB — گەرمی خێراتر)
             continue
         out, err, code = "", "", ""
         try:
@@ -5851,7 +5851,7 @@ def _ar_worker():
             try:
                 # هەر جارێک گەڕانەوە بۆ ماڵپەر — evaluation تازە (جیاکردنەوەی بەکارهێنەران)
                 pg.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=60000)
-                pg.wait_for_timeout(5500)
+                pg.wait_for_timeout(4000)
                 if direct:
                     tgt = (MS.get("ar_ok") or {}).get(model_name) or {}
                     tid = tgt.get("id")
