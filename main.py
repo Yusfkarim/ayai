@@ -3604,6 +3604,330 @@ def sync_cb_models(force=False):
         print(f"[CB-SYNC] {str(e)[:80]}", flush=True)
 
 
+# ══════════ ChatbotAI (chatbotai.co) — §2.30 — Firebase + حەوزی ئەکاونت + خۆکار-ساینئەپ ══════════
+CA_KEY = "AIzaSyDHatafp1HL1DKD0Id1UVHPGQY8m_eseAk"
+CA_BASE = "https://chatbotai.co"
+CA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+CA_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ca_accounts.json")
+CA_ST = {"tok": None, "tok_t": 0.0, "idx": 0, "next_num": 82401,
+         "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
+                      {"email": "komex82400@duidir.com", "password": "komex82400@duidir.com"}],
+         "limits": {}, "signups": {"date": "", "n": 0}}
+_CA_SYNC = {"t": 0.0}
+# کاتالۆگی بنەڕەتی — sync ی خۆکار لە HTML ی ماڵپەر نوێی دەکاتەوە (key → version, label)
+CA_FALLBACK = {
+    "gpt-5.4-nano": ("gpt-5.4-nano", "GPT-5.4 Nano"),
+    "gpt-5.4-instant": ("gpt-5.4-instant-2026-03-05", "GPT-5.4 Instant"),
+    "gemini-3.1-pro": ("gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
+    "claude": ("claude-sonnet-5", "Claude Sonnet 5"),
+    "perplexity": ("sonar", "Perplexity"),
+    "deepseek": ("deepseek-4-pro-0813", "DeepSeek-V4-Pro"),
+    "grok": ("grok-4.6", "Grok 4.6"),
+    "claude-fable": ("claude-fable-5-1", "Claude Fable 5.1"),
+    "claude-opus": ("claude-opus-5", "Claude Opus 5"),
+    "gemini": ("gemini-3.8-flash", "Gemini 3.8 Flash"),
+    "gpt-5.6-sol": ("gpt-5.6-sol", "GPT-5.6 Sol"),
+    "gpt-5.6-terra": ("gpt-5.6-terra", "GPT-5.6 Terra"),
+    "gpt-5.6-luna": ("gpt-5.6-luna", "GPT-5.6 Luna"),
+    "gpt-6-astra": ("gpt-6-astra", "GPT-6 Astra"),
+    "gpt-5.5": ("gpt-5.5-2026-04-23", "GPT-5.5"),
+    "kimi": ("kimi-k3", "Kimi K3"),
+    "kimi-k2.6": ("kimi-k2.6", "Kimi K2.6"),
+    "kimi-k3-thinking": ("kimi-k3-thinking", "Kimi K3 Thinking"),
+    "deepseek-v4-pro-thinking": ("deepseek-4-pro-0813-thinking", "DeepSeek-V4-Pro Thinking"),
+    "o3": ("o3-2025-04-16", "OpenAI o3"),
+    "llama": ("llama-4-maverick", "Llama 4"),
+    "gpt-4": ("gpt-4o-2024-08-06", "GPT-4o"),
+    "gpt-4o-mini": ("gpt-4o-mini-2024-07-18", "GPT-4o-mini"),
+    "gpt-4.1": ("gpt-4.1-2025-04-14", "GPT-4.1"),
+}
+
+
+def _ca_load_acc():
+    import json as _j
+    try:
+        d = _j.load(open(CA_ACC_FILE, encoding="utf-8"))
+        CA_ST["accounts"] = d.get("accounts") or CA_ST["accounts"]
+        CA_ST["idx"] = int(d.get("idx") or 0)
+        CA_ST["next_num"] = int(d.get("next_num") or 82401)
+        CA_ST["limits"] = d.get("limits") or {}
+        CA_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+    except Exception:
+        pass
+
+
+def _ca_save_acc():
+    import json as _j
+    try:
+        _j.dump({"accounts": CA_ST.get("accounts") or [], "idx": CA_ST["idx"],
+                 "next_num": CA_ST["next_num"], "limits": CA_ST.get("limits") or {},
+                 "signups": CA_ST.get("signups") or {"date": "", "n": 0}},
+                open(CA_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_ca_load_acc()
+
+
+def _ca_firebase(ep, email, pw):
+    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/accounts:{ep}?key={CA_KEY}",
+                      json={"email": email, "password": pw, "returnSecureToken": True},
+                      headers={"User-Agent": CA_UA}, timeout=(10, 25))
+    if r.status_code != 200:
+        return None
+    tok = (r.json() or {}).get("idToken")
+    return (tok, "") if tok else None
+
+
+def _ca_signup_new():
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    sg = CA_ST.get("signups") or {"date": "", "n": 0}
+    if sg.get("date") != today:
+        sg = {"date": today, "n": 0}
+    if sg.get("n", 0) >= 20 or len(CA_ST.get("accounts") or []) >= 40:
+        return None
+    n = CA_ST["next_num"]
+    for _ in range(6):
+        email = f"komex{n}@duidir.com"
+        res = _ca_firebase("signUp", email, email)
+        if res:
+            CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
+            CA_ST["idx"] = len(CA_ST["accounts"]) - 1
+            CA_ST["next_num"] = n + 1
+            sg["n"] = sg.get("n", 0) + 1
+            CA_ST["signups"] = sg
+            CA_ST["tok"] = None
+            _ca_save_acc()
+            print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
+            return res
+        n += 1
+    CA_ST["next_num"] = n
+    _ca_save_acc()
+    return None
+
+
+def _ca_token():
+    import time as _t
+    if CA_ST.get("tok") and _t.time() - CA_ST.get("tok_t", 0) < 2700:
+        return CA_ST["tok"]
+    accs = CA_ST.get("accounts") or []
+    if accs:
+        acc = accs[CA_ST["idx"] % len(accs)]
+        res = _ca_firebase("signInWithPassword", acc["email"], acc["password"])
+        if res:
+            CA_ST["tok"] = res[0]
+            CA_ST["tok_t"] = _t.time()
+            return CA_ST["tok"]
+    resn = _ca_signup_new()
+    if not resn:
+        raise EMError("ca: هیچ ئەکاونت")
+    CA_ST["tok"] = resn[0]
+    CA_ST["tok_t"] = _t.time()
+    return CA_ST["tok"]
+
+
+def _ca_rotate(model_key):
+    """ئەکاونتی دواتر بۆ ئەم مۆدێڵە — ئەوانەی سنووریان تێپەڕاندووە لابەرە؛ ئەگەر نەمابوو → نوێ"""
+    accs = CA_ST.get("accounts") or []
+    lim = CA_ST.get("limits") or {}
+    for _ in range(len(accs)):
+        CA_ST["idx"] = (CA_ST["idx"] + 1) % len(accs)
+        acc = accs[CA_ST["idx"]]
+        em = lim.get(acc["email"]) or {}
+        if not em.get(model_key) and not em.get("*"):
+            CA_ST["tok"] = None
+            _ca_save_acc()
+            return True
+    return bool(_ca_signup_new())
+
+
+def _ca_models_catalog():
+    cat = {}
+    for k, v in (MS.get("ca_ok") or {}).items():
+        cat[k] = (v.get("version") or k, v.get("label") or k)
+    for k, v in CA_FALLBACK.items():
+        cat.setdefault(k, v)
+    return cat
+
+
+def ca_chat(messages, model_id, timeout=110):
+    """چاتی ChatbotAI — send + پۆڵی get-all + حەوزی ئەکاونت + خۆکار-ساینئەپ"""
+    import time as _t
+    cat = _ca_models_catalog()
+    if model_id not in cat:
+        raise EMError("ca: مۆدێڵ نییە")
+    mkey, mver = model_id, cat[model_id][0]
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if role == "system":
+            lines.append("[Instructions] " + c)
+        elif role == "user":
+            lines.append("[User] " + c)
+        else:
+            lines.append("[Assistant] " + c)
+    if not lines:
+        raise EMError("ca: هیچ نامە")
+    lines.append("[Assistant]")
+    prompt = "\n".join(lines)[-6000:]
+    last_err = ""
+    for attempt in range(8):
+        try:
+            tok = _ca_token()
+        except EMError:
+            if not _ca_rotate(mkey):
+                raise
+            continue
+        H = {"User-Agent": CA_UA, "Content-Type": "application/json",
+             "authorization": tok, "Origin": CA_BASE, "Referer": CA_BASE + "/"}
+        try:
+            r = requests.post(CA_BASE + "/api/chat/message/send",
+                              json={"message": prompt, "model": mkey, "temporaryChat": False,
+                                    "modelVersion": mver}, headers=H, timeout=(15, 40))
+        except Exception as e:
+            raise EMError(f"ca: {str(e)[:60]}")
+        ok = False
+        sid = ""
+        err = ""
+        try:
+            j = r.json() or {}
+            ok = bool(j.get("success"))
+            sid = str(j.get("sessionId") or "")
+            err = str(j.get("error") or "")
+        except Exception:
+            err = r.text[:80]
+        if not ok:
+            last_err = err or str(r.status_code)
+            low = last_err.lower()
+            if "limit" in low or "free message" in low or "no free" in low:
+                accs = CA_ST.get("accounts") or []
+                if accs:
+                    acc = accs[CA_ST["idx"] % len(accs)]
+                    lm = CA_ST.setdefault("limits", {}).setdefault(acc["email"], {})
+                    lm[mkey] = True
+                    if "lifetime" not in low:
+                        lm["*"] = True  # ئەژمێرەکە بە گشتی تەواوە
+                    _ca_save_acc()
+                if not _ca_rotate(mkey):
+                    raise EMError("ca: سنووری هەموو ئەکاونتەکان")
+                continue
+            if r.status_code in (401, 403):
+                CA_ST["tok"] = None
+                if not _ca_rotate(mkey):
+                    raise EMError("ca: توکن")
+                continue
+            raise EMError(f"ca: {last_err[:60]}")
+        # پۆڵی وەڵام — get-all (POST)
+        deadline = _t.time() + min(timeout, 100)
+        while _t.time() < deadline:
+            _t.sleep(2.5)
+            try:
+                r2 = requests.post(CA_BASE + "/api/session/get-all", headers=H, json={}, timeout=(15, 30))
+                sessions = (r2.json() or {}).get("sessions") or []
+            except Exception:
+                continue
+            for s in sessions:
+                if str(s.get("sessionId")) != sid:
+                    continue
+                ms = s.get("messages") or []
+                if ms and ms[-1].get("finish_reason") == "stop":
+                    ans = (ms[-1].get("content") or "").strip()
+                    if ans:
+                        return ans
+        last_err = "بەتاڵ/درەنگ"
+        CA_ST["tok"] = None
+    raise EMError(f"ca: {last_err[:60] or 'شکست'}")
+
+
+def ca_servers():
+    src = MS.get("ca_ok") or {k: {"version": v[0], "label": v[1]} for k, v in CA_FALLBACK.items()}
+    out = []
+    for k in sorted(src):
+        lbl = (src[k] or {}).get("label") or k
+        out.append({"id": f"ca-{re.sub(r'[^a-z0-9]+', '-', k.lower()).strip('-')}",
+                    "name": f"{lbl} (CA)", "model_id": k, "kind": "ca"})
+    return out
+
+
+def _ca_extract_models(html):
+    """نەخشەی مۆدێڵەکان لە payload ی Nuxt ی HTML — کۆنفیگی multi_language (idMap: نرخ لە شوێنی تر)"""
+    i = 0
+    while True:
+        j = -1
+        for pat in ('{\\\\"is_active', '{\\"is_active', '{"is_active'):
+            j = html.find(pat, i)
+            if j >= 0:
+                break
+        if j < 0:
+            return None
+        k = html.rfind('"', max(0, j - 8), j)
+        if k < 0:
+            i = j + 1
+            continue
+        out = []
+        esc = False
+        pos = k + 1
+        while pos < len(html):
+            ch = html[pos]
+            if esc:
+                out.append(ch)
+                esc = False
+            elif ch == "\\":
+                out.append(ch)
+                esc = True
+            elif ch == '"':
+                break
+            else:
+                out.append(ch)
+            pos += 1
+        i = pos + 1
+        try:
+            inner = json.loads('"' + "".join(out) + '"')
+            cfg = json.loads(inner)
+        except Exception:
+            continue
+        if isinstance(cfg, dict) and isinstance(cfg.get("models"), dict) and len(cfg["models"]) >= 3:
+            return cfg["models"]
+    return None
+
+
+def sync_ca_models(force=False):
+    """ئۆتۆ-ئەپدێتی ChatbotAI: نەخشەی مۆدێڵەکان لە HTML ی /chat — ٦ کاتژمێر"""
+    import time as _t
+    if not force and _t.time() - _CA_SYNC["t"] < 21600:
+        return
+    _CA_SYNC["t"] = _t.time()
+    try:
+        r = requests.get(CA_BASE + "/chat", headers={"User-Agent": CA_UA, "Accept": "text/html",
+                                                     "Referer": CA_BASE + "/"}, timeout=(15, 40))
+        if r.status_code != 200:
+            print(f"[CA-SYNC] HTML {r.status_code}", flush=True)
+            return
+        models = _ca_extract_models(r.text)
+        if not models:
+            print("[CA-SYNC] نەخشە نەدۆزرایەوە — کاتی کۆن دەمێنێتەوە", flush=True)
+            return
+        ok = {}
+        for k, v in models.items():
+            try:
+                if not (v or {}).get("is_active"):
+                    continue
+                ok[k] = {"version": v.get("version") or k, "label": v.get("display_name") or k}
+            except Exception:
+                continue
+        if len(ok) >= 5:
+            MS["ca_ok"] = ok
+            _ms_save()
+            print(f"[CA-SYNC] کاتالۆگ {len(ok)} مۆدێڵ", flush=True)
+    except Exception as e:
+        print(f"[CA-SYNC] {str(e)[:80]}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -4064,6 +4388,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = pi_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "cb":
                     content = cb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "ca":
+                    content = ca_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -4126,6 +4452,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = pi_chat(nmsgs, nsrv["model_id"])
                     elif k == "cb":
                         content = cb_chat(nmsgs, nsrv["model_id"])
+                    elif k == "ca":
+                        content = ca_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -4219,7 +4547,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -4305,6 +4633,8 @@ def detect_brain(allow_fallback=True):
         servers += pi_servers()
         sync_cb_models()
         servers += cb_servers()
+        sync_ca_models()
+        servers += ca_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -4320,6 +4650,7 @@ def detect_brain(allow_fallback=True):
         sync_giz_models()
         sync_pi_models()
         sync_cb_models()
+        sync_ca_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -4709,6 +5040,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "cb"
+            if k == "ca":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ca_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "ca"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -4828,6 +5165,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "cb"
+                if k == "ca":
+                    a = ca_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "ca"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
