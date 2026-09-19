@@ -3154,26 +3154,41 @@ def _gz_parse_catalog(raw):
 
 
 def _gz_probe_all(cands):
-    """پۆلێنکردنی مۆدێڵەکان — ٨ هاوتەریب (تردی پاشبنەما)"""
+    """پۆلێنکردنی مۆدێڵەکان — ٣ هاوتەریب + stagger (session-429 → دووبارە)"""
     import time as _t
     from concurrent.futures import ThreadPoolExecutor
     changed = False
+    sess_err = {"n": 0}
 
     def probe(c):
         v, lbl = c["value"], c["label"]
-        try:
-            a = gz_chat([{"role": "user", "content": "Reply with: OK"}], v, timeout=45)
-            return (v, lbl, "ok" if a else "empty", a[:60])
-        except Exception as e:
-            msg = str(e)
-            if "لۆگین" in msg:
-                return (v, lbl, "login", "")
-            if "کوانتا" in msg or "cooldown" in msg:
-                return (v, lbl, "quota", "")
-            return (v, lbl, "err", msg[:60])
+        for attempt in (1, 2):
+            try:
+                a = gz_chat([{"role": "user", "content": "Reply with: OK"}], v, timeout=45)
+                return (v, lbl, "ok" if a else "empty", a[:60])
+            except Exception as e:
+                msg = str(e)
+                if "لۆگین" in msg:
+                    return (v, lbl, "login", "")
+                if "کوانتا" in msg or "cooldown" in msg:
+                    return (v, lbl, "quota", "")
+                if "session" in msg and attempt == 1:
+                    sess_err["n"] += 1
+                    _t.sleep(11)
+                    continue
+                return (v, lbl, "err", msg[:60])
+        return (v, lbl, "err", "session-retry")
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        for v, lbl, st, info in ex.map(probe, cands):
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futs = []
+        for c in cands:
+            futs.append(ex.submit(probe, c))
+            _t.sleep(0.15)
+        for f in futs:
+            try:
+                v, lbl, st, info = f.result()
+            except Exception:
+                continue
             if st == "ok":
                 MS.setdefault("gz_ok", {})[v] = {"label": lbl, "t": _t.time()}
                 MS.get("gz_bad", {}).pop(v, None)
@@ -3184,6 +3199,7 @@ def _gz_probe_all(cands):
                 changed = True
     if changed:
         _ms_save()
+    return sess_err["n"]
 
 
 def sync_giz_models(force=False):
@@ -3217,7 +3233,12 @@ def sync_giz_models(force=False):
             if gone:
                 _ms_save()
             if fresh:
-                _gz_probe_all(fresh)
+                se = _gz_probe_all(fresh)
+                if se > len(fresh) * 0.4:
+                    # زۆربەی session ەکان شکاین — ٢٠ خولەکی تر دووبارە
+                    _GZ_SYNC["t"] = _t.time() - 20400
+                    print(f"[GZ-SYNC] session-فەیل {se}/{len(fresh)} — دووبارە لە ٢٠ خولەک", flush=True)
+                    return
             print(f"[GZ-SYNC] تەواو — ok={len(MS.get('gz_ok', {}))}", flush=True)
         except Exception as e:
             print(f"[GZ-SYNC] {str(e)[:80]}", flush=True)
