@@ -567,3 +567,13 @@
 - **چاککردنی بۆگی CB-sync** (#76 پەسەند نەکراو بوو): `CB_FREE_BOTS` ئێستا فلتەر دەکرێت —
   تەنها ١٠ بۆتی بەخۆڕایی لە مێنیو (پێشتر هەر ٤٤ بوون بە tier f — ٣٤ heavy بە هەڵە لە مێنیو بوون).
 - **nv_accounts.json**: next_num 82426 → 82430 (حەوزی حیجز).
+
+## #78 (2026-09-20) — مۆدێڵەکانی arena بە دایرێکت
+- **دایرێکت مۆد**: route.continue_ — app ی arena تۆکنی recaptcha دروست دەکات، worker بۆدی لە ناوەڕاست
+  دەگۆڕێت (modelAId = UUID ی مۆدێڵ + content + UUID7 ی نوێ) → 200. سەلمێنراو: gpt-5.1، minimax-m2.7.
+- **sync_arena_models** (#78): GET arena.ai (login) → flight-data ی SSR → 218 مۆدێڵ → text→text →
+  MS["ar_ok"] (٩٠ مۆدێڵ). هر ٦ کاتژمێر. IDs: ar-<name>. battle = ar-battle هەرماوە.
+- **⚠️ کێشەی گەورەی Fly**: chromium لەسەر shared-cpu-1x هەمیشە HANG دەبێت (V8 CodeRange OOM + D-state)!
+  چارەسەر: `flyctl scale vm performance-1x` (dedicated CPU + 2GB) → کار دەکات.
+- worker: import شکست → بێدەنگ نامرێت ئێستا (print + reset).
+- دۆخی sync: `ar_ok` زیادکرا بۆ MS + load list.
