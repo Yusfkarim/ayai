@@ -5808,6 +5808,25 @@ def _ar_worker():
                             locale="en-US")
         ctx.add_cookies(cks)
         pg = ctx.new_page()
+        pg.add_init_script("""
+            (() => {
+                if (window.__arHooked) return;
+                window.__arHooked = true;
+                const orig = window.fetch;
+                window.fetch = async (...args) => {
+                    const res = await orig(...args);
+                    try {
+                        const u = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+                        if (u.includes('/nextjs-api/stream/') && res && res.body) {
+                            window.__arStatus = res.status;
+                            window.__arDec = new TextDecoder();
+                            window.__arReader = res.clone().body.getReader();
+                        }
+                    } catch (e) {}
+                    return res;
+                };
+            })();
+        """)
         pg.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=60000)
         pg.wait_for_timeout(6000)
         st.update({"browser": b, "ctx": ctx, "page": pg})
@@ -5890,11 +5909,36 @@ def _ar_worker():
                     ta.focus();
                     ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true}));
                 }""")
+                # 📡 خوێندنەوەی ستریم — کۆتایی یەکەم وەڵام (A/B) = ئامادە (چاوەڕێی B ناکەین)
                 t0 = time.time()
                 tos_done = False
+                acc, a, b2, status = "", "", "", None
                 while time.time() - t0 < job.get("timeout", 150):
-                    if ev.is_set() and holder.get("r"):
+                    if ev.is_set() and holder.get("r") and status is None:
+                        try:
+                            status = holder["r"].status
+                        except Exception:
+                            pass
+                    tap = pg.evaluate("""async () => {
+                        try {
+                            const s = window.__arStatus || null;
+                            if (!window.__arReader) return {s: s, c: null};
+                            const v = await window.__arReader.read();
+                            return {s: s, c: v.done ? "AR_END" : window.__arDec.decode(v.value, {stream: true})};
+                        } catch (e) { return {s: null, c: null}; }
+                    }""")
+                    if tap.get("s") and status is None:
+                        status = tap["s"]
+                    c = tap.get("c")
+                    if c == "AR_END":
+                        a, b2 = _ar_parse(acc)
                         break
+                    if c:
+                        acc += c
+                        a, b2 = _ar_parse(acc)
+                        done_mark = re.search(r'[ab]d:\{"finishReason', acc)
+                        if (a and done_mark) or (b2 and re.search(r'bd:\{"finishReason', acc)):
+                            break
                     # مۆدالی ToS لە یەکەم ناردن — بە coordinate کلیک بکە
                     if not tos_done and time.time() - t0 > 3:
                         box = pg.evaluate("""() => {
@@ -5908,26 +5952,23 @@ def _ar_worker():
                         if box:
                             pg.mouse.click(box["x"], box["y"])
                             tos_done = True
-                    pg.wait_for_timeout(450)
-                if not holder.get("r"):
+                    pg.wait_for_timeout(300)
+                if status is None and not acc:
                     raise RuntimeError("ar: وەڵام نەگەیشت")
-                resp = holder["r"]
-                code = str(resp.status)
-                if resp.status == 429:
+                code = str(status or "")
+                have = a or b2
+                if status == 429:
                     err = "ar: 429 لیمیت"
                     AR_COOLDOWN["until"] = time.time() + 360
-                elif resp.status == 200:
-                    # ⚠️ resp.text() بە cp1252 decode دەکات → مۆجیبەیکی عەرەبی
-                    # body() = بایت → UTF-8 بە دەست
-                    a, b2 = _ar_parse(resp.body().decode("utf-8", "replace"))
-                    out = a or b2
-                    if not out:
-                        err = "ar: stream بەتاڵ"
-                elif resp.status in (401, 403):
-                    err = f"ar: http {resp.status} — کوکی کۆن"
+                elif have:
+                    out = have
+                elif status in (401, 403):
+                    err = f"ar: http {status} — کوکی کۆن"
                     kill()
+                elif status and status != 200:
+                    err = f"ar: http {status}"
                 else:
-                    err = f"ar: http {resp.status}"
+                    err = "ar: stream بەتاڵ"
             finally:
                 try:
                     pg.remove_listener("response", on_resp)
