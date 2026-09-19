@@ -1790,6 +1790,168 @@ def ng_chat(messages, timeout=110):
     raise EMError("ng: وەڵام نەگەڕایەوە")
 
 
+
+# ════════════════════════════════════════════════════════════
+# ٢.١٦) ئۆتۆ-سینکی مۆدێڵ — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد بکات یان بگۆڕێت
+#      خۆکارانە دەخوێنرێتەوە؛ تەنها مۆدێڵی ڕاییگەی سەلمێنراو زیاد دەکرێت
+#      duck: لیست لە bundle ی فەرمییەوە | ak: پڕۆب ی بچووک بۆ مۆدێڵی نوێ
+# ════════════════════════════════════════════════════════════
+
+MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}}
+MS_T = {"duck": 0.0, "ak": 0.0}
+MS_LOCK = threading.Lock()
+
+
+def _ms_load():
+    try:
+        with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        for k in ("duck", "ak_ok", "ak_block"):
+            v = d.get(k)
+            if isinstance(v, dict):
+                MS[k].update(v)
+    except Exception:
+        pass
+
+
+def _ms_save():
+    try:
+        with open(MODEL_SYNC_FILE, "w", encoding="utf-8") as f:
+            json.dump(MS, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_ms_load()
+
+
+def _ms_dup(servers, model_id):
+    """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
+    n = norm_model(model_id)
+    if not n:
+        return True
+    for x in servers:
+        if n in norm_model(x["id"]) or n in norm_model(str(x.get("model_id", ""))):
+            return True
+    return False
+
+
+def sync_duck_models(servers):
+    """لیستی مۆدێڵە ڕاییگەکانی duck.ai ڕاستەوخۆ لە bundle ی فەرمی — هەر ٣٠ خولەک"""
+    if time.time() - MS_T["duck"] < 1800:
+        return
+    with MS_LOCK:
+        if time.time() - MS_T["duck"] < 1800:
+            return
+        MS_T["duck"] = time.time()
+    try:
+        s = _duck_session()
+        r = s.get("https://duck.ai/", headers={"Accept": "text/html", "Upgrade-Insecure-Requests": "1"},
+                  timeout=(15, 25))
+        m = re.search(r'(/dist/duckai-dist/entry\.duckai\.[A-Za-z0-9]+\.js)', r.text)
+        if not m:
+            print("[SYNC] duck: bundle نەدۆزرایەوە", flush=True)
+            return
+        r2 = s.get("https://duck.ai" + m.group(1), timeout=(15, 40))
+        js = r2.text
+        found = {}
+        for mo in re.finditer(r'\{model:"([a-z0-9./\-]+)",modelName:"[^"]*",modelVariant:"([^"]*)",'
+                              r'modelShortName:"([^"]*)".{0,600}?availableTo:\[([^\]]*)\]', js):
+            mid, variant, short, avail = mo.group(1), mo.group(2), mo.group(3), mo.group(4)
+            if "Free" not in avail:
+                continue
+            found[mid] = short or variant or mid
+        for mo in re.finditer(r'\{model:"([a-z0-9./\-]+)",upgradeModel:"[^"]+"\}', js):
+            found.pop(mo.group(1), None)  # مردووەکان لاببە
+        newd = {}
+        for mid, short in found.items():
+            slug = re.sub(r'[^a-z0-9.]+', '-', mid.lower()).strip('-')
+            newd[mid] = {"id": f"duck-{slug}", "name": f"{short} (Duck)",
+                         "model_id": mid, "kind": "duck"}
+        old_ids = set(MS.get("duck", {}).keys())
+        MS["duck"] = newd
+        _ms_save()
+        extras = [k for k in newd if not _ms_dup(servers, k)]
+        print(f"[SYNC] duck: {len(newd)} مۆدێڵی ڕاییگە ({','.join(newd)}) | نوێ: {extras}", flush=True)
+    except Exception as e:
+        print(f"[SYNC] duck هەڵە: {str(e)[:80]}", flush=True)
+
+
+def sync_ak_models(servers):
+    """anakin — مۆدێڵی نوێی لیستی گشتی → پڕۆب ی بچووک؛ تەنها ئەوەی میوان کاری دەکات زیاد دەکرێت"""
+    if time.time() - MS_T["ak"] < 3600:
+        return
+    with MS_LOCK:
+        if time.time() - MS_T["ak"] < 3600:
+            return
+        MS_T["ak"] = time.time()
+    try:
+        r = requests.get("https://api.anakin.ai/api/v1/ai-models?locale=en-US",
+                         headers={"User-Agent": DUCK_UA, "Origin": "https://app.anakin.ai",
+                                  "Referer": "https://app.anakin.ai/", "x-client-mode": "web"},
+                         timeout=(15, 25))
+        data = r.json().get("data") or []
+        cands = []
+        for x in data:
+            if not isinstance(x, dict):
+                continue
+            mid = x.get("modelId")
+            types = x.get("types") or []
+            label = str(x.get("label") or "")
+            if not mid or int(mid) in (308, 309) or "chat" not in types:
+                continue
+            if x.get("comingSoon") or x.get("legacy"):
+                continue
+            if re.search(r'flex|thinking|high|low|minimal', label, re.I):
+                continue
+            if str(mid) in MS["ak_ok"] or str(mid) in MS["ak_block"]:
+                continue
+            cands.append((int(mid), label))
+        cands.sort(reverse=True)  # نوێترین پێشتر
+        if not cands:
+            return
+        # سەرەتا پشکنینی تەندروستی — ٣٠٩ دەبێت کار بکات، ئەگینا IP لە cooldown ە و پڕۆب ڕاست ناکات
+        def _probe(mid, content="hi"):
+            payload = json.dumps({"app_id": 19510, "model_id": int(mid),
+                                  "messages": [{"role": "user", "content": content}]})
+            p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
+                               capture_output=True, timeout=60)
+            lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+            return json.loads(lines[-1]) if lines else {}
+        chk = _probe(309)
+        if not (chk.get("ok") and chk.get("answer")):
+            print("[SYNC] ak: ٣٠٩ وەڵام نەدایەوە — IP لە cooldown ە، پڕۆب دوادەخرێت", flush=True)
+            return
+        mid, label = cands[0]
+        res = _probe(mid, "Say exactly: OK")
+        if res.get("ok") and res.get("answer"):
+            MS["ak_ok"][str(mid)] = {"label": label, "t": time.time()}
+            print(f"[SYNC] ak: مۆدێڵی نوێی میوان ✅ {mid} {label}", flush=True)
+        else:
+            MS["ak_block"][str(mid)] = {"label": label, "t": time.time()}
+            print(f"[SYNC] ak: {mid} {label} بۆ میوان کراوە نییە", flush=True)
+        _ms_save()
+    except Exception as e:
+        print(f"[SYNC] ak هەڵە: {str(e)[:80]}", flush=True)
+
+
+def _apply_model_sync(servers):
+    """مۆدێڵە دۆزراوەکان بۆ لیست زیاد دەکات (بێ دووبارە)"""
+    out = list(servers)
+    for mid, e in MS.get("duck", {}).items():
+        if _ms_dup(out, mid):
+            continue
+        out.append(dict(e))
+    for mid, info in MS.get("ak_ok", {}).items():
+        if _ms_dup(out, mid):
+            continue
+        slug = re.sub(r'[^a-z0-9]+', '-', str(info.get("label", mid)).lower()).strip('-') or mid
+        out.append({"id": f"ak-{slug}-{mid}", "name": f"{info.get('label', mid)} (Anakin)",
+                    "model_id": str(mid), "kind": "ak"})
+    return out
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -2292,6 +2454,16 @@ def detect_brain(allow_fallback=True):
         servers += ng_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
+    # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
+    try:
+        sync_duck_models(servers)
+    except Exception as e:
+        print(f"[SYNC] duck fail: {e}", flush=True)
+    try:
+        sync_ak_models(servers)
+    except Exception as e:
+        print(f"[SYNC] ak fail: {e}", flush=True)
+    servers = _apply_model_sync(servers)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
