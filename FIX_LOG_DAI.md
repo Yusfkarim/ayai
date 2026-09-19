@@ -322,5 +322,5 @@
 - **ئۆتۆ-ئەپدێت:** sync_ct_models هەر ٦ کاتژمێر — چەرەکەکانی /chat/ (HTML + ٢ هۆپ) → ئارای {name,value} → مۆدێڵە زیندووەکان → MS[ct_ok] (تەنها زیادکردن، هیچ سڕینەوەیەک)؛ ئێستا: GPT-5.6 Luna
 - **بەک-ئێند + زنجیرە:** kind "ct" — API loop + API rebind + TG chain + TG rebind + LEAK_RE (\bchattide\b) + model_sync.json (ct_ok/ct_bad بە گەرمی)
 - **مینیو:** ct-gpt-5.6-luna لەگەڵ luna ی z02/act یەک دەنگ دەبێت (srv_key dedupe) → /v1/models هەر ٧٥ دەمێنێتەوە؛ MODEL_SOURCES[gpt-5-6-luna] = {act, ct, z02} → فەڵباکی خێرای هاو-مۆدێڵ
-- deploy #50 ✅ → /health ١٠٠ | /v1/models ٧٥
+- deploy #50 ✅ → /health ١٠١ | /v1/models ٧٥ (بەک-ئێند +١ ct؛ مینیو ct لەژێر دەنگی luna)
 - Fly: ct-gpt-5.6-luna → «CT-50-FLY-OK» ✅ (سانداکس: CT-50-OK ✅)
