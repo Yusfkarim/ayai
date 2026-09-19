@@ -1667,6 +1667,58 @@ def duck_chat(model_id, messages, timeout=110):
     raise last or EMError("duck: شکست")
 
 
+
+# ════════════════════════════════════════════════════════════
+# ٢.١٤) anakin.ai — «Free No Sign Up Chatgpt» — Gemini بێ تۆمار
+#      node client (anakin_client.mjs) — واژووی ڕەسەن: md5(object-hash(body)+SECRET+ts)
+#      لیمیت: ~٢ نامە/IP/پەنجەرە → cooldown ١٠ خولەک دوای ٤٢٩ — فەڵباکی زنجیرە
+# ════════════════════════════════════════════════════════════
+
+AK_CLIENT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anakin_client.mjs")
+_AK_COOLDOWN = {"until": 0.0}
+
+
+def ak_servers():
+    return [
+        {"id": "ak-gemini-2.5-flash", "name": "Gemini 2.5 Flash (Anakin)",
+         "model_id": "308", "kind": "ak"},
+        {"id": "ak-gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite (Anakin)",
+         "model_id": "309", "kind": "ak"},
+    ]
+
+
+def ak_chat(model_id, messages, timeout=110):
+    """چاتی anakin — node client؛ system تێکەڵ بە یەکەم نامە (شێوازی qb)"""
+    import time as _t
+    if _t.time() < _AK_COOLDOWN["until"]:
+        raise EMError("ak: cooldown")
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    rest = [m for m in messages if m.get("role") in ("user", "assistant")][-21:]
+    if rest and rest[0].get("role") == "user" and sys_txt:
+        rest = [dict(rest[0])]
+        rest[0] = dict(rest[0])
+        rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
+    payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
+    try:
+        p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
+                           capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise EMError("ak: timeout")
+    lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+    if not lines:
+        raise EMError("ak: no output")
+    try:
+        obj = json.loads(lines[-1])
+    except Exception:
+        raise EMError("ak: bad output")
+    if obj.get("ok") and obj.get("answer"):
+        return obj["answer"]
+    code = str(obj.get("code") or "")
+    if "429" in code:
+        _AK_COOLDOWN["until"] = _t.time() + 600
+    raise EMError(obj.get("error") or "ak: failed", obj.get("code"))
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -1969,6 +2021,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = qb_chat(history + [{"role": "user", "content": q}])
                 elif kind == "duck":
                     content = duck_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                elif kind == "ak":
+                    content = ak_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2003,6 +2057,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = qb_chat(nmsgs)
                     elif k == "duck":
                         content = duck_chat(nsrv["model_id"], nmsgs)
+                    elif k == "ak":
+                        content = ak_chat(nsrv["model_id"], nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2096,7 +2152,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2153,6 +2209,10 @@ def detect_brain(allow_fallback=True):
         servers += duck_servers()
     except Exception as e:
         print(f"[BRAIN] duck fail: {e}", flush=True)
+    try:
+        servers += ak_servers()
+    except Exception as e:
+        print(f"[BRAIN] ak fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -2413,6 +2473,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "duck"
+            if k == "ak":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ak_chat(cand["model_id"], msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "ak"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -2462,6 +2528,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "duck"
+                if k == "ak":
+                    a = ak_chat(nsrv["model_id"], nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "ak"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

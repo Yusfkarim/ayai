@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY easemate_client.mjs .
 COPY easemate_sign.wasm .
+COPY anakin_client.mjs .
+COPY anakin_objecthash.js .
 COPY deepai_client.mjs .
 COPY README.md .
 

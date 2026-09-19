@@ -207,3 +207,17 @@
 - deploy #41 ✅ → /health ٨١ (٧٦+٥)؛ Fly هەر ٥ مۆدێڵەکە تاقیکراوە: OK×٤ + 7+5→"12"
 - API پێرسۆنا ✅: Captain Sparrow → «Arrr! Paris» (duck-claude-haiku-4-5)
 - commit 848499a
+
+## #42 — anakin.ai — «Free No Sign Up Chatgpt» — Gemini x٢ بێ تۆمار — deploy ⏳
+- سەرچاوەی نوێ: ak — app.anakin.ai/apps/19510 (TRY_IT_OUT بێ لۆگین) → POST api.anakin.ai/api/v1/workspaces/0/apps/{appId}/draft-conversation-messages (SSE)
+- دیوار: body پێویستی بە واژووە: ts + sc + rc + ss
+- **شیکردنەوەی واژوو (کۆمەڵە):** کۆدە obfuscated ەکە لە bundle ی 82.bc7ec18b.js دۆزرایەوە:
+  - base64 بە ئەلفوبێی custom (a-z یەکەم!) + RC4 بە کلیل per-call → سترینگەکان
+  - cS: bodyHash=object-hash(body,{unorderedSets,unorderedObjects}) → rc=md5(bodyHash+SECRET+ts) → sc=md5(rc+SECRET+ts) → ss=md5(SECRET.replace('7','2').replace('9','1'))
+  - SECRET_C = '^wqZ*7@*2zTd2vcqPC9YWYgbwpq4dm&ZF9cQxpckt3Vge%' — ck بە «AcoQ23b8xfFeQX7u8zw8» تەنها ناوەکان دەگۆڕێت (ts/sc/rc/ss)
+  - پشتڕاستکرا: هەر سێ واژووەکە ١٠٠٪ لەگەڵ capture ی browser یەک دەکەون ✅
+- فایلەکان: anakin_client.mjs (CLI: stdin JSON → stdout {ok,answer}) + anakin_objecthash.js (vendored، MIT)
+- مۆدێڵە سەلمێنراوەکان: 309 = Gemini 2.5 Flash Lite ✅ («5» بۆ 2+3، «OKOK») + 308 = Gemini 2.5 Flash ✅
+- لیمیت: ٤٢٩/٤٢٩٠٠٠ بە IP (هەموو app ەکان، هەر زوو دوای ~٢-٣ نامە) → ak_chat cooldown ی ١٠ خولەک + فەڵباکی زنجیرە — پەیوەندی بەکارهێنەر ناتەکانێت
+- فرە-پەیام ✅ (messages history)؛ پێرسۆنا بە پێشگری «ئاراستەی سیستەم» (شێوازی qb) چونکە role=system ڕەت دەکرێتەوە
+- LEAK_RE: anakin|ئەنەکین؛ Dockerfile: COPY ی دوو فایلە نوێیەکە
