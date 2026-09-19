@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2397,6 +2397,172 @@ def sync_yl_models(force=False):
         print("[YL-SYNC] yollo زیندووە — yollo-chat ئامادە", flush=True)
     except Exception as e:
         print(f"[YL-SYNC] هەڵە: {str(e)[:80]}", flush=True)
+
+
+# ══════════ Heck AI (heck.ai) — §2.22 — بێ لۆگین؛ FREE = ٥٠ چات/ڕۆژ؛ probe-gated ══════════
+HK_BASE = "https://api.heckai.weight-wave.com/api/ha/v1"
+HK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+HK_LIMIT = {"until": 0.0}
+_HK = {"sid": "", "t": 0.0}
+# کاتالۆگی تایر-فری (لە چەرەکی layout هەڵدرا) — premium ەکان 401 ن — دانەمەزرێن
+HK_CATALOG = [
+    ("deepseek/deepseek-v4-flash", "DeepSeek v4 Flash"),
+    ("deepseek/deepseek-v4-pro", "DeepSeek v4 Pro"),
+    ("tencent/hy3-preview", "Tencent Hy3 Preview"),
+    ("qwen/qwen3.7-plus", "Qwen 3.7 Plus"),
+    ("stepfun/step-3.7-flash", "Step 3.7 Flash"),
+    ("google/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
+    ("google/gemini-3-flash-preview", "Gemini 3.0 Flash"),
+    ("openai/gpt-5.4-mini", "GPT 5.4 mini"),
+    ("minimax/minimax-m3", "Minimax M3"),
+    ("anthropic/claude-opus-4.8", "Claude Opus 4.8"),
+]
+
+
+def _hk_headers():
+    return {"User-Agent": HK_UA, "Content-Type": "application/json",
+            "Origin": "https://heck.ai", "Referer": "https://heck.ai/", "authorization": ""}
+
+
+def _hk_session(force=False):
+    import time as _t
+    if not force and _HK["sid"] and _t.time() - _HK["t"] < 3600:
+        return _HK["sid"]
+    r = requests.post(HK_BASE + "/session/create", json={"title": "chat"},
+                      headers=_hk_headers(), timeout=(10, 20))
+    sid = (r.json() or {}).get("id")
+    if not sid:
+        raise EMError(f"hk: session {str(r.text)[:60]}")
+    _HK.update(sid=sid, t=_t.time())
+    return sid
+
+
+def _hk_quota_ts():
+    import time as _t
+    return (int(_t.time()) // 86400 + 1) * 86400 + 300
+
+
+def hk_chat(messages, model_id="deepseek/deepseek-v4-flash", timeout=120):
+    """چاتی heck.ai — تک-شۆت (پرسیار + وەڵامی پێشوو)؛ 402 = کرێکی OpenRouter ەکەیان"""
+    import time as _t
+    if _t.time() < HK_LIMIT["until"]:
+        raise EMError("hk: upstream credit cooldown")
+    last, pq, pa = "", None, None
+    for m in reversed(messages):
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if m.get("role") == "user":
+            last = c
+            break
+        if pa is None:
+            pa = c
+        elif pq is None:
+            pq = c
+    if not last:
+        raise EMError("hk: هیچ پرسیار")
+    sid = _hk_session()
+    body = {"model": model_id, "question": last[-4000:], "language": "English",
+            "sessionId": sid, "previousQuestion": pq, "previousAnswer": pa,
+            "imgUrls": [], "superSmartMode": False}
+    try:
+        r = requests.post(HK_BASE + "/chat", json=body, headers=_hk_headers(),
+                          timeout=(15, timeout), stream=True)
+    except Exception as e:
+        raise EMError(f"hk: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code == 429:
+            HK_LIMIT["until"] = _t.time() + 600
+        elif r.status_code in (400, 500) and model_id in MS.get("hk_ok", {}):
+            MS["hk_ok"].pop(model_id, None)
+            MS.setdefault("hk_bad", {})[model_id] = {"code": r.status_code, "t": _t.time()}
+            _ms_save()
+        raise EMError(f"hk: {r.status_code}")
+    out = []
+    err = None
+    paywall = False
+    for line in r.text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        tok = line[5:].strip()
+        if not tok or tok == "[ERROR]":
+            continue
+        if tok.startswith("{"):
+            try:
+                j = json.loads(tok)
+            except Exception:
+                continue
+            msg = str(j.get("message") or "")
+            if j.get("error") or "error" in str(j.get("error", "")).lower():
+                err = msg[:90]
+                if "Payment Required" in msg or "402" in msg or "credits" in msg.lower():
+                    paywall = True
+                break
+            for key in ("content", "text", "answer", "token", "delta"):
+                v = j.get(key)
+                if isinstance(v, str) and v:
+                    out.append(v)
+                    break
+            continue
+        out.append(tok)
+    ans = "".join(out).strip()
+    if paywall:
+        HK_LIMIT["until"] = _hk_quota_ts()
+        if MS.get("hk_ok"):
+            MS["hk_ok"].clear()
+            _ms_save()
+            print("[HK] کرێکی سەرەوە بەتاڵ — hk_ok پاککرایەوە تا چاک بوو", flush=True)
+        raise EMError("hk: 402 upstream → دیلی تا نیوەشەوی UTC")
+    if not ans:
+        raise EMError(f"hk: {err or 'وەڵام بەتاڵ'}")
+    return ans
+
+
+def hk_servers():
+    labels = dict(HK_CATALOG)
+    out = []
+    for mid in list(MS.get("hk_ok", {}).keys())[:12]:
+        label = labels.get(mid, mid.split("/")[-1])
+        slug = re.sub(r'[^a-z0-9.]+', '-', str(mid).lower()).strip('-').replace('/', '-')
+        out.append({"id": f"hk-{slug}", "name": f"{label} (Heck)",
+                    "model_id": mid, "kind": "hk"})
+    return out
+
+
+def sync_hk_models(force=False):
+    """ئۆتۆ-ئەپدێتی heck: پشکنینی زیندوو — ٤٠٢ (کرێکی بەتاڵ) → هیچ؛ سەرکەوتن → هەموو کاتالۆگەکە ✅
+       نیو کاتژمێر لە کاتی مردوودا (زیندووبوونەوەی خێرا)، ٦ کاتژمێر لە کاتی زیندوودا"""
+    import time as _t
+    ok_now = bool(MS.get("hk_ok"))
+    ttl = 21600 if ok_now else 1800
+    if not force and _t.time() - MS_T.get("hk", 0.0) < ttl:
+        return
+    MS_T["hk"] = _t.time()
+    probe = "deepseek/deepseek-v4-flash"
+    try:
+        a = hk_chat([{"role": "user", "content": "Reply with exactly: OK"}], probe, timeout=45)
+        alive = bool(a)
+    except Exception as e:
+        alive = False
+        msg = str(e)[:70]
+        if "402" in msg or "credit" in msg.lower():
+            print(f"[HK-SYNC] کرێکی سەرەوە بەتاڵە ({msg}) — چاوەڕوانی پڕکردنەوە", flush=True)
+        else:
+            print(f"[HK-SYNC] پشکنین شکات: {msg}", flush=True)
+    if alive:
+        added = 0
+        for mid, _lbl in HK_CATALOG:
+            if mid not in MS.get("hk_ok", {}):
+                MS.setdefault("hk_ok", {})[mid] = {"t": _t.time()}
+                added += 1
+        for mid in list(MS.get("hk_bad", {}).keys()):
+            MS["hk_bad"].pop(mid, None)
+        if added or not ok_now:
+            _ms_save()
+        print(f"[HK-SYNC] heck زیندووە ✅ {added} مۆدێڵ چالاک بوون (hk_ok={len(MS['hk_ok'])})", flush=True)
+    elif ok_now and not MS.get("hk_ok"):
+        _ms_save()
 
 
 def _ms_dup(servers, model_id):
@@ -2843,6 +3009,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = ct_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "yl":
                     content = yl_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "hk":
+                    content = hk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2889,6 +3057,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = ct_chat(nmsgs, nsrv["model_id"])
                     elif k == "yl":
                         content = yl_chat(nmsgs, nsrv["model_id"])
+                    elif k == "hk":
+                        content = hk_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2982,7 +3152,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3052,6 +3222,8 @@ def detect_brain(allow_fallback=True):
         servers += ct_servers()
         sync_yl_models()
         servers += yl_servers()
+        sync_hk_models()
+        servers += hk_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3059,6 +3231,7 @@ def detect_brain(allow_fallback=True):
         sync_l7_models()
         sync_ct_models()
         sync_yl_models()
+        sync_hk_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3400,6 +3573,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "yl"
+            if k == "hk":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = hk_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "hk"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3479,6 +3658,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "yl"
+                if k == "hk":
+                    a = hk_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "hk"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

@@ -385,3 +385,12 @@
 - **تۆمارکردنیش بلۆکە:** فۆرمی Register (ناو+ئیمەیل+پاسوۆرد) دوگمەکەی **disabled** هەتا Cloudflare Turnstile تۆکن بدات — لە headless هەرگیز نایەت (هەمان کێشەی chatx/arena) → ناکرێت هەژمار دروست بکرێت بۆ ڕۆتەیشن
 - کاتالۆگ: model ی تاک بۆ هەر بۆت (grok-3-mini بینراو)؛ پلانی FREE بە کریتی ڕۆژانە دوای لۆگین (Ultra/Max بە پارە) — جێبەجێکردنی API ئامادەیە ئەگەر هەژمار بدرێت (شێوازی zerotwo)
 - بڕیار: داخرین — بێ زانیاری نوێ دووبارە ناگەڕێتەوە
+
+## #56 — Heck AI (heck.ai) — §2.22 probe-gated + کاتالۆگی تەواو هەڵدرا
+- داواکاری بەکارهێنەر: «heck.ai زیادکە بۆم و لیمتی مەیەڵە و هەموو مۆدیلەکانی بکەوە»
+- **کرێکردنەوە (بێ لۆگین):** POST api.heckai.weight-wave.com/api/ha/v1/session/create {title} ← sessionId ← POST /chat {model:"provider/id", question, language, sessionId, previousQuestion/Answer, imgUrls, superSmartMode} ← SSE data:<تۆکن> + [ERROR] جیسون
+- **کاتالۆگی تەواو (١١ فری + ٨ پریمیۆم لە چەرەکی layout):** deepseek-v4-flash/pro، tencent/hy3-preview، qwen3.7-plus، stepfun/step-3.7-flash، gemini-3.1-flash-lite، gemini-3-flash-preview، gpt-5.4-mini، minimax-m3، claude-opus-4.8 (فری) | opus-4.6، sonnet-4.6، gemini-3.1-pro، gemini-3.5-flash، kimi-k2.6، glm-5.1، gpt-5.4، grok-4.3 (پریمیۆم — 401)
+- **لیمیتەکەی:** FREE = ٥٠ چات/ڕۆژ + ٥ گەڕان (لە /api/stripe/price-info دەرکەوت) — ڕۆتەیشنی سێشن + 429 → کۆڵداونی ١٠ خولەک + 402 → دیلی تا نیوەشەوی UTC
+- **کێشەی ئێستا (بەڵگە):** هەموو مۆدێڵەکان 402 «Payment Required — can only afford 26 tokens» = **کرێتی OpenRouter ەکەیان بەتاڵە** (سەرەوەی خۆیان — هەموو مۆدێڵەکان، سێرچیش 402؛ :free ی OpenRouter = 500 چونکە لیست-ساید شیکاری) — ماڵپەرەکە ئێستا بۆ هیچ کەسێک کار ناکات
+- **چارەسەری زیرەنگ (probe-gate):** sync_hk_models هەر نیو کاتژمێر (لە کاتی مردوودا) ١ پشکنین — سەرکەوتن → **هەموو ١١ مۆدێڵەکە خۆکارانە دەچنە مینیو**؛ تا ئەوکات مینیو پاکە (هیچ مۆدێڵی مردوو نییە) — parser بە ٣ فۆرمات تاقیکرایەوە ✅
+- deploy #56 ✅
