@@ -310,3 +310,17 @@
 - deploy #49 ✅ → /health ١٠٠ | /v1/models ٧٥ (l7 ×٣ لە مینیو + GLM لەژێر دەنگی GLM ەکەی تر)
 - چاک: Dockerfile ← COPY model_sync.json (دۆخی گەرم لەگەڵ deploy)؛ prune ی ok لابرا (تەنها شکستی چات دەیسڕێت — catalogs بەپێی ناوچە دەگۆڕدرێن)
 - Fly: l7-minimax-m2.7 → «L7-49-OK» ✅ | l7-nemo → «20» ✅ | commits 7d8d8f1→4445b16
+
+## #50 — ChatTide (chattide.ai) + ئۆتۆ-ئەپدێت + لیمیت — deploy ✅ ١٠٠/٧٥
+- داواکاری بەکارهێنەر: «chattide.ai زیادبکەو ئۆتۆئەپدێتیش دانێ بۆی و لیمیتەکەشی مەبەڵێ»
+- **کرێپەکە (وەک میوان):** POST api.chattide.ai/aigc/chat/v2/professional/stream ← {spaceHandle,roleId:0,messages:[…],conversationId:null,model} ← SSE data:<تۆکن> + کۆتایی --@DONE@--
+- **ناسنامە:** visitorId = هەر ٣٢-هێکس؛ هێدەری vtoken = base64(RSA-PKCS1v15-pub(vid)) — کلیلە گشتییەکە (١٠٢٤-بت، e=65537) لە چەرەکی Next.js هەڵدرا؛ **بە stdlib ی خاوێن جێبەجێ کرا (پادینی تایپ-٢ ڕاندۆم — تایپ-١ ڕەت دەکرێتەوە)**
+- **لیمیت + چارەسەر (داواکاری «لیمیتەکەشی مەبەڵێ»):** ٢ چات/visitorId، freeCreditRefresh=-1 (هەرگیز)
+  - چارەسەر: هەر چاتێک visitorId ی نوێ → ڕۆتەیشنی ناسنامە → کوانتا کاری پێ ناکات (تاقیکرایەوە: ٧+ چات لە یەک IP)
+  - پاشبنەما: کۆدی 229/quota → دیلی هەر نیوەشەوی UTC (+٥ خولەک)؛ «Please refresh» → دیلی ١٠ خولەک (لەرینەوەی وەرگیر)
+- **§2.20:** CT_LIMIT + _ct_vtoken + _ct_identity + ct_chat (SSE + دیکۆدی `-=- --`→بۆشایی و `-=-n--`→هێڵی نوێ — هەمان کۆنڤێنشنی NG) + ct_servers + sync_ct_models
+- **ئۆتۆ-ئەپدێت:** sync_ct_models هەر ٦ کاتژمێر — چەرەکەکانی /chat/ (HTML + ٢ هۆپ) → ئارای {name,value} → مۆدێڵە زیندووەکان → MS[ct_ok] (تەنها زیادکردن، هیچ سڕینەوەیەک)؛ ئێستا: GPT-5.6 Luna
+- **بەک-ئێند + زنجیرە:** kind "ct" — API loop + API rebind + TG chain + TG rebind + LEAK_RE (\bchattide\b) + model_sync.json (ct_ok/ct_bad بە گەرمی)
+- **مینیو:** ct-gpt-5.6-luna لەگەڵ luna ی z02/act یەک دەنگ دەبێت (srv_key dedupe) → /v1/models هەر ٧٥ دەمێنێتەوە؛ MODEL_SOURCES[gpt-5-6-luna] = {act, ct, z02} → فەڵباکی خێرای هاو-مۆدێڵ
+- deploy #50 ✅ → /health ١٠٠ | /v1/models ٧٥
+- Fly: ct-gpt-5.6-luna → «CT-50-FLY-OK» ✅ (سانداکس: CT-50-OK ✅)

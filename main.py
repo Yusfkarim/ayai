@@ -2056,8 +2056,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2065,7 +2065,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2082,6 +2082,182 @@ def _ms_save():
 
 
 _ms_load()
+
+
+# ══════════ ChatTide (chattide.ai) — §2.20 — ٢ چات/ڕۆژ بۆ هەر IP (٠٠:٠٠ UTC نوێ دەبێتەوە) ══════════
+CT_LIMIT = {"quota_until": 0.0, "wobble_until": 0.0}
+CT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+_CT_N = int(
+    "c201d7ff13221b2c1c631aa9a1eea2d4ebf08f0b3aeefbbe7ef363923d9fa77f8045be0f3c76ba59e8a8a0356d09f13360c5ee989acd62ac264d543caef915ec978cbfedcd8a3877383864f31c1e5f50c88c6ac154bdc12cd8fef47bac80fec28765f04b1b55cf8656fce086ecde7843dd6e5ed92b82fb812e5646aaccdd3c2d", 16)
+_CT_E = 65537
+_CT_SYNC = {"t": 0.0}
+_CT_ARR_RE = re.compile(r'\[\{name:"[^"]{1,50}",value:"[^"]{1,50}"\}(?:,\{name:"[^"]{1,50}",value:"[^"]{1,50}"\}){0,30}\]')
+_CT_VAL_RE = re.compile(r'\{name:"([^"]{1,50})",value:"([^"]{1,50})"\}')
+_CT_FALLBACK = [("gpt-5.6-luna", "GPT 5.6 Luna")]
+
+
+def _ct_vtoken(vid):
+    """vtoken = base64(RSA-PKCS1v15-pub(vid)) — تەنها stdlib (پادینی تایپ-٢ ڕاندۆم)"""
+    import base64 as _b64
+    import secrets as _sc
+    ps_len = 128 - 3 - len(vid)
+    ps = bytearray()
+    while len(ps) < ps_len:
+        b = _sc.token_bytes(1)
+        if b != b"\x00":
+            ps += b
+    em = b"\x00\x02" + bytes(ps) + b"\x00" + vid.encode()
+    return _b64.b64encode(pow(int.from_bytes(em, "big"), _CT_E, _CT_N).to_bytes(128, "big")).decode()
+
+
+def _ct_identity():
+    """ناسنامەی میوانی نوێ: visitorId = md5-ڕاندۆم → vtoken + mo_uuid"""
+    import hashlib as _hl
+    from urllib.parse import quote as _q
+    vid = _hl.md5(("ct" + str(time.time_ns()) + str(random.random())).encode()).hexdigest()
+    vt = _ct_vtoken(vid)
+    mo = _hl.md5(("mo" + vid).encode()).hexdigest()
+    hd = {"accept": "text/event-stream,application/json, text/event-stream",
+          "content-type": "application/json", "lang": "en", "source": "web",
+          "referer": "https://www.chattide.ai/", "origin": "https://www.chattide.ai",
+          "sec-ch-ua": '"Not_A Brand";v="8", "Chromium";v="153", "HeadlessChrome";v="153"',
+          "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+          "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site",
+          "user-agent": CT_UA, "vtoken": vt}
+    ck = {"NEXT_LOCALE": "en", "mo_uuid": mo, "chatTide.visitor.id": _q(vt, safe="")}
+    return hd, ck
+
+
+def _ct_quota_ts():
+    """نیوەشەوی UTC ی داهاتوو + ٥ خولەک — کاتی نوێبوونەوەی کوانتای ڕۆژانە"""
+    return (int(time.time()) // 86400 + 1) * 86400 + 300
+
+
+def ct_chat(messages, model_id="gpt-5.6-luna", timeout=150):
+    """چاتی chattide.ai — میوان: ٢ چات/ڕۆژ بۆ هەر IP؛ کۆدی 229 → دیلی تا نیوەشەوی UTC"""
+    import time as _t
+    if _t.time() < CT_LIMIT["quota_until"]:
+        raise EMError("ct: daily quota (2/IP/day)")
+    if _t.time() < CT_LIMIT["wobble_until"]:
+        raise EMError("ct: wobble cooldown")
+    hd, ck = _ct_identity()
+    body = {"spaceHandle": True, "roleId": 0, "conversationId": None, "model": model_id,
+            "messages": [{"role": m.get("role", "user"),
+                          "content": [{"type": "text", "text": m.get("content") or ""}]} for m in messages]}
+    try:
+        r = requests.post("https://api.chattide.ai/aigc/chat/v2/professional/stream",
+                          json=body, headers=hd, cookies=ck, timeout=(15, timeout))
+    except Exception as e:
+        raise EMError(f"ct: {str(e)[:60]}")
+    if r.status_code != 200:
+        raise EMError(f"ct: {r.status_code}")
+    txt = r.text
+    if '"code":229' in txt or "quota has been exhausted" in txt:
+        CT_LIMIT["quota_until"] = _ct_quota_ts()
+        raise EMError("ct: 229 quota → دیلی بۆ نیوەشەوی UTC")
+    out = []
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        tok = line[5:].strip()
+        if not tok or tok == "--@DONE@--":
+            continue
+        if tok.startswith("Please refresh"):
+            CT_LIMIT["wobble_until"] = _t.time() + 600
+            raise EMError("ct: refresh-wobble → دیلی ١٠ خولەک")
+        if tok.startswith("{"):
+            try:
+                j = json.loads(tok)
+            except Exception:
+                continue
+            if str(j.get("code")) == "229" or "quota" in str(j.get("message") or "").lower():
+                CT_LIMIT["quota_until"] = _ct_quota_ts()
+                raise EMError("ct: 229 quota → دیلی بۆ نیوەشەوی UTC")
+            continue
+        out.append(tok)
+    ans = "".join(out).replace("-=- --", " ").replace("-=-n--", "\n").strip()
+    ans = re.sub(r" {3,}", "  ", ans)
+    if not ans:
+        CT_LIMIT["wobble_until"] = _t.time() + 300
+        raise EMError("ct: وەڵام بەتاڵ")
+    CT_LIMIT["quota_until"] = 0.0
+    CT_LIMIT["wobble_until"] = 0.0
+    return ans
+
+
+def _ct_label(mid):
+    out = []
+    for p in str(mid).split("-"):
+        out.append(p if p and p[0].isdigit() else p.capitalize())
+    return " ".join(out)
+
+
+def ct_servers():
+    ids = list(MS.get("ct_ok", {}).keys()) or [f for f, _ in _CT_FALLBACK]
+    labels = dict(_CT_FALLBACK)
+    out = []
+    for mid in ids[:6]:
+        label = labels.get(mid, _ct_label(mid))
+        slug = re.sub(r'[^a-z0-9.]+', '-', str(mid).lower()).strip('-')
+        out.append({"id": f"ct-{slug}", "name": f"{label} (ChatTide)",
+                    "model_id": mid, "kind": "ct"})
+    return out
+
+
+def _ct_is_model(val):
+    v = str(val)
+    if not re.match(r'^(gpt|claude|gemini|grok|llama|qwen|deepseek|mistral|glm|kimi|minimax|o[1-9])[\w.\-]*$', v):
+        return False
+    return not any(w in v for w in ("whisper", "tts", "embed", "image", "flux", "video", "music", "guard"))
+
+
+def sync_ct_models(force=False):
+    """ئۆتۆ-ئەپدێتی chattide: لیستی مۆدێڵە زیندووەکان لە چەرەکەکانی Next.js (TTL ٦ کاتژمێر).
+       هیچ شتێک ناسڕدرێتەوە — تەنها زیادکردن (یاسای ڕاگرتنی هەموو مۆدێڵەکان)"""
+    import time as _t
+    if not force and _t.time() - _CT_SYNC["t"] < 21600:
+        return
+    _CT_SYNC["t"] = _t.time()
+    found = {}
+
+    def _scan(js):
+        if 'value:"' not in js:
+            return
+        for arr in _CT_ARR_RE.findall(js):
+            for _nm, val in _CT_VAL_RE.findall(arr):
+                if _ct_is_model(val):
+                    found[val] = True
+
+    try:
+        h = {"User-Agent": CT_UA}
+        html = requests.get("https://www.chattide.ai/chat/", headers=h, timeout=(10, 20)).text
+        chunks = set(re.findall(r'/_next/static/chunks/[a-zA-Z0-9/_.\-]+\.js', html))
+        for cu in list(chunks)[:6]:
+            try:
+                js = requests.get("https://www.chattide.ai" + cu, headers=h, timeout=(10, 15)).text
+                _scan(js)
+                chunks |= set(re.findall(r'/_next/static/chunks/[a-zA-Z0-9/_.\-]+\.js', js))
+            except Exception:
+                continue
+        for cu in list(chunks)[:30]:
+            try:
+                js = requests.get("https://www.chattide.ai" + cu, headers=h, timeout=(10, 15)).text
+            except Exception:
+                continue
+            _scan(js)
+    except Exception as e:
+        print(f"[CT-SYNC] هەڵە: {str(e)[:80]}", flush=True)
+        return
+    added = 0
+    for mid in found:
+        if mid not in MS.get("ct_ok", {}) and mid not in MS.get("ct_bad", {}):
+            MS.setdefault("ct_ok", {})[mid] = {"t": time.time()}
+            added += 1
+            print(f"[CT-SYNC] مۆدێڵی نوێ: {mid}", flush=True)
+    if added:
+        _ms_save()
+    print(f"[CT-SYNC] chattide: {len(found)} دۆزرا، {added} زیادکرا، ct_ok={len(MS.get('ct_ok', {}))}", flush=True)
 
 
 def _ms_dup(servers, model_id):
@@ -2524,6 +2700,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = l7_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "g4f":
                     content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "ct":
+                    content = ct_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2566,6 +2744,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = l7_chat(nmsgs, nsrv["model_id"])
                     elif k == "g4f":
                         content = g4f_chat(nmsgs, nsrv["model_id"])
+                    elif k == "ct":
+                        content = ct_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2659,7 +2839,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2725,11 +2905,14 @@ def detect_brain(allow_fallback=True):
         sync_l7_models()
         servers += l7_servers()
         servers += _g4f_models()
+        sync_ct_models()
+        servers += ct_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
     try:
         sync_l7_models()
+        sync_ct_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3059,6 +3242,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "g4f"
+            if k == "ct":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ct_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "ct"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3128,6 +3317,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "g4f"
+                if k == "ct":
+                    a = ct_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "ct"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
