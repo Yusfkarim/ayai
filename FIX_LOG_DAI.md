@@ -269,3 +269,15 @@
 - **monica.im/home:** ئەپی وێب = Sign Up بەربەست (Google/Email/Apple) + reCAPTCHA/geetest — داخراو
 - **poe/mistral/helixmind:** 403 CF | deepseek 202-b0 | typegpt/freegpt/aiwnie: DNS مردوو
 - سیستەم نەگۆڕا — هێشتا #45 (٨٨/٦٨) لەسەرە
+
+## #47 — سکان ی گەورەی سەرچاوەی بچووک → LLM7.io زیادکرا — deploy ⏳
+- داواکاری بەکارهێنەر: «سەرچاوە بچووکە نوێیەکان بە ژمارەی زۆر سکان بکە»
+- سکرای ١٥+ کاندید: poe/mistral/helixmind ٤٠٣ CF، qwen login-wall، monica signup-wall، arena.ai reCAPTCHA v3، naga.ac/hcap ٤٠١ کلیل، api.navy ٤٠١، OVHcloud ٤٢٩ بەردەوام (کلیلی نایەت)
+- **✅ براوە: LLM7.io (api.llm7.io/v1)** — فەرمی، بێ کلیل بۆ میوان (١٠ داواکاری/خولەک، ٦٠/کاتژمێر بە IP)، OpenAI-سازگار
+  - ٤ مۆدێڵی زیندوو: codestral-latest ✅، mistral-Nemo-Instruct-2407 ✅ (٤٢)، minimax-m2.7 ✅، GLM-5.3-Flash ✅
+  - سیستەم پرۆمپتی دکتۆر التعافي تەواو پەیڕەو دەکات (وەڵامی عەرەبی بە پێرسۆنا ✅)
+- §2.17: L7_LIMIT (٤٢٩/٤٠٢ → ٦٠٠ چرکە cooldown)، l7_servers()، l7_chat(messages, model_id)
+- ٨ پاچە: بلۆک + detect_brain + TG dispatch + TG smart_rebind + API loop + API rebind + زنجیرە ×٢ + LEAK_RE (llm7)
+- GLM-5.3-Flash لە مینیو یەکگراوە لەگەڵ GLM ە سەرچاوەی تر (کلیل: glm-5-3-flash) — بەک-ئێند ٢ سەرچاوە
+- **بەک-ئێند: ٩٢ سەرچاوە | مینیو: ٧١ مۆدێڵ**
+- deploy #47 ⏳

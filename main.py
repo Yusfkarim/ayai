@@ -1729,6 +1729,48 @@ def ak_chat(model_id, messages, timeout=110):
 NG_LIMIT = {"until": 0.0}
 
 
+# ══════════ LLM7 (llm7.io) — بێ کلیل، OpenAI-سازگار §2.17 ══════════
+L7_LIMIT = {"until": 0.0}
+L7_BASE = "https://api.llm7.io/v1"
+
+
+def l7_servers():
+    out = []
+    for mid, label in (("codestral-latest", "Codestral"),
+                       ("mistral-Nemo-Instruct-2407", "Mistral Nemo"),
+                       ("minimax-m2.7", "MiniMax M2.7"),
+                       ("GLM-5.3-Flash", "GLM 5.3 Flash")):
+        slug = re.sub(r'[^a-z0-9.]+', '-', mid.lower()).strip('-')
+        out.append({"id": f"l7-{slug}", "name": f"{label} (LLM7)",
+                    "model_id": mid, "kind": "l7"})
+    return out
+
+
+def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
+    """چاتی llm7.io — میوان: ١٠ داواکاری/خولەک، ٦٠/کاتژمێر بێ کلیل"""
+    import time as _t
+    if _t.time() < L7_LIMIT["until"]:
+        raise EMError("l7: cooldown")
+    body = {"model": model_id, "messages": messages, "max_tokens": 1400}
+    try:
+        r = requests.post(L7_BASE + "/chat/completions", json=body,
+                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                                   "Content-Type": "application/json",
+                                   "Referer": "https://llm7.io"},
+                          timeout=(15, timeout))
+    except Exception as e:
+        raise EMError(f"l7: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code in (429, 402):
+            L7_LIMIT["until"] = _t.time() + 600
+        raise EMError(f"l7: {r.status_code}")
+    try:
+        m = r.json()["choices"][0]["message"]
+    except Exception:
+        raise EMError("l7: parse")
+    return (m.get("content") or "").strip()
+
+
 def ng_servers():
     return [{"id": "ng-gemini-flash-lite", "name": "Gemini 3.1 Flash Lite (NoteGPT)",
              "model_id": "gemini-3.1-flash-lite", "kind": "ng"}]
@@ -2230,7 +2272,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-        for kind in ("em", "aff", "cbc", "rwd", "pol"):
+        for kind in ("em", "aff", "cbc", "rwd", "l7", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
                 if cand and cand not in order:
@@ -2262,6 +2304,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = ak_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 elif kind == "ng":
                     content = ng_chat(history + [{"role": "user", "content": q}])
+                elif kind == "l7":
+                    content = l7_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2300,6 +2344,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = ak_chat(nsrv["model_id"], nmsgs)
                     elif k == "ng":
                         content = ng_chat(nmsgs)
+                    elif k == "l7":
+                        content = l7_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2393,7 +2439,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2456,6 +2502,7 @@ def detect_brain(allow_fallback=True):
         print(f"[BRAIN] ak fail: {e}", flush=True)
     try:
         servers += ng_servers()
+        servers += l7_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -2707,7 +2754,7 @@ def ask(session, question):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-    for kind in ("em", "aff", "cbc", "rwd", "pol"):
+    for kind in ("em", "aff", "cbc", "rwd", "l7", "pol"):
         if srv and srv.get("kind") == kind:
             continue
         cand = pick_in_kind(BRAIN["servers"], kind, srv["id"] if srv else "gpt")
@@ -2777,6 +2824,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "ng"
+            if k == "l7":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = l7_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "l7"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -2836,6 +2889,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "ng"
+                if k == "l7":
+                    a = l7_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "l7"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
