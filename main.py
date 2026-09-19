@@ -5919,7 +5919,9 @@ def _ar_worker():
                     err = "ar: 429 لیمیت"
                     AR_COOLDOWN["until"] = time.time() + 360
                 elif resp.status == 200:
-                    a, b2 = _ar_parse(resp.text())
+                    # ⚠️ resp.text() بە cp1252 decode دەکات → مۆجیبەیکی عەرەبی
+                    # body() = بایت → UTF-8 بە دەست
+                    a, b2 = _ar_parse(resp.body().decode("utf-8", "replace"))
                     out = a or b2
                     if not out:
                         err = "ar: stream بەتاڵ"
