@@ -375,3 +375,5 @@
   - **ناردن بە Cloudflare Turnstile دەپارێزرێت** (sitekey 0x4AAAAAAC_cZtVlrKQgA_T-) — headless: تۆکن هەرگیز نایەت (٤ تاقیکردنەوە: چاوەڕوانی خۆکار، کلیکی iframe، کلیکی کۆوردینات — هەموو بەتاڵ) → `{"turnstile_required":true}`
   - فۆرماتی sendchat تۆمارکرا بۆ داهاتوو: POST /sendchat {_token CSRF, user_id, chats_id, prompt, current_model, cf-turnstile-response} — ئەگەر چارەسەری Turnstile هەبوو، جێبەجێکردنی ئامادەیە
   - بڕیار: وەک arena.ai (recaptcha-v3) — بێ چارەسەر دووبارە ناگەڕێیەوە
+- **بەک-ئێند: ١٠٢ سەرچاوە | مینیو: ٧٦ مۆدێڵ** (+١ یۆلۆ — مۆدێڵی نوێی تایبەت)
+- deploy #54 ✅ → /health ١٠٢ | /v1/models ٧٦ | Fly: yl-yollo-chat → «YL-54-FLY-OK» ✅
