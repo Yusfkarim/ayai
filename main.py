@@ -5816,9 +5816,9 @@ def _ar_worker():
 
     while True:
         try:
-            job = _ARQ["q"].get(timeout=1500)
+            job = _ARQ["q"].get(timeout=3600)
         except Exception:
-            kill()  # ٢٥ خولەک بێ کار — ڕام پاک بکەوە (٤GB — گەرمی خێراتر)
+            kill()  # ٦٠ خولەک بێ کار — ڕام پاک بکەوە
             continue
         out, err, code = "", "", ""
         try:
@@ -5849,9 +5849,7 @@ def _ar_worker():
             pg.on("response", on_resp)
             rewrote = {"on": False}
             try:
-                # هەر جارێک گەڕانەوە بۆ ماڵپەر — evaluation تازە (جیاکردنەوەی بەکارهێنەران)
-                pg.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=60000)
-                pg.wait_for_timeout(4000)
+                # page پێشتر hydration کراوە (لە کۆتایی جوبی پێشوودا — بێ goto لێرە = خێرا)
                 if direct:
                     tgt = (MS.get("ar_ok") or {}).get(model_name) or {}
                     tid = tgt.get("id")
@@ -5886,7 +5884,7 @@ def _ar_worker():
                     set.call(ta, txt);
                     ta.dispatchEvent(new Event('input', {bubbles: true}));
                 }""", trig)
-                pg.wait_for_timeout(500)
+                pg.wait_for_timeout(300)
                 pg.evaluate("""() => {
                     const ta = document.querySelector('textarea');
                     ta.focus();
@@ -5910,7 +5908,7 @@ def _ar_worker():
                         if box:
                             pg.mouse.click(box["x"], box["y"])
                             tos_done = True
-                    pg.wait_for_timeout(900)
+                    pg.wait_for_timeout(450)
                 if not holder.get("r"):
                     raise RuntimeError("ar: وەڵام نەگەیشت")
                 resp = holder["r"]
@@ -5953,6 +5951,17 @@ def _ar_worker():
             job["ev"].set()
         except Exception:
             pass
+        # 🔄 پێش-ئامادەکردن بۆ جوبی داهاتوو — لە پاشبنەمادا (بەکارهێنەر چاوەڕێ ناکات)
+        try:
+            cur = st.get("page")
+            if cur:
+                cur.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=45000)
+                cur.wait_for_timeout(3500)
+        except Exception:
+            try:
+                kill()
+            except Exception:
+                pass
 
 
 def ar_servers():
