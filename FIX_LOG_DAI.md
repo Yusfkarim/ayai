@@ -208,7 +208,7 @@
 - API پێرسۆنا ✅: Captain Sparrow → «Arrr! Paris» (duck-claude-haiku-4-5)
 - commit 848499a
 
-## #42 — anakin.ai — «Free No Sign Up Chatgpt» — Gemini x٢ بێ تۆمار — deploy ⏳
+## #42 — anakin.ai — «Free No Sign Up Chatgpt» — Gemini x٢ بێ تۆمار — deploy ✅ ٨٣
 - سەرچاوەی نوێ: ak — app.anakin.ai/apps/19510 (TRY_IT_OUT بێ لۆگین) → POST api.anakin.ai/api/v1/workspaces/0/apps/{appId}/draft-conversation-messages (SSE)
 - دیوار: body پێویستی بە واژووە: ts + sc + rc + ss
 - **شیکردنەوەی واژوو (کۆمەڵە):** کۆدە obfuscated ەکە لە bundle ی 82.bc7ec18b.js دۆزرایەوە:
@@ -221,3 +221,5 @@
 - لیمیت: ٤٢٩/٤٢٩٠٠٠ بە IP (هەموو app ەکان، هەر زوو دوای ~٢-٣ نامە) → ak_chat cooldown ی ١٠ خولەک + فەڵباکی زنجیرە — پەیوەندی بەکارهێنەر ناتەکانێت
 - فرە-پەیام ✅ (messages history)؛ پێرسۆنا بە پێشگری «ئاراستەی سیستەم» (شێوازی qb) چونکە role=system ڕەت دەکرێتەوە
 - LEAK_RE: anakin|ئەنەکین؛ Dockerfile: COPY ی دوو فایلە نوێیەکە
+- deploy #42 ✅ → /health ٨٣ (٨١+٢)؛ Fly: ak-gemini-2.5-flash → «13» بۆ 6+7 ✅ + lite → «AK-FINAL» ✅
+- commit 375884f
