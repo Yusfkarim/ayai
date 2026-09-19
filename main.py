@@ -4545,28 +4545,17 @@ def sync_nv_models(force=False):
             print(f"[NV-SYNC] catalog {r.status_code}", flush=True)
             return
         items = (r.json() or {}).get("data") or []
-        by_bot = {}
+        ok = {}
         for m in items:
             k = (m or {}).get("modelKey") or ""
             b = m.get("botId")
-            if not k or k in NV_SKIP_KEYS:
+            if not k or k in NV_SKIP_KEYS or b is None:
                 continue
             if (m.get("type") or "") != "text":
                 continue
-            tier = "f" if b in NV_FREE_BOTS else ("p" if b in NV_PREM_CHEAP else ("x" if b in NV_PREMIUM_BOTS else ""))
-            if not tier:
-                continue
-            by_bot.setdefault(b, []).append((k, m.get("title") or k, tier))
-        ok = {}
-        for b, lst in by_bot.items():
-            tier = lst[0][2]
-            k, lbl = NV_PREF.get(b, lst[0][0]), None
-            for kk, tt, _ in lst:
-                if kk == k:
-                    lbl = tt
-                    break
-            if lbl is None:
-                k, lbl = lst[0][0], lst[0][1]
+            # هەموو مۆدێڵێک — یەک تۆمار بۆ هەر modelKey؛ mۆدێڵی نەناسراویش → x (خۆکار-نوێ)
+            tier = "f" if b in NV_FREE_BOTS else ("p" if b in NV_PREM_CHEAP else "x")
+            lbl = m.get("title") or k
             if lbl.startswith("models."):
                 lbl = (NV_FREE_BOTS.get(b) or NV_PREMIUM_BOTS.get(b) or k)
             ok[k] = {"botId": b, "label": lbl, "tier": tier}
