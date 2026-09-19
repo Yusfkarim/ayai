@@ -535,3 +535,10 @@
 - **تێبینی ڕاست:** سایت بەتەواوی پارەدار (402 subscription_required لەسەر هەموو شت — تاقیکراوەتەوە ٤٨ مۆدێڵ + وێنە + دەنگ + دۆکیومێنت؛ credit_balance=0) — بۆیە tier=x: هەر بانگێک → هەڵەی جوان → فەیلئۆڤەری هەمان مۆدێڵ لە سەرچاوەکانی تر. ئەگەر سەبسکریپشن کرای ئەکاونت (pimeyax560@dreameg.com) → tier=f لە کۆد + هەمووی زیندوو دەبێت.
 - **تەکنیک:** Supabase password-grant → کوکی sb-…-auth-token = JSON.stringify(session) ڕاوەڕاو (Bearer 401). AL_KEY anon لە کۆد. ڕیسێپی تەواو: AL_RECIPE_NOTPAID.md.
 - وایەر ×٤ + sync_al_models (٦کاتژمێر) + LEAK_RE += allchatbots. حەوز: ١ ئەکاونت (ساینئەپ = کۆنفرمی ئیمەیڵ پێویستە — خۆکار ناکرێت).
+
+## #73 — AI/ML API (aimlapi.com) — 2026-09-19
+- **داواکاری بەکارهێنەر:** ئەکاونت pimeyax560@dreameg.com / 12345678Rkjk@& (دروستکراوی ئەمڕۆ، isVerified=true، فەندز=0).
+- **تەکنیک:** PUT auth.aimlapi.com/v1/auth/account {email,password} + aim-device-id → JWT (~11کاتژمێر). کلیل: POST app.aimlapi.com/v1/keys (تەنها لە دروستکردندا تەواو دەدرێت) → کلیلەکە پاشەکەوت کرا لە aiml_key.json. چات: POST api.aimlapi.com/v1/chat/completions (OpenAI-جۆر).
+- **کاتالۆگ:** 938 مۆدێڵ (361 چاتی-یەکتا) — ١١٠ باشترین تۆمار کران (Sol Pro/Astra/Luna Pro/Terra Pro/Grok 4.6/Kimi K3/MiniMax M3/GLM 5.3/Qwen 3.8/Seed 2.0/Ernie 5.0/Nemotron 3/Muse Spark/Inkling/Mercury...).
+- **دۆخ:** سایت فەرمی دەڵێت "We do not offer free models" — هەموو چات 403 funds → tier=x (هەڵەی جوان → فەیلئۆڤەر). ئەگەر فەندز یان تریاڵ هەبوو → tier=f لە sync + هەمووی زیندوو.
+- وایەر ×٤ + sync (٦کاتژمێر) + LEAK_RE += aimlapi.

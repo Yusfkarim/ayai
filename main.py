@@ -2062,7 +2062,7 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}, "aiml_ok": {}}
 MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0, "al": 0.0}
 MS_LOCK = threading.Lock()
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad", "al_ok", "al_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad", "al_ok", "al_bad", "aiml_ok"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -4756,6 +4756,207 @@ def sync_al_models(force=False):
         print(f"[AL-SYNC] تۆمارکراو {len(ok)}", flush=True)
 
 
+# ══════════ AI/ML API (aimlapi.com) — §2.34 — دەروازەی 938 مۆدێڵ (پارەدار — tier-x) ══════════
+# لۆگین: PUT auth.aimlapi.com/v1/auth/account {email,password} + aim-device-id → token (~11کاتژمێر)
+# کلیل: POST app.aimlapi.com/v1/keys → چات: POST api.aimlapi.com/v1/chat/completions (OpenAI-جۆر)
+# ئەکاونت بێ-فەندز → 403 → هەڵەی جوان → فەیلئۆڤەری هەمان مۆدێڵ لە سەرچاوەکانی تر
+AIML_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aiml_key.json")
+AIML_ST = {"tok": None, "tok_t": 0.0, "key": None,
+           "email": "pimeyax560@dreameg.com", "password": "12345678Rkjk@&"}
+_AIML_SYNC = {"t": 0.0}
+AIML_MODELS = {
+    "openai/gpt-6-astra": "GPT-6 Astra", "openai/gpt-5.6-sol-pro": "GPT-5.6 Sol Pro",
+    "openai/gpt-5.6-sol": "GPT-5.6 Sol", "openai/gpt-5.6-terra-pro": "GPT-5.6 Terra Pro",
+    "openai/gpt-5.6-terra": "GPT-5.6 Terra", "openai/gpt-5.6-luna-pro": "GPT-5.6 Luna Pro",
+    "openai/gpt-5.6-luna": "GPT-5.6 Luna", "openai/gpt-5-5-pro": "GPT-5.5 Pro",
+    "openai/gpt-5-5": "GPT-5.5", "openai/gpt-5-4-pro": "GPT-5.4 Pro", "openai/gpt-5-4": "GPT-5.4",
+    "openai/gpt-5.4-mini": "GPT-5.4 Mini", "openai/gpt-5.4-nano": "GPT-5.4 Nano",
+    "openai/gpt-5-3-codex": "GPT-5.3 Codex", "openai/gpt-5-2-pro": "GPT-5.2 Pro",
+    "openai/gpt-5-2": "GPT-5.2", "openai/gpt-5-1": "GPT-5.1", "openai/gpt-5": "GPT-5",
+    "openai/gpt-5-mini": "GPT-5 Mini", "openai/gpt-5-nano": "GPT-5 Nano",
+    "openai/gpt-4.1": "GPT-4.1", "openai/gpt-4o": "GPT-4o", "openai/gpt-4o-mini": "GPT-4o Mini",
+    "openai/o3-pro": "o3 Pro", "openai/o3-mini": "o3 Mini", "openai/gpt-oss-120b": "GPT OSS 120B",
+    "anthropic/claude-opus-5": "Claude Opus 5", "anthropic/claude-opus-4.8": "Claude Opus 4.8",
+    "anthropic/claude-opus-4.7": "Claude Opus 4.7", "anthropic/claude-opus-4.5": "Claude Opus 4.5",
+    "anthropic/claude-sonnet-5": "Claude Sonnet 5", "anthropic/claude-sonnet-4.6": "Claude Sonnet 4.6",
+    "anthropic/claude-haiku-4.5": "Claude 4.5 Haiku", "anthropic/claude-fable-5.1": "Claude Fable 5.1",
+    "anthropic/claude-fable-5": "Claude Fable 5", "anthropic/claude-3-haiku": "Claude 3 Haiku",
+    "google/gemini-3.8-flash": "Gemini 3.8 Flash", "google/gemini-3.7-flash": "Gemini 3.7 Flash",
+    "google/gemini-3.6-flash": "Gemini 3.6 Flash", "google/gemini-3.5-flash": "Gemini 3.5 Flash",
+    "google/gemini-3.1-pro-preview": "Gemini 3.1 Pro", "google/gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
+    "google/gemini-2.5-pro": "Gemini 2.5 Pro", "google/gemini-2.5-flash": "Gemini 2.5 Flash",
+    "google/gemma-4-31b-it": "Gemma 4 31B",
+    "x-ai/grok-4-6": "Grok 4.6", "x-ai/grok-4-5": "Grok 4.5", "x-ai/grok-4-3": "Grok 4.3",
+    "x-ai/grok-4-20-0309-reasoning": "Grok 4.20", "x-ai/grok-4-1-fast-reasoning": "Grok 4.1 Fast",
+    "x-ai/grok-code-fast-1": "Grok Code Fast",
+    "moonshot/kimi-k3": "Kimi K3", "moonshot/kimi-k2-7-code": "Kimi K2.7 Code",
+    "moonshot/kimi-k2-5": "Kimi K2.5", "moonshotai/kimi-latest": "Kimi Latest",
+    "deepseek/deepseek-v4.1-flash": "DeepSeek V4.1 Flash", "deepseek/deepseek-v4-pro": "DeepSeek V4 Pro",
+    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash", "deepseek/deepseek-chat": "DeepSeek Chat",
+    "deepseek/deepseek-reasoner": "DeepSeek R1", "deepseek/deepseek-thinking-v3.2-exp": "DeepSeek V3.2 Think",
+    "minimax/minimax-m3": "MiniMax M3", "minimax/m2-7-highspeed": "MiniMax M2.7",
+    "minimax/m2-5-20260218": "MiniMax M2.5", "minimax/m1": "MiniMax M1",
+    "zhipu/glm-5.3": "GLM 5.3", "zhipu/glm-5.2": "GLM 5.2", "zhipu/glm-5-1": "GLM 5.1",
+    "zhipu/glm-5": "GLM 5", "zhipu/glm-4.7": "GLM 4.7", "z-ai/glm-5v-turbo": "GLM 5V Turbo",
+    "alibaba/qwen3.8-max": "Qwen 3.8 Max", "alibaba/qwen3.8-flash": "Qwen 3.8 Flash",
+    "alibaba/qwen3.7-max": "Qwen 3.7 Max", "alibaba/qwen3.6-plus": "Qwen 3.6 Plus",
+    "alibaba/qwen3-max": "Qwen 3 Max",
+    "bytedance/seed-2-0-pro": "Seed 2.0 Pro", "bytedance/seed-2-0-lite": "Seed 2.0 Lite",
+    "bytedance/seed-2-0-mini": "Seed 2.0 Mini", "bytedance/seed-1-8": "Seed 1.8",
+    "meta/muse-spark-1.3": "Muse Spark 1.3", "meta/muse-glimmer-30b": "Muse Glimmer 30B",
+    "nvidia/nemotron-3-ultra-550b-a55b": "Nemotron 3 Ultra", "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super",
+    "nvidia/nemotron-3-nano-30b-a3b": "Nemotron 3 Nano",
+    "tencent/hy4-preview": "Hy4 Preview", "tencent/hy3": "Hy3",
+    "baidu/ernie-5.0": "ERNIE 5.0", "amazon/nova-pro-v1": "Nova Pro 1.0",
+    "amazon/nova-lite-v1": "Nova Lite 1.0", "amazon/nova-micro-v1": "Nova Micro 1.0",
+    "stepfun/step-3.7-flash": "Step 3.7 Flash", "xiaomi/mimo-v2.5-pro": "MiMo V2.5 Pro",
+    "upstage/solar-pro4": "Solar Pro 4", "writer/palmyra-x5": "Palmyra X5",
+    "thinkingmachines/inkling": "Inkling", "inception/mercury-2.5": "Mercury 2.5",
+    "mistralai/mistral-medium-3.5": "Mistral Medium 3.5", "mistralai/mistral-large": "Mistral Large",
+    "mistralai/codestral-2508": "Codestral", "cohere/command-a": "Command A",
+    "perplexity/sonar-pro": "Sonar Pro", "perplexity/sonar": "Sonar",
+    "nousresearch/hermes-4-405b": "Hermes 4 405B", "ibm-granite/granite-4.2-8b": "Granite 4.2 8B",
+    "sakana/fugu-ultra-v2": "Fugu Ultra v2", "stealth/union-alpha": "Union Alpha",
+    "typesafe/jev": "Jev 1.13", "meituan/longcat-2.0": "LongCat 2.0", "poolside/laguna-s-2.1": "Laguna S 2.1"}
+
+
+def _aiml_load():
+    import json as _j
+    try:
+        d = _j.load(open(AIML_ACC_FILE, encoding="utf-8"))
+        AIML_ST["key"] = d.get("key")
+    except Exception:
+        pass
+
+
+def _aiml_save():
+    import json as _j
+    try:
+        _j.dump({"key": AIML_ST.get("key")}, open(AIML_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_aiml_load()
+
+
+def _aiml_login():
+    import time as _t, uuid as _u
+    if AIML_ST.get("tok") and _t.time() - AIML_ST.get("tok_t", 0) < 30000:
+        return AIML_ST["tok"]
+    try:
+        r = requests.put("https://auth.aimlapi.com/v1/auth/account",
+                         json={"email": AIML_ST["email"], "password": AIML_ST["password"]},
+                         headers={"aim-device-id": str(_u.uuid4()), "User-Agent": "Mozilla/5.0",
+                                  "Origin": "https://aimlapi.com", "Referer": "https://aimlapi.com/"},
+                         timeout=(15, 30))
+        if r.status_code != 200:
+            raise EMError(f"aiml-login {r.status_code}")
+        AIML_ST["tok"] = r.json().get("token")
+        AIML_ST["tok_t"] = _t.time()
+        return AIML_ST["tok"]
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"aiml: {str(e)[:60]}")
+
+
+def _aiml_ensure_key():
+    tok = _aiml_login()
+    H = {"Authorization": f"Bearer {tok}", "User-Agent": "Mozilla/5.0"}
+    if AIML_ST.get("key"):
+        return AIML_ST["key"]
+    # کیلی هەیە؟
+    r = requests.get("https://app.aimlapi.com/v1/keys", headers=H, timeout=(15, 30))
+    items = (r.json() or {}).get("items") or []
+    if not items:
+        r2 = requests.post("https://app.aimlapi.com/v1/keys", headers=H, json={"name": "ta3afi"}, timeout=(15, 30))
+        if r2.status_code not in (200, 201):
+            raise EMError(f"aiml-key {r2.status_code}")
+        items = [r2.json()]
+    # تەنها لە کاتی دروستکردندا key تەواو دەدرێت — ئەگەر کۆنەکە نەمانەوە، دووبارە دروست بکە
+    full = (items[0] or {}).get("key")
+    if not full:
+        r3 = requests.post("https://app.aimlapi.com/v1/keys", headers=H, json={"name": "ta3afi"}, timeout=(15, 30))
+        if r3.status_code not in (200, 201):
+            raise EMError(f"aiml-key {r3.status_code}")
+        full = (r3.json() or {}).get("key")
+    if not full:
+        raise EMError("aiml: هیچ کلیل")
+    AIML_ST["key"] = full
+    _aiml_save()
+    return full
+
+
+def aiml_chat(messages, model_id, timeout=110):
+    """چاتی AI/ML API — OpenAI-جۆر — 403 (فەندز) → فەیلئۆڤەر"""
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        lines.append({"role": role, "content": c})
+    if not lines:
+        raise EMError("aiml: هیچ نامە")
+    key = _aiml_ensure_key()
+    try:
+        r = requests.post("https://api.aimlapi.com/v1/chat/completions",
+                          headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                                   "User-Agent": "Mozilla/5.0"},
+                          json={"model": model_id, "messages": lines}, timeout=(15, timeout))
+    except Exception as e:
+        raise EMError(f"aiml: {str(e)[:60]}")
+    if r.status_code in (401, 403):
+        try:
+            j = r.json()
+        except Exception:
+            j = {}
+        msg = str((j.get("message") or j.get("error") or ""))[:60]
+        if "funds" in msg.lower():
+            raise EMError("aiml: پارەدار — بە فەندز بەردەستە")  # → فەیلئۆڤەر
+        if r.status_code == 401:
+            AIML_ST["tok"] = None
+            raise EMError("aiml: توکن")
+        raise EMError(f"aiml: {msg or r.status_code}")
+    if r.status_code == 429:
+        raise EMError("aiml: لیمیت")
+    if r.status_code != 200:
+        raise EMError(f"aiml: HTTP{r.status_code}")
+    try:
+        j = r.json()
+        ans = (j.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        if isinstance(ans, list):
+            ans = "".join(x.get("text", "") for x in ans if isinstance(x, dict))
+        ans = (ans or "").strip()
+        if ans:
+            return ans
+    except Exception:
+        pass
+    raise EMError("aiml: بەتاڵ")
+
+
+def aiml_servers():
+    out = []
+    for k, lbl in sorted(AIML_MODELS.items()):
+        slug = re.sub(r"[^a-z0-9]+", "-", str(k).lower()).strip("-") or "model"
+        out.append({"id": f"aiml-{slug}", "name": f"{lbl} (AI/ML)", "model_id": k, "kind": "aiml"})
+    return out
+
+
+def sync_aiml_models(force=False):
+    """تۆمارکردنی کاتالۆگی AI/ML — ٦ کاتژمێر — tier=x"""
+    import time as _t
+    if not force and _t.time() - _AIML_SYNC["t"] < 21600:
+        return
+    _AIML_SYNC["t"] = _t.time()
+    ok = {k: {"label": lbl, "tier": "x"} for k, lbl in AIML_MODELS.items()}
+    if ok:
+        MS["aiml_ok"] = ok
+        _ms_save()
+        print(f"[AIML-SYNC] تۆمارکراو {len(ok)}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -5224,6 +5425,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "al":
                     content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "aiml":
+                    content = aiml_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -5294,6 +5497,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = nv_chat(nmsgs, nsrv["model_id"])
                     elif k == "al":
                         content = al_chat(nmsgs, nsrv["model_id"])
+                    elif k == "aiml":
+                        content = aiml_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -5387,7 +5592,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|novaapp|allchatbots|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|novaapp|allchatbots|aimlapi|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -5481,6 +5686,8 @@ def detect_brain(allow_fallback=True):
         servers += nv_servers()
         sync_al_models()
         servers += al_servers()
+        sync_aiml_models()
+        servers += aiml_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -5500,6 +5707,7 @@ def detect_brain(allow_fallback=True):
         sync_ac_models()
         sync_nv_models()
         sync_al_models()
+        sync_aiml_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -5913,6 +6121,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "al"
+            if k == "aiml":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = aiml_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "aiml"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -6052,6 +6266,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "al"
+                if k == "aiml":
+                    a = aiml_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "aiml"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
