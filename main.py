@@ -6028,8 +6028,45 @@ def start_hf_keepalive():
     print(f"[KEEP] خۆپینگی {where} لەسەر {url}", flush=True)
 
 
+def _self_update_daemon():
+    """خۆ-نوێکردنەوە لە GitHub raw — هەر ١٠ خولەک؛ تەنها ئەگەر کۆدە نوێیە py_compile تێپەڕێت"""
+    import sys as _s, time as _t, subprocess as _sp
+    url = "https://raw.githubusercontent.com/Yusfkarim/ayai/main/main.py"
+    local = os.path.abspath(__file__)
+    while True:
+        _t.sleep(600)
+        try:
+            r = requests.get(url, timeout=(10, 30), headers={"User-Agent": "selfupdater"})
+            if r.status_code != 200:
+                continue
+            new = r.text
+            if "def main(" not in new:
+                continue
+            try:
+                cur = open(local, encoding="utf-8").read()
+            except Exception:
+                continue
+            if new == cur:
+                continue
+            tmp = local + ".new"
+            open(tmp, "w", encoding="utf-8").write(new)
+            if _sp.run([_s.executable, "-m", "py_compile", tmp], capture_output=True).returncode != 0:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+                continue
+            os.replace(tmp, local)
+            print("[SELF-UPDATE] کۆدی نوێ لە GitHub — ریستارت…", flush=True)
+            _t.sleep(2)
+            os.execv(_s.executable, [_s.executable] + _s.argv)
+        except Exception:
+            continue
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
+    threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
     start_hf_keepalive()
     me = tg("getMe")
