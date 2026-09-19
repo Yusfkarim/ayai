@@ -3100,53 +3100,60 @@ def gz_servers():
 
 
 def _gz_parse_catalog(raw):
-    """JS-catalog → لیستی {value, label}"""
+    """JS-catalog → لیستی {value, label, free0} — سکەنی ئۆبجێکت-بە-ئۆبجێکت (خێرا، بێ json5)"""
     import re as _re
-    try:
-        import json5 as _j5
-    except Exception:
-        _j5 = None
     i = raw.find("items:[")
     if i < 0:
-        raise EMError("gz: catalog items نییە")
+        return []
     t = raw[i + len("items:"):]
-    depth = 0
-    instr = None
-    esc = False
-    end = None
-    for idx, ch in enumerate(t):
-        if instr:
-            if esc:
-                esc = False
-            elif ch == "\\":
-                esc = True
-            elif ch == instr:
-                instr = None
-            continue
-        if ch in ("`", "'"):
-            instr = ch
-            esc = False
-        elif ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                end = idx + 1
-                break
-    body = t[:end].replace("`", "'")
-    body = _re.sub(r":\s*!0\b", ": true", body)
-    body = _re.sub(r":\s*!1\b", ": false", body)
-    body = _re.sub(r":\s*void 0\b", ": null", body)
-    if _j5 is not None:
-        items = _j5.loads(body)
-    else:
-        items = json.loads(body)
     out = []
-    for it in items:
-        v = (it or {}).get("value")
-        if not v or v in GZ_SKIP or it.get("hidden") or it.get("blockFreeTrial"):
+    seen = set()
+    pos = 0
+    n = len(t)
+    while True:
+        st = t.find("{value:", pos)
+        if st < 0 or st >= n:
+            break
+        depth = 0
+        instr = None
+        esc = False
+        en = -1
+        lim = min(st + 9000, n)
+        for idx in range(st, lim):
+            ch = t[idx]
+            if instr:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == instr:
+                    instr = None
+                continue
+            if ch in ("`", '"', "'"):
+                instr = ch
+                esc = False
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    en = idx
+                    break
+        if en < 0:
+            pos = st + 7
             continue
-        out.append({"value": v, "label": it.get("label") or v, "plans": it.get("plans")})
+        obj = t[st:en + 1]
+        pos = en + 1
+        mv = _re.search(r'value:\s*["\'`]([^"\'`]{1,80})["\'`]', obj)
+        if not mv:
+            continue
+        v = mv.group(1)
+        if v in seen:
+            continue
+        seen.add(v)
+        ml = _re.search(r'label:\s*["\'`]([^"\'`]{0,120})["\'`]', obj)
+        free0 = bool(_re.search(r'free:\s*\{[^}]*throttleLimit:\s*0', obj))
+        out.append({"value": v, "label": (ml.group(1) if ml else v), "free0": free0})
     return out
 
 
@@ -3165,10 +3172,7 @@ def sync_giz_models(force=False):
         cat = {}
         for c in cands:
             v = c["value"]
-            if v.startswith("gateway/"):
-                continue
-            pl = c.get("plans")
-            if isinstance(pl, dict) and "free" in pl and pl["free"].get("throttleLimit") == 0:
+            if v in GZ_SKIP or v.startswith("gateway/") or c.get("free0"):
                 continue
             cat[v] = c["label"]
         _GZ_SYNC["catalog"] = cat
