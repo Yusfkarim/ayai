@@ -30,3 +30,12 @@
 ## مۆدێڵی مێنیو:
 - `ar-battle` — "Arena Battle (arena.ai)" — battle mode: دوو مۆدێڵی نەناسراو (A/B) وەڵام دەدەن
 - direct mode قەدەغەیە بۆ نامەی-١ (سێرڤەر) — battle هەمیشە سەلامەتە
+
+## #78 — دایرێکت + مۆدێڵەکان (تەواو):
+- **دایرێکت**: worker route.continue_ دەکات — app تۆکن دروست دەکات، بۆدی دەگۆڕدرێت
+  (modelAId=UUID + content + UUID7ی نوێ) → 200 → a0/b0.
+- **مۆدێڵەکان**: sync_arena_models — flight-data ی SSR → 218 → text→text → ٩٠ مۆدێڵ (MS.ar_ok).
+  UUID ی هەر مۆدێڵ لە `{"id":"<uuid>","organization":...}` لە flight. key = `name` (نەک publicName).
+- **Fly**: shared-cpu-1x = chromium HANG (V8 CodeRange OOM)! performance-1x = 2GB OOM!
+  ✅ **performance-2x (2 CPU + 4GB)** — هەردوو مۆدەکە سەرکەوتوو.
+- dedupe: مۆدێڵە هاوبەشەکان (minimax-m2.7 وەک LLM7) یەک ئێنتریان هەیە — ئەو نەیتیڤە دەرەکە دەبات.

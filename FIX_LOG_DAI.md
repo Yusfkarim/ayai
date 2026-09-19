@@ -577,3 +577,5 @@
   چارەسەر: `flyctl scale vm performance-1x` (dedicated CPU + 2GB) → کار دەکات.
 - worker: import شکست → بێدەنگ نامرێت ئێستا (print + reset).
 - دۆخی sync: `ar_ok` زیادکرا بۆ MS + load list.
+- **OOM لە 2GB**: arena.ai + chromium لە performance-1x (2GB) OOM دەکەوێت → **performance-2x**
+  (2 CPU + 4GB) — تاقیکراوە: ar-kiteki «FLY-DIRECT-78» ✅ + ar-battle «BATTLE-78» ✅.
