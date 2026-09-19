@@ -433,4 +433,5 @@
   - **§2.24:** aka_chat + aka_servers + sync_akash_models (٦ کاتژمێر — لابردنی لابراوەکان وەک HF) + زنجیرە ×٤ + LEAK_RE (\bakash\b) + model_sync (aka_ok/aka_bad)
   - بۆنووس: gpt-oss-120b ئێستا لە ز02 (١٥/ڕۆژ) + Akash (بەرز) — فەڵباکی هاو-مۆدێڵ
 - تاقیکردنەوە: «AKA-59-A» (gpt-oss) ✅ «AKA-59-B» (llama) ✅
-- deploy #59 ✅
+- deploy #59 ✅ → /health ١٠٤ | /v1/models ٧٨ (+٢ ئاکاش: گپ-ئۆسس + لامای ٧٠B)
+- Fly: aka-openai-gpt-oss-120b → «AKA-59-FLY-OK» ✅ (لە IP ی داتاسەنتەریش کار دەکات)
