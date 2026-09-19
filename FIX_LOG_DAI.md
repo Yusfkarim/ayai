@@ -450,3 +450,12 @@
   - تاقیکراوە: «GKX-1» ✅ | ١٢/١٢ ✅
 - **❌ 1min.ai:** app.1min.ai ← لۆگین-واڵی تەواو (Join Waitlist)؛ API ەکەیان: api.1min.ai ← هەموو ڕێڕەوەکان 404 (تەنها بە API-key ی پارەدار) — داخرا
 - **#60 Fly-verified:** /health **115** | /v1/models **89** (+`hb-hotbot-chat`, +`gk-glm-4-flash`) | چات لە Fly: hb «HB-60-FLY» ✅ | gk ✅ | head **2c3faa3** | 1min.ai داخرا (لۆگین-واڵ + API پارەدار)
+
+## #61 — GizAI ✅ (§2.27) — ٥٢١ مۆدێڵ لە کاتالۆگ، خۆکار پشکنین
+- داواکاری بەکارهێنەر: giz.ai/assistant زیادبکە + هەموو مۆدێڵەکان + ئۆتۆئەپدێت + لیمیت مەیەڵە
+- **فلۆو (تەواو بە requests):** POST /api/data/spaces/spaceServer.createAnonymousSession {visitorId:32chr, session:{mode:chat, modeInput:{baseModel:dynamic, settings:{character:AI, responseMode:text}, reasoning:{level:low,mode:default}, context:general, reference:auto, showChoices:false}}} ← {sessionId} ← **POST /api/data/users/inferenceServer.infer {model, input:{messages:[{type:role, content}], sessionId, mode:chat, settings, context:general}, subscribeId:22chr, instanceId:21chr} + سەر x-giz-instance-id + کوکی pfb9 (ناسنامەی جێگیر — بەند بە IP نییە)** ← 201 {status:completed, output:"…"}
+- **کاتالۆگ:** cdnwww.giz.ai/api/model/choices/textGeneration (JS→json5) — ٥٢١ پاڵێوراو؛ sync ی ٦ کاتژمێر بە ترد؛ نوێیەکان بە ٨ هاوتەریب تاقی دەکرێنەوە؛ ok→gz_ok، 401/429→gz_bad؛ لابردنی ئەوانەی کاتالۆگ نەماون
+- **کوانتا:** بۆ هەر مۆدێڵی بەخۆڕایی ~٢-٤ داواکاری/کاتژمێر → 429 «limit for your Free plan» → cooldown ی ٣٧٠٠ چرکە؛ 401 «Please log in» (مۆدێڵە پارەدارەکان ~٣٠٠ gateway/*) → cooldown ی ڕۆژێک؛ بەکارهێنەر: لیمیت مەیەڵە
+- **dynamic (Auto) لە ڕێپلەی کار ناکات** (400 Dynamic model not found) — دەرکرا
+- سەندبۆکس IP بلۆکە (429 hosting) بەڵام **Fly بلۆک نەکراوە** — «GZ-FLY-61» ✅ لە Fly ەوە
+- مۆدێڵە کاراکانی سەلمێنراو: gemini-flash، gpt-5-4-nano (+gemini-flash-lite بەڵێنکراو)

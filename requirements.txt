@@ -1,3 +1,4 @@
 requests
 cryptography
 py-mini-racer
+json5

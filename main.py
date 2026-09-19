@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -3016,6 +3016,216 @@ def sync_gk_models(force=False):
         print(f"[GK-SYNC] {str(e)[:70]}", flush=True)
 
 
+# ══════════ GizAI (giz.ai) — §2.27 — کوانتا بۆ هەر مۆدێڵ ~١ کاتژمێر (بەکارهێنەر: لیمیت مەیەڵە) ══════════
+GZ_BASE = "https://www.giz.ai"
+GZ_CDN = "https://cdnwww.giz.ai/api/model/choices/textGeneration"
+GZ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+# ناسنامەی نەناسراو (کوکی pfb9) — سەرڤەر بەند بە IP نییە
+GZ_PFB9 = "c7380813ca955a386914044983fbcf6a082dbf2bea2eb91917b37ba33d6ff05b"
+GZ_SKIP = {"dynamic"}  # dynamic لە ڕێپلەی 400 دەدات (resolve ی session ی وێب دەوێت)
+GZ_COOLDOWN = {"quota": 3700.0, "login": 86400.0}
+_GZ_BADC = {}  # model → cooldown تا
+_GZ_SYNC = {"t": 0.0, "thread": None, "labels": {}}
+
+
+def _gz_rid(n):
+    import secrets as _sc, string as _st
+    return "".join(_sc.choice(_st.ascii_letters + _st.digits + "-_") for _ in range(n))
+
+
+def gz_chat(messages, model_id, timeout=110):
+    """چاتی GizAI — session ی نەناسراو ← infer → {"status":"completed","output":…}"""
+    import time as _t
+    if _t.time() < _GZ_BADC.get(model_id, 0):
+        raise EMError("gz: cooldown")
+    hist = [{"type": (m.get("role") or "user"), "content": m.get("content") or ""}
+            for m in messages if m.get("content")][-12:]
+    if not hist:
+        raise EMError("gz: هیچ نامە")
+    try:
+        s = requests.Session()
+        s.headers.update({"User-Agent": GZ_UA, "Content-Type": "application/json",
+                          "Origin": GZ_BASE, "Referer": GZ_BASE + "/assistant?mode=chat&baseModel=dynamic"})
+        s.cookies.set("pfb9", GZ_PFB9, domain="www.giz.ai")
+        r0 = s.post(GZ_BASE + "/api/data/spaces/spaceServer.createAnonymousSession",
+                    json={"visitorId": _gz_rid(32), "session": {"mode": "chat", "shared": False,
+                          "modeInput": {"baseModel": "dynamic", "settings": {"character": "AI", "responseMode": "text"},
+                          "reasoning": {"level": "low", "mode": "default"}, "context": "general",
+                          "reference": "auto", "showChoices": False}}}, timeout=(10, 25))
+        sid = (r0.json() or {}).get("sessionId") if r0.status_code in (200, 201) else None
+        if not sid:
+            raise EMError(f"gz: session {r0.status_code}")
+        inst = _gz_rid(21)
+        inf = {"model": model_id,
+               "input": {"messages": hist, "sessionId": sid, "mode": "chat",
+                         "settings": {"character": "AI", "responseMode": "text"}, "context": "general"},
+               "subscribeId": _gz_rid(22), "instanceId": inst}
+        r = s.post(GZ_BASE + "/api/data/users/inferenceServer.infer", json=inf,
+                   headers={"x-giz-instance-id": inst}, timeout=(15, timeout))
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"gz: {str(e)[:60]}")
+    if r.status_code == 429:
+        _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["quota"]
+        raise EMError("gz: کوانتای مۆدێڵ (~١ کاتژمێر)")
+    if r.status_code == 401:
+        _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["login"]
+        raise EMError("gz: لۆگین-واڵ")
+    if r.status_code != 201 and r.status_code != 200:
+        raise EMError(f"gz: {r.status_code}")
+    try:
+        j = r.json()
+    except Exception:
+        raise EMError("gz: parse")
+    if (j.get("status") or "completed") != "completed":
+        raise EMError(f"gz: status={j.get('status')}")
+    ans = (j.get("output") or "").strip()
+    if not ans:
+        raise EMError("gz: وەڵام بەتاڵ")
+    return ans
+
+
+def _gz_slug(v):
+    import re as _re
+    sl = _re.sub(r"[^a-zA-Z0-9]+", "-", v).strip("-").lower()
+    return sl[:60] or "model"
+
+
+def gz_servers():
+    out = []
+    for v, meta in sorted(MS.get("gz_ok", {}).items()):
+        if v in GZ_SKIP:
+            continue
+        lbl = (meta or {}).get("label") or v
+        out.append({"id": f"gz-{_gz_slug(v)}", "name": f"{lbl} (Giz)", "model_id": v, "kind": "gz"})
+    return out
+
+
+def _gz_parse_catalog(raw):
+    """JS-catalog → لیستی {value, label}"""
+    import re as _re
+    try:
+        import json5 as _j5
+    except Exception:
+        _j5 = None
+    i = raw.find("items:[")
+    if i < 0:
+        raise EMError("gz: catalog items نییە")
+    t = raw[i + len("items:"):]
+    depth = 0
+    instr = None
+    esc = False
+    end = None
+    for idx, ch in enumerate(t):
+        if instr:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == instr:
+                instr = None
+            continue
+        if ch in ("`", "'"):
+            instr = ch
+            esc = False
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                end = idx + 1
+                break
+    body = t[:end].replace("`", "'")
+    body = _re.sub(r":\s*!0\b", ": true", body)
+    body = _re.sub(r":\s*!1\b", ": false", body)
+    body = _re.sub(r":\s*void 0\b", ": null", body)
+    if _j5 is not None:
+        items = _j5.loads(body)
+    else:
+        items = json.loads(body)
+    out = []
+    for it in items:
+        v = (it or {}).get("value")
+        if not v or v in GZ_SKIP or it.get("hidden") or it.get("blockFreeTrial"):
+            continue
+        out.append({"value": v, "label": it.get("label") or v})
+    return out
+
+
+def _gz_probe_all(cands):
+    """پۆلێنکردنی مۆدێڵەکان — ٨ هاوتەریب (تردی پاشبنەما)"""
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    changed = False
+
+    def probe(c):
+        v, lbl = c["value"], c["label"]
+        try:
+            a = gz_chat([{"role": "user", "content": "Reply with: OK"}], v, timeout=45)
+            return (v, lbl, "ok" if a else "empty", a[:60])
+        except Exception as e:
+            msg = str(e)
+            if "لۆگین" in msg:
+                return (v, lbl, "login", "")
+            if "کوانتا" in msg or "cooldown" in msg:
+                return (v, lbl, "quota", "")
+            return (v, lbl, "err", msg[:60])
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for v, lbl, st, info in ex.map(probe, cands):
+            if st == "ok":
+                MS.setdefault("gz_ok", {})[v] = {"label": lbl, "t": _t.time()}
+                MS.get("gz_bad", {}).pop(v, None)
+                changed = True
+                print(f"[GZ] ✅ {v}", flush=True)
+            elif st in ("login", "quota", "empty"):
+                MS.get("gz_bad", {}).setdefault(v, {"t": _t.time(), "why": st})
+                changed = True
+    if changed:
+        _ms_save()
+
+
+def sync_giz_models(force=False):
+    """ئۆتۆ-ئەپدێتی GizAI: کاتالۆگی CDN (٦ کاتژمێر) — تاقیکردنەوەی نوێیەکان بە ترد"""
+    import time as _t, threading as _th
+    if not force and _t.time() - _GZ_SYNC["t"] < 21600:
+        return
+    th = _GZ_SYNC.get("thread")
+    if th is not None and th.is_alive():
+        return
+    _GZ_SYNC["t"] = _t.time()
+
+    def run():
+        try:
+            r = requests.get(GZ_CDN, headers={"User-Agent": GZ_UA}, timeout=(10, 40))
+            if r.status_code != 200:
+                print(f"[GZ-SYNC] catalog {r.status_code}", flush=True)
+                return
+            cands = _gz_parse_catalog(r.text)
+            cat_vals = {c["value"] for c in cands}
+            _GZ_SYNC["labels"] = {c["value"]: c["label"] for c in cands}
+            # ئۆتۆ-لابردنی ئەوانەی لە کاتالۆگ نەماون
+            gone = [v for v in MS.get("gz_ok", {}) if v not in cat_vals]
+            for v in gone:
+                MS.get("gz_ok", {}).pop(v, None)
+                print(f"[GZ-SYNC] لابردن: {v}", flush=True)
+            known_ok = set(MS.get("gz_ok", {}).keys())
+            known_bad = {v for v, m in MS.get("gz_bad", {}).items() if _t.time() - (m or {}).get("t", 0) < 86400 * 3}
+            fresh = [c for c in cands if c["value"] not in known_ok and c["value"] not in known_bad]
+            print(f"[GZ-SYNC] کاتالۆگ {len(cat_vals)} | نوێ بۆ پشکنین {len(fresh)}", flush=True)
+            if gone:
+                _ms_save()
+            if fresh:
+                _gz_probe_all(fresh)
+            print(f"[GZ-SYNC] تەواو — ok={len(MS.get('gz_ok', {}))}", flush=True)
+        except Exception as e:
+            print(f"[GZ-SYNC] {str(e)[:80]}", flush=True)
+
+    _GZ_SYNC["thread"] = _th.Thread(target=run, daemon=True)
+    _GZ_SYNC["thread"].start()
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -3470,6 +3680,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = hb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "gk":
                     content = gk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "gz":
+                    content = gz_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -3526,6 +3738,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = hb_chat(nmsgs, nsrv["model_id"])
                     elif k == "gk":
                         content = gk_chat(nmsgs, nsrv["model_id"])
+                    elif k == "gz":
+                        content = gz_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -3619,7 +3833,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3699,6 +3913,8 @@ def detect_brain(allow_fallback=True):
         servers += hb_servers()
         sync_gk_models()
         servers += gk_servers()
+        sync_giz_models()
+        servers += gz_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3711,6 +3927,7 @@ def detect_brain(allow_fallback=True):
         sync_akash_models()
         sync_hb_models()
         sync_gk_models()
+        sync_giz_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -4082,6 +4299,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "gk"
+            if k == "gz":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = gz_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "gz"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -4186,6 +4409,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "gk"
+                if k == "gz":
+                    a = gz_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "gz"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
