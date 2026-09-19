@@ -295,7 +295,7 @@
 - deploy #48 ✅ → /health ٩٧ | /v1/models ٧٤
 - Fly: g4f-nemotron-3-ultra → «G4F-FLY-OK» ✅ | commit 642c4c8
 
-## #49 — ئۆتۆ-ئەپدێتی گشتگیر + سکانی وردی نوێ — deploy ⏳
+## #49 — ئۆتۆ-ئەپدێتی گشتگیر + سکانی وردی نوێ — deploy ✅ ١٠٠/٧٥
 - داواکاری بەکارهێنەر: «بەوردی بگەڕێ بۆ سەرچاوەی نوێ، بەس لەبیرت نەچێت هەمووی ئۆتۆ ئەپدێتی هەبێ»
 - **سکانی ورد (شەپۆلی ٣):** hackclub (ئێستا Slack-auth ❌)، api.airforce (401 ❌)، deepinfra (401 ❌)، sharedchat/netfly (CF 403 ❌)، uncloseai (404 ❌)، theoldllm/yupp (429 ❌)، heck/free2gpt/wsupai (login ❌)
   - دەرەنجام: هیچ سەرچاوەیەکی تازەی بێ-کلیل لەم شەپۆلە — بەڵام کانگاکانی ناو سیستەم خۆیان سەرچاوەی زیندوون
@@ -307,4 +307,6 @@
   - نوێ: nemotron-3-super-120b (nvidia)، nemotron-3-nano:30b (ollama)
 - **خشتەی ئۆتۆ-ئەپدێتی گشتگیر:** duck(bundle) + anakin(catalog+probe) + pol/aff/rwd(live) + LLM7(turbo+probe) + G4F(popularity) ✅ | em/act/fla/qb/ng/cbc/z02: یەک-ئێندپۆینتی سەلمێنراو — هیچ بۆ سینککردن نییە
 - **بەک-ئێند: ١٠٠ سەرچاوە | مینیو: ٧٥ مۆدێڵ**
-- deploy #49 ⏳
+- deploy #49 ✅ → /health ١٠٠ | /v1/models ٧٥ (l7 ×٣ لە مینیو + GLM لەژێر دەنگی GLM ەکەی تر)
+- چاک: Dockerfile ← COPY model_sync.json (دۆخی گەرم لەگەڵ deploy)؛ prune ی ok لابرا (تەنها شکستی چات دەیسڕێت — catalogs بەپێی ناوچە دەگۆڕدرێن)
+- Fly: l7-minimax-m2.7 → «L7-49-OK» ✅ | l7-nemo → «20» ✅ | commits 7d8d8f1→4445b16
