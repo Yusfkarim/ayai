@@ -294,3 +294,17 @@
 - **بەک-ئێند: ٩٧ سەرچاوە | مینیو: ٧٤ مۆدێڵ** | anakin sync ئەم جارە کاری کرد (٣٤٤ پشکنرا)
 - deploy #48 ✅ → /health ٩٧ | /v1/models ٧٤
 - Fly: g4f-nemotron-3-ultra → «G4F-FLY-OK» ✅ | commit 642c4c8
+
+## #49 — ئۆتۆ-ئەپدێتی گشتگیر + سکانی وردی نوێ — deploy ⏳
+- داواکاری بەکارهێنەر: «بەوردی بگەڕێ بۆ سەرچاوەی نوێ، بەس لەبیرت نەچێت هەمووی ئۆتۆ ئەپدێتی هەبێ»
+- **سکانی ورد (شەپۆلی ٣):** hackclub (ئێستا Slack-auth ❌)، api.airforce (401 ❌)، deepinfra (401 ❌)، sharedchat/netfly (CF 403 ❌)، uncloseai (404 ❌)، theoldllm/yupp (429 ❌)، heck/free2gpt/wsupai (login ❌)
+  - دەرەنجام: هیچ سەرچاوەیەکی تازەی بێ-کلیل لەم شەپۆلە — بەڵام کانگاکانی ناو سیستەم خۆیان سەرچاوەی زیندوون
+- **✅ LLM7 → داینامیکی تەواو (§2.19):** sync_l7_models هەر ٣٠ خولەک — /v1/models → tier=turbo + model_type=chat → پشکنینی نوێیەکان (٣/خول، ڕێز بە ١٠RPM) → MS[l7_ok/l7_bad] پاشەکەوت لە model_sync.json؛ bad دەوەستێت ٢٤ کاتژمێر؛ لابردنی مردوو لە ok
+  - ئەنجام: هەر مۆدێڵێکی نوێی بێ-کلیل کە llm7 زیاد بکات (لیستەکەی زۆر دەگۆڕدرێت) خۆکارانە دەچێتە مینیو
+  - fallback: کۆدە ٤ی ناسراو ئەگەر کۆمەڵگە بەتاڵ بێت
+  - چاککردن: sync پێش servers+=l7_servers() جێبەجێ دەبێت (پێشتر دواتر بوو)
+- **✅ G4F → فراوانی داینامیکی:** ٢ دڵنیا (gpt-oss-120b, gpt-4o-mini) + پڕ بە باشترین ٨ بە باوبانگ لە ٩ پڕۆڤایەری متمانەپێکراو (groq/nvidia/gemini/ollama/openrouter-free…) — فلتەری دەقی (whisper/tts/image/guard دەرباز)
+  - نوێ: nemotron-3-super-120b (nvidia)، nemotron-3-nano:30b (ollama)
+- **خشتەی ئۆتۆ-ئەپدێتی گشتگیر:** duck(bundle) + anakin(catalog+probe) + pol/aff/rwd(live) + LLM7(turbo+probe) + G4F(popularity) ✅ | em/act/fla/qb/ng/cbc/z02: یەک-ئێندپۆینتی سەلمێنراو — هیچ بۆ سینککردن نییە
+- **بەک-ئێند: ١٠٠ سەرچاوە | مینیو: ٧٥ مۆدێڵ**
+- deploy #49 ⏳

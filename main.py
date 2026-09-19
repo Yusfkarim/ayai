@@ -1732,14 +1732,63 @@ NG_LIMIT = {"until": 0.0}
 # ══════════ LLM7 (llm7.io) — بێ کلیل، OpenAI-سازگار §2.17 ══════════
 L7_LIMIT = {"until": 0.0}
 L7_BASE = "https://api.llm7.io/v1"
+L7_FALLBACK = [("codestral-latest", "Codestral"),
+               ("mistral-Nemo-Instruct-2407", "Mistral Nemo"),
+               ("minimax-m2.7", "MiniMax M2.7"),
+               ("GLM-5.3-Flash", "GLM 5.3 Flash")]
+
+
+def sync_l7_models():
+    """ئۆتۆ-سینکی llm7 — turbo ی کۆمەڵگە + پشکنینی نوێیەکان (٣ لە خولێکدا) — هەر ٣٠ خولەک"""
+    import time as _t
+    if _t.time() - MS_T["l7"] < 1800:
+        return
+    try:
+        r = requests.get(L7_BASE + "/models", headers={"User-Agent": ACT_UAS[0]},
+                         timeout=(10, 20))
+        items = (r.json() or {}).get("data") or []
+    except Exception:
+        return
+    MS_T["l7"] = _t.time()
+    cands = [m["id"] for m in items
+             if m.get("tier") == "turbo" and m.get("model_type", "chat") == "chat"]
+    # مردووەکان لە ok دەربکە + bad ی کۆن دووبارە تاقی بکەوە (٢٤ کاتژمێر)
+    for mid in list(MS["l7_ok"].keys()):
+        if mid not in cands:
+            del MS["l7_ok"][mid]
+    for mid in list(MS["l7_bad"].keys()):
+        if _t.time() - float(MS["l7_bad"][mid].get("t") or 0) > 86400:
+            del MS["l7_bad"][mid]
+    probed = 0
+    for mid in cands:
+        if mid in MS["l7_ok"] or mid in MS["l7_bad"] or probed >= 3:
+            continue
+        probed += 1
+        try:
+            rr = requests.post(L7_BASE + "/chat/completions",
+                               json={"model": mid, "messages": [{"role": "user", "content": "Reply with: OK"}],
+                                     "max_tokens": 8},
+                               headers={"User-Agent": ACT_UAS[0], "Content-Type": "application/json"},
+                               timeout=(10, 45))
+            if rr.status_code == 200 and (rr.json().get("choices") or [{}])[0].get("message", {}).get("content"):
+                MS["l7_ok"][mid] = {"t": _t.time()}
+                print(f"[SYNC] l7: نوێی بێ-کلیل ✅ {mid}", flush=True)
+            else:
+                MS["l7_bad"][mid] = {"code": rr.status_code, "t": _t.time()}
+        except Exception as e:
+            MS["l7_bad"][mid] = {"err": str(e)[:60], "t": _t.time()}
+        _ms_save()
+        _t.sleep(1.5)
 
 
 def l7_servers():
+    ids = list(MS["l7_ok"].keys())
+    if not ids:
+        ids = [f for f, _ in L7_FALLBACK]
+    labels = dict(L7_FALLBACK)
     out = []
-    for mid, label in (("codestral-latest", "Codestral"),
-                       ("mistral-Nemo-Instruct-2407", "Mistral Nemo"),
-                       ("minimax-m2.7", "MiniMax M2.7"),
-                       ("GLM-5.3-Flash", "GLM 5.3 Flash")):
+    for mid in ids[:8]:
+        label = labels.get(mid, (mid.split("-")[0].capitalize() if mid else "LLM7"))
         slug = re.sub(r'[^a-z0-9.]+', '-', mid.lower()).strip('-')
         out.append({"id": f"l7-{slug}", "name": f"{label} (LLM7)",
                     "model_id": mid, "kind": "l7"})
@@ -1861,29 +1910,59 @@ def _g4f_baker_daemon():
         time.sleep(90)
 
 
+G4F_TRUST = {"groq.com", "nvidia.com", "gemini-v1beta", "ollama.com", "ollama-swarm",
+             "ollama.pro", "logfare.ai", "relayrouter.org", "openrouter.ai"}
+G4F_EXCLUDE = ("whisper", "tts", "embed", "bge", "guard", "image", "flux",
+               "stable-diffusion", "sdxl", "music", "video", "dall")
+
+
 def _g4f_models():
-    """لیستی داینامیکی — مۆدێڵی هەڵبژێردراو لە /v1/models"""
-    PREFER = [("openai/gpt-oss-120b", "GPT-OSS 120B"),
-              ("gpt-4o-mini", "GPT-4o mini"),
-              ("models/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
-              ("nemotron-3-ultra", "Nemotron 3 Ultra"),
-              ("gpt-5-6-luna", "GPT-5.6 Luna")]
+    """داینامیکی تەواو — باشترین ٨ بە باوبانگ لە پڕۆڤایەری متمانەپێکراو"""
     out, seen = [], set()
     try:
         r = requests.get(G4F_BASE + "/v1/models", headers=_g4f_headers(), timeout=(10, 20))
         items = (r.json() or {}).get("data") or []
     except Exception:
         items = []
-    for tail, label in PREFER:
+    PREFER = ["openai/gpt-oss-120b", "gpt-4o-mini"]
+    # ١. دوو دڵنیاکە
+    for tail in PREFER:
         for it in items:
             sid = str(it.get("id") or "")
             if sid == tail or sid.endswith(":" + tail):
                 slug = re.sub(r"[^a-z0-9.]+", "-", tail.lower()).strip("-")
                 if slug not in seen:
                     seen.add(slug)
-                    out.append({"id": f"g4f-{slug}", "name": f"{label} (G4F)",
+                    out.append({"id": f"g4f-{slug}", "name": f"{tail.split('/')[-1]} (G4F)",
                                 "model_id": sid, "kind": "g4f"})
                 break
+    # ٢. پڕۆڤایەری متمانەپێکراو — ڕیز بە داواکاری
+    pool = []
+    for it in items:
+        sid = str(it.get("id") or "")
+        owner = str(it.get("owned_by") or "")
+        if owner not in G4F_TRUST:
+            continue
+        if owner == "openrouter.ai" and ":free" not in sid:
+            continue
+        base = sid.split(":", 1)[1] if ":" in sid else sid
+        low = base.lower()
+        if any(x in low for x in G4F_EXCLUDE):
+            continue
+        try:
+            reqs = int(it.get("requests") or 0)
+        except Exception:
+            reqs = 0
+        pool.append((reqs, base, sid))
+    pool.sort(reverse=True)
+    for reqs, base, sid in pool:
+        if len(out) >= 8:
+            break
+        slug = re.sub(r"[^a-z0-9.]+", "-", base.lower()).strip("-")
+        if slug in seen:
+            continue
+        seen.add(slug)
+        out.append({"id": f"g4f-{slug}", "name": f"{base} (G4F)", "model_id": sid, "kind": "g4f"})
     return out
 
 
@@ -1979,8 +2058,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}}
-MS_T = {"duck": 0.0, "ak": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -1988,7 +2067,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2645,12 +2724,14 @@ def detect_brain(allow_fallback=True):
         print(f"[BRAIN] ak fail: {e}", flush=True)
     try:
         servers += ng_servers()
+        sync_l7_models()
         servers += l7_servers()
         servers += _g4f_models()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
     try:
+        sync_l7_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
