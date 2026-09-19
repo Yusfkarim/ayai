@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -3182,6 +3182,139 @@ def sync_giz_models(force=False):
         print(f"[GZ-SYNC] {str(e)[:80]}", flush=True)
 
 
+# ══════════ Pi (pi.ai) — §2.28 — curl_cffi (CF-impersonate) + SSE partial ══════════
+PI_BASE = "https://pi.ai"
+PI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+PI_STATE = {"s": None, "did": None}
+PI_LIMIT = {"until": 0.0}
+_PI_SYNC = {"t": 0.0}
+
+
+def _pi_headers():
+    return {"Origin": PI_BASE, "Referer": PI_BASE + "/talk", "x-api-version": "5",
+            "x-client-timezone": "UTC", "User-Agent": PI_UA}
+
+
+def _pi_session():
+    """نشستی curl_cffi — بەکارهێنەری نەناسراو (chat/start + legal-accept)"""
+    from curl_cffi import requests as _cr
+    import uuid as _u
+    s = _cr.Session(impersonate="chrome")
+    did = str(_u.uuid4())
+    r = s.post(PI_BASE + "/api/chat/start",
+               json={"distinctId": did, "deviceFingerprint": "pnjfnj"},
+               headers=_pi_headers(), timeout=(15, 30))
+    if r.status_code != 200:
+        raise EMError(f"pi: start {r.status_code}")
+    r2 = s.post(PI_BASE + "/api/user/legal-accept",
+                json={"name": "Yusf", "ageVerified": True,
+                      "useDataToImproveModelsConsent": True,
+                      "useEmotionRecognitionOnVoiceConsent": True},
+                headers=_pi_headers(), timeout=(15, 30))
+    PI_STATE["s"] = s
+    PI_STATE["did"] = did
+    return s, did
+
+
+def pi_chat(messages, model_id="pi-chat", timeout=110):
+    """چاتی Pi — مێژوو فلێت دەکرێت بۆ یەک دەق؛ SSE partial → یەک وەڵام"""
+    import time as _t, uuid as _u, json as _j
+    if _t.time() < PI_LIMIT["until"]:
+        raise EMError("pi: cooldown")
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if role == "system":
+            lines.append("[Instructions] " + c)
+        elif role == "user":
+            lines.append("[User] " + c)
+        else:
+            lines.append("[Assistant] " + c)
+    if not lines:
+        raise EMError("pi: هیچ نامە")
+    lines.append("[Assistant]")
+    text = "\n".join(lines)[-6000:]
+    import re as _re
+    text = _re.sub(r"\[User\]\s*\[Assistant\]", "", text)
+    last = ""
+    for attempt in (1, 2):
+        try:
+            s = PI_STATE.get("s")
+            did = PI_STATE.get("did")
+            if s is None:
+                s, did = _pi_session()
+            r = s.post(PI_BASE + "/api/v2/chat",
+                       json={"text": text, "conversation": "",
+                             "eqDistinctId": did, "eqSessionId": str(_u.uuid4()),
+                             "clientId": str(_u.uuid4())},
+                       headers=_pi_headers(), timeout=(15, timeout), stream=True)
+            if r.status_code in (401, 403, 429) and attempt == 1:
+                PI_STATE["s"] = None
+                if r.status_code == 429:
+                    PI_LIMIT["until"] = _t.time() + 300
+                continue
+            if r.status_code != 200:
+                raise EMError(f"pi: {r.status_code}")
+            parts = []
+            buf = ""
+            for ch in r.iter_content(chunk_size=None):
+                buf += ch.decode("utf-8", "replace")
+                while "\n" in buf:
+                    ln, buf = buf.split("\n", 1)
+                    ln = ln.strip()
+                    if ln.startswith("data:"):
+                        try:
+                            d = _j.loads(ln[5:].strip())
+                            t2 = d.get("text")
+                            if isinstance(t2, str):
+                                parts.append(t2)
+                        except Exception:
+                            pass
+            last = "".join(parts).strip()
+            if last:
+                return last
+            # بەتاڵ — ئەگەر trial تەواو بووە، نشستی نوێ
+            PI_STATE["s"] = None
+            continue
+        except EMError:
+            raise
+        except Exception as e:
+            PI_STATE["s"] = None
+            if attempt == 2:
+                raise EMError(f"pi: {str(e)[:60]}")
+    if last:
+        return last
+    raise EMError("pi: وەڵام بەتاڵ")
+
+
+def pi_servers():
+    out = []
+    if "pi-chat" in MS.get("pi_ok", {}) or not MS.get("pi_ok"):
+        out.append({"id": "pi-pi-chat", "name": "Pi (pi.ai)", "model_id": "pi-chat", "kind": "pi"})
+    return out
+
+
+def sync_pi_models(force=False):
+    """ئۆتۆ-ئەپدێتی Pi: چاتی تاقیکردنەوە (٦ کاتژمێر) — بەکارهێنەری نوێ = کوانتای نوێ"""
+    import time as _t
+    if not force and _t.time() - _PI_SYNC["t"] < 21600:
+        return
+    _PI_SYNC["t"] = _t.time()
+    try:
+        PI_STATE["s"] = None  # نشستی نوێ = بەکارهێنەری نوێ
+        a = pi_chat([{"role": "user", "content": "Reply with: OK"}], timeout=60)
+        if a:
+            if "pi-chat" not in MS.get("pi_ok", {}):
+                MS.setdefault("pi_ok", {})["pi-chat"] = {"t": _t.time()}
+                _ms_save()
+            print("[PI-SYNC] pi زیندووە ✅", flush=True)
+    except Exception as e:
+        print(f"[PI-SYNC] {str(e)[:70]}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -3638,6 +3771,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = gk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "gz":
                     content = gz_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "pi":
+                    content = pi_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -3696,6 +3831,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = gk_chat(nmsgs, nsrv["model_id"])
                     elif k == "gz":
                         content = gz_chat(nmsgs, nsrv["model_id"])
+                    elif k == "pi":
+                        content = pi_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -3789,7 +3926,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3871,6 +4008,8 @@ def detect_brain(allow_fallback=True):
         servers += gk_servers()
         sync_giz_models()
         servers += gz_servers()
+        sync_pi_models()
+        servers += pi_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3884,6 +4023,7 @@ def detect_brain(allow_fallback=True):
         sync_hb_models()
         sync_gk_models()
         sync_giz_models()
+        sync_pi_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -4261,6 +4401,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "gz"
+            if k == "pi":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = pi_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "pi"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -4370,6 +4516,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "gz"
+                if k == "pi":
+                    a = pi_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "pi"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

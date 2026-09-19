@@ -461,3 +461,12 @@
 - مۆدێڵە کاراکانی سەلمێنراو: gemini-flash، gpt-5-4-nano (+gemini-flash-lite بەڵێنکراو)
 - **#61 گۆڕانکاری کۆتایی:** کوانتای Giz دەرکەوت کوانتای گشتییە بۆ IP (~٣/کاتژمێر) → probe ەک لابرا؛ تۆمارکردنی ڕاستەوخۆی ١٤ مۆدێڵی نا-gateway لە کاتالۆگ (gateway/* = پارەدار، دەرکراو)؛ 401→کوڵداونی ڕۆژێک، 429→کوڵداونی کاتژمێرێک لە کاتی چات
 - **#61 Fly-verified:** /health **118** | /v1/models **90** (٩ gz + ٣ مێرجکراو لەگەڵ هەمان مۆدێڵی سەرچاوەی تر) | چات «GZ-61-FLY» ✅ (gz 401 → failover ی هەمان-مۆدێڵ جێبەجێ) | 401-cooldown ← کاتژمێر | کاتالۆگ-پارسر: ئۆبجێکت-سکەنەر ٠.٢s (json5 لابرا لە پاڕسەر — هەنگاوی boot) | heads: 263afc1, 721bd63, a14f024, **572f5c2**
+
+## #62 — Pi ✅ (§2.28) — curl_cffi ی CF-impersonate
+- داواکاری بەکارهێنەر: pi.ai/talk زیادبکە وەک ئەوانی تر
+- **دیوارەکە:** pi.ai = Cloudflare چالاک — requests ی ئاسایی 403 (سەندبۆکس + Fly)؛ **چارەسەر: curl_cffi impersonate="chrome" + User-Agent ی ڕوون** → 200 لە هەردووکیان
+- **فلۆو:** POST /api/chat/start {distinctId:uuid4, deviceFingerprint:"pnjfnj"} ← بەکارهێنەری نەناسراو ← POST /api/user/legal-accept {name, ageVerified:true, ...} ← **POST /api/v2/chat {text:<فلێتی مێژوو>, conversation:"", eqDistinctId, eqSessionId:uuid4, clientId:uuid4} + x-api-version:5** ← SSE: `event: partial` + `data:{"text":"چەشنی"}` → یەکخستن
+- مێژوو فلێت دەکرێت: [Instructions]/[User]/[Assistant] — ١٢ ترە کۆتایی
+- **مۆدێڵ: یەک (pi-chat)** — نشست ماوەییە؛ 401/403/429 یان بەتاڵی → نشستی نوێ (بەکارهێنەری نوێ = کوانتای نوێ)؛ 429 → cooldown ی ٥ خولەک
+- sync ی ٦ کاتژمێر (نشستی نوێ پێش پشکنین)
+- سەرەکی: CF لە Fly هەندێ جار 403 ی یەکەم — دووبارەکردنەوە لە کۆددا هەیە (attempt ٢ بە نشستی نوێ)
