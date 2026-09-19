@@ -1937,18 +1937,17 @@ def sync_ak_models(servers):
 
 
 def _apply_model_sync(servers):
-    """مۆدێڵە دۆزراوەکان بۆ لیست زیاد دەکات (بێ دووبارە)"""
+    """هەموو مۆدێڵە دۆزراوەکان زیاد دەکرێن — بێ سڕینەوەی هیچ سەرچاوەیەک؛
+       مینیو خۆی دووەکییەکان یەک دەخات (dedupe_servers) و بەک-ئێند هەردووکیان دەیهێڵێتەوە"""
     out = list(servers)
     for mid, e in MS.get("duck", {}).items():
-        if _ms_dup(out, mid):
-            continue
-        out.append(dict(e))
+        if not any(x["id"] == e["id"] for x in out):
+            out.append(dict(e))
     for mid, info in MS.get("ak_ok", {}).items():
-        if _ms_dup(out, mid):
-            continue
-        slug = re.sub(r'[^a-z0-9]+', '-', str(info.get("label", mid)).lower()).strip('-') or mid
-        out.append({"id": f"ak-{slug}-{mid}", "name": f"{info.get('label', mid)} (Anakin)",
-                    "model_id": str(mid), "kind": "ak"})
+        sid = f"ak-{re.sub(r'[^a-z0-9]+', '-', str(info.get('label', mid)).lower()).strip('-') or mid}-{mid}"
+        if not any(x["id"] == sid for x in out):
+            out.append({"id": sid, "name": f"{info.get('label', mid)} (Anakin)",
+                        "model_id": str(mid), "kind": "ak"})
     return out
 
 
@@ -2108,14 +2107,15 @@ def api_brain_ensure():
     new = detect_brain_api()
     if new["servers"]:
         API_BRAIN["mode"], API_BRAIN["servers"] = new["mode"], new["servers"]
+        rebuild_aliases(new["servers"])
         API_BRAIN["t"] = time.time()
         print(f"[API-BRAIN] {new['mode']} ({len(new['servers'])} سێرڤەر)", flush=True)
 
 
 def _api_servers():
-    # ناوە ڕاستەقینەکانی مۆدەڵەکان — وەک خۆیان (gemini-3-1، gpt-5-mini، …)
+    # ناوە ڕاستەقینەکانی مۆدەڵەکان — یەک دەنگ بۆ هەر مۆدێڵ (دووەکی سەرچاوەکان لە بەک-ئێند دەمێننەوە)
     return [{"alias": x["id"], "id": x["id"], "name": x.get("name", x["id"])}
-            for x in API_BRAIN["servers"]]
+            for x in dedupe_servers(API_BRAIN["servers"])]
 
 
 def _resolve_server(ref):
@@ -2226,6 +2226,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         # هیچ سیستەم پرۆمپت یان یاسای بۆتەکە لێرەدا نییە
         # زنجیرەی هەوڵ: سێرڤەری هەڵبژێردراو + یەکێک لە هەر سەرچاوەیەکی تر
         order = [srv]
+        # ⚡ فەڵباکی خێرا: هەمان مۆدێڵ لە سەرچاوەی تر
+        for alt in MODEL_SOURCES.get(srv_key(srv), []):
+            if alt["id"] != srv["id"] and alt not in order:
+                order.append(alt)
         for kind in ("em", "aff", "cbc", "rwd", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
@@ -2490,13 +2494,20 @@ def auto_refresh():
                 changed = (new["mode"] != BRAIN["mode"] or
                            [x["id"] for x in new["servers"]] != [x["id"] for x in BRAIN["servers"]])
                 BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
+                rebuild_aliases(new["servers"])
                 valid = {x["id"] for x in new["servers"]}
                 reborn = 0
                 for s in sessions.values():
                     if s["server"] not in valid:
-                        # ١. هەمان مۆدێڵ لە سەرچاوەیەکی تر
-                        mk = s.get("mkey") or norm_model(s["server"])
-                        rebind = next((x["id"] for x in new["servers"] if norm_model(x["id"]) == mk), None)
+                        # ١. هەمان مۆدێڵ لە سەرچاوەیەکی تر — کلیل + نەخشەی سەرچاوەکان
+                        old_key = SRV_KEY_BY_ID.get(s["server"]) or s.get("mkey") or norm_model(s["server"])
+                        alts = [x for x in MODEL_SOURCES.get(old_key, []) if x["id"] in valid]
+                        if alts:
+                            s["server"] = alts[0]["id"]
+                            s["mkey"] = old_key
+                            continue
+                        mk = s.get("mkey") or old_key
+                        rebind = next((x["id"] for x in new["servers"] if srv_key(x) == mk or norm_model(x["id"]) == mk), None)
                         if rebind:
                             s["server"] = rebind
                             continue
@@ -2504,7 +2515,7 @@ def auto_refresh():
                         up = smart_rebind(new["servers"], s["server"])
                         if up:
                             s["server"] = up
-                            s["mkey"] = norm_model(up)
+                            s["mkey"] = SRV_KEY_BY_ID.get(up) or norm_model(up)
                             reborn += 1
                 if reborn:
                     print(f"[REFRESH] 🔄 {reborn} سێشن بۆ نەوەی نوێتر نەقڵکران", flush=True)
@@ -2530,12 +2541,37 @@ def norm_model(mid):
     return s
 
 
+def srv_key(x):
+    """کلیلی سیمانتیکی مۆدێڵ — بۆ گروپکردنی هەمان مۆدێڵ لە سەرچاوەی جیاواز
+       model_id ی دەقی (نموونە: gpt-5.6-luna) → کلیلی هاوبەش؛ ژمارەی/نەبوون → id"""
+    mid = str(x.get("model_id") or "").strip()
+    if not mid or mid.isdigit():
+        mid = x["id"]
+    return norm_model(mid)
+
+
+# نەخشەی مۆدێڵ → هەموو سەرچاوەکانی (بۆ فەڵباکی ڕاستەوخۆی هەمان مۆدێڵ)
+MODEL_SOURCES = {}
+SRV_KEY_BY_ID = {}
+
+
+def rebuild_aliases(servers):
+    """MODEL_SOURCES نوێ دەکاتەوە — مۆدێڵ → لیستی هەموو سەرچاوەکانی بە ڕیز"""
+    MODEL_SOURCES.clear()
+    SRV_KEY_BY_ID.clear()
+    for x in servers:
+        k = srv_key(x)
+        SRV_KEY_BY_ID[x["id"]] = k
+        MODEL_SOURCES.setdefault(k, []).append(x)
+
+
 def dedupe_servers(servers):
-    """یەکێک بۆ هەر مۆدێڵ — یەکەم سەرچاوە (easemate) دەبێتە سەرەکی"""
+    """یەکێک بۆ هەر مۆدێڵ — یەکەم سەرچاوە سەرەکییە؛ دووەکییەکان لە model_sources دەمێننەوە"""
+    rebuild_aliases(servers)
     seen = set()
     uniq = []
     for x in servers:
-        k = norm_model(x["id"])
+        k = srv_key(x)
         if k in seen:
             continue
         seen.add(k)
@@ -2640,7 +2676,8 @@ def get_session(user_id):
         s = sessions.get(user_id)
         if s is None:
             default = BRAIN["servers"][0]["id"] if BRAIN["servers"] else "openai"
-            s = {"server": default, "history": [], "mkey": norm_model(default) if default else None}
+            dflt = next((x for x in BRAIN["servers"] if x["id"] == default), None)
+            s = {"server": default, "history": [], "mkey": (srv_key(dflt) if dflt else (norm_model(default) if default else None))}
             sessions[user_id] = s
         return s
 
@@ -2651,10 +2688,10 @@ def ask(session, question):
     sys_msg = {"role": "system", "content": SYSTEM_PROMPT}
     srv = next((x for x in BRAIN["servers"] if x["id"] == session["server"]), None)
     if not srv and BRAIN["servers"]:
-        # ١. هەمان مۆدێڵ لە سەرچاوەیەکی تر
-        mk = session.get("mkey") or norm_model(session.get("server") or "")
+        # ١. هەمان مۆدێڵ لە سەرچاوەیەکی تر — بە کلیلی سیمانتیکی مۆدێڵ
+        mk = session.get("mkey") or SRV_KEY_BY_ID.get(session.get("server") or "") or norm_model(session.get("server") or "")
         if mk:
-            srv = next((x for x in BRAIN["servers"] if norm_model(x["id"]) == mk), None)
+            srv = next((x for x in BRAIN["servers"] if srv_key(x) == mk or norm_model(x["id"]) == mk), None)
             if srv:
                 session["server"] = srv["id"]
     if not srv and BRAIN["servers"]:
@@ -2666,6 +2703,10 @@ def ask(session, question):
     order = []
     if srv:
         order.append(srv)
+        # ⚡ فەڵباکی خێرا: هەمان مۆدێڵ لە سەرچاوەی تر — پێش هەر شتێکی تر
+        for alt in MODEL_SOURCES.get(srv_key(srv), []):
+            if alt["id"] != srv["id"] and alt not in order:
+                order.append(alt)
     for kind in ("em", "aff", "cbc", "rwd", "pol"):
         if srv and srv.get("kind") == kind:
             continue
@@ -2848,6 +2889,7 @@ def handle_message(msg):
             return
         with _lock:
             BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
+        rebuild_aliases(new["servers"])
         servers = new["servers"]
         s = get_session(user_id)
         if s["server"] not in [x["id"] for x in servers]:
@@ -2855,7 +2897,7 @@ def handle_message(msg):
         # مۆدێلە دووبارەکان یەک دەخرێن — هەمان مۆدێڵ لە چەند سەرچاوە = یەک دەنگ
         uniq = dedupe_servers(servers)
         with _lock:
-            pending[user_id] = {str(i): {"id": x["id"], "key": norm_model(x["id"])} for i, x in enumerate(uniq, 1)}
+            pending[user_id] = {str(i): {"id": x["id"], "key": srv_key(x)} for i, x in enumerate(uniq, 1)}
         body = f"🤖 <b>قائمة الموديلات</b> — {len(uniq)} موديل (المكرر بين المصادر مدموج):\n\n"
         for i, x in enumerate(uniq, 1):
             mark = " ✅" if x["id"] == s["server"] else ""
@@ -2885,6 +2927,7 @@ def handle_message(msg):
     if not BRAIN["servers"]:
         new = detect_brain()
         BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
+        rebuild_aliases(new["servers"])
         if not BRAIN["servers"]:
             reply(chat_id, "⚠️ لا يوجد مصدر متاح الآن — حاول بعد قليل.")
             return
@@ -3013,6 +3056,7 @@ def main():
     print("🧠 دەستنیشانکردنی سەرچاوەی AI…", flush=True)
     new = detect_brain()
     BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
+    rebuild_aliases(new["servers"])
     if new["mode"] == "aff":
         print(f"🟢 مێشکی سەرەکی: aifreeforever ({len(new['servers'])} سێرڤەر)", flush=True)
     elif new["mode"] == "pol":
