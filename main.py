@@ -1752,10 +1752,8 @@ def sync_l7_models():
     MS_T["l7"] = _t.time()
     cands = [m["id"] for m in items
              if m.get("tier") == "turbo" and m.get("model_type", "chat") == "chat"]
-    # مردووەکان لە ok دەربکە + bad ی کۆن دووبارە تاقی بکەوە (٢٤ کاتژمێر)
-    for mid in list(MS["l7_ok"].keys()):
-        if mid not in cands:
-            del MS["l7_ok"][mid]
+    # تێبینی: ok تەنها کاتێک لابردرێت کە چاتەکەی خۆی شکست بخوات (ل7 catalogs بەپێی ناوچە دەگۆڕدرێت)
+    # bad ی کۆن دووبارە تاقی بکەوە (٢٤ کاتژمێر)
     for mid in list(MS["l7_bad"].keys()):
         if _t.time() - float(MS["l7_bad"][mid].get("t") or 0) > 86400:
             del MS["l7_bad"][mid]
