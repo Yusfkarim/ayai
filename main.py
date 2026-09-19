@@ -4697,7 +4697,7 @@ def al_chat(messages, model_id, timeout=110):
             ck = {AL_COOKIE: json.dumps(sess)}
             continue
         if r.status_code == 402:
-            raise EMError("al: پرێمیۆمی-قورس — بە پارە بەردەستە")  # → فەیلئۆڤەری هەمان مۆدێڵ
+            raise EMError("al: سەبسکریپشن پێویستە — دەگوازرێتەوە")
         if r.status_code == 429:
             raise EMError("al: لیمیت")
         if r.status_code != 200:
@@ -4914,7 +4914,9 @@ def aiml_chat(messages, model_id, timeout=110):
             j = {}
         msg = str((j.get("message") or j.get("error") or ""))[:60]
         if "funds" in msg.lower():
-            raise EMError("aiml: پارەدار — بە فەندز بەردەستە")  # → فەیلئۆڤەر
+            MS.get("aiml_ok", {}).pop(model_id, None)
+            _ms_save()
+            raise EMError("aiml: فەندز — دەگوازرێتەوە بۆ سەرچاوەی هەمان مۆدێڵ")
         if r.status_code == 401:
             AIML_ST["tok"] = None
             raise EMError("aiml: توکن")
@@ -4950,7 +4952,7 @@ def sync_aiml_models(force=False):
     if not force and _t.time() - _AIML_SYNC["t"] < 21600:
         return
     _AIML_SYNC["t"] = _t.time()
-    ok = {k: {"label": lbl, "tier": "x"} for k, lbl in AIML_MODELS.items()}
+    ok = {k: {"label": lbl, "tier": "f"} for k, lbl in AIML_MODELS.items()}
     if ok:
         MS["aiml_ok"] = ok
         _ms_save()
