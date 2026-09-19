@@ -4255,7 +4255,8 @@ NV_CMS = "https://webcms.novaapp.ai/api/ai-models?populate[]=tags&populate[]=exa
 NV_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 NV_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nv_accounts.json")
 NV_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82416,
-         "accounts": [{"email": "komex82414@duidir.com", "password": "komex82414@duidir.com"},
+         "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
+                      {"email": "komex82414@duidir.com", "password": "komex82414@duidir.com"},
                       {"email": "komex82415@duidir.com", "password": "komex82415@duidir.com"}],
          "exhausted": {}, "signups": {"date": "", "n": 0}}
 _NV_SYNC = {"t": 0.0}
