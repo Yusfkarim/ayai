@@ -6291,9 +6291,21 @@ def keep_typing(chat_id, stop):
 def reply(chat_id, text):
     r = tg("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
            disable_web_page_preview=True)
-    if not r.get("ok"):
-        for part in split_msg(text):
-            tg("sendMessage", chat_id=chat_id, text=part.replace("<", "&lt;"))
+    if r.get("ok"):
+        return
+    # فەڵباکی زیرەک: یەکەم هەوڵ — بەشە-بەشە بە HTML (کێشە = درێژی)
+    ok2 = True
+    for part in split_msg(text):
+        r2 = tg("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML",
+                disable_web_page_preview=True)
+        if not r2.get("ok"):
+            ok2 = False
+            break
+    if ok2:
+        return
+    # دووەم: بەبێ HTML — ئێسکەیپ
+    for part in split_msg(text):
+        tg("sendMessage", chat_id=chat_id, text=part.replace("<", "&lt;"))
 
 
 def handle_message(msg):
@@ -6333,12 +6345,21 @@ def handle_message(msg):
         uniq = dedupe_servers(servers)
         with _lock:
             pending[user_id] = {str(i): {"id": x["id"], "key": srv_key(x)} for i, x in enumerate(uniq, 1)}
-        body = f"🤖 <b>قائمة الموديلات</b> — {len(uniq)} موديل (المكرر بين المصادر مدموج):\n\n"
+        # بەشە-بەشە بنێرە (سنووری تێلەگرام ٤٠٩٦ پیت) — HTML لە هەر بەشێک ساغ دەمێنێتەوە
+        parts_out = [f"🤖 <b>قائمة الموديلات</b> — {len(uniq)} موديل (المكرر بين المصادر مدموج):\n\n"]
+        cur = parts_out[0]
         for i, x in enumerate(uniq, 1):
             mark = " ✅" if x["id"] == s["server"] else ""
-            body += f"{i}. <code>{x['id']}</code>{mark}\n"
-        body += "\n✍️ اكتب رقم الموديل فقط للتبديل مثال: <code>5</code>"
-        reply(chat_id, body)
+            ln = f"{i}. <code>{x['id']}</code>{mark}\n"
+            if len(cur) + len(ln) > 3700:
+                parts_out.append(cur)
+                cur = ""
+            cur += ln
+        cur += "\n✍️ اكتب رقم الموديل فقط للتبديل مثال: <code>5</code>"
+        parts_out.append(cur)
+        for p in parts_out:
+            if p.strip():
+                reply(chat_id, p)
         return
 
     # هەڵبژاردنی سێرڤەر بە ژمارە
