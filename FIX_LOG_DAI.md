@@ -236,7 +236,7 @@
 - deploy #43 ✅ → /health ٨٤؛ Fly: ng → «42» بۆ 30+12 ✅ (پاککردنەوەی template کار دەکات)
 - commit 46e510c
 
-## #44 — ئۆتۆ-سینکی مۆدێڵ بۆ هەموو سەرچاوەکان — deploy ⏳
+## #44 — ئۆتۆ-سینکی مۆدێڵ بۆ هەموو سەرچاوەکان — deploy ✅ ٨٤
 - داواکاری بەکارهێنەر: «لە هەموو سەرچاوەکان ئەگەر مۆدێڵەکە گۆڕا ئۆتۆماتیکی بیکاتە نوێترین مۆدێڵی زیادکراویان»
 - **sync_duck_models:** هەر ٣٠ خولەک — duck.ai پەڕە → bundle ی entry.duckai.*.js → پارسینی {model, modelShortName, availableTo} → مۆدێڵی ڕاییگە + لابردنی مردووەکان (upgradeModel) → مۆدێڵی نوێ خۆکارانە دەچێتە مینیو
   - regex: modelShortName تا availableTo بە .{0,600}? (لەگەڵ supportedReasoningEffort array)
@@ -245,4 +245,5 @@
 - **پاشەکەوت:** model_sync.json — دوای ڕیستارت مۆدێڵە دۆزراوەکان دەمێننەوە
 - **نەوە-گۆڕێن (پێشتر بوو، ئێستا بە سینک بەهێزترە):** مۆدێڵێک لابرا/گۆڕا → smart_rebind سێشنەکان دەباتە نوێترین هەمان خێزان (تاقیکرا: gpt-5.9 مر.dead → گپ-oss؛ gemini-4.0 مر.dead → 3.8)
 - ئەوانی تر: pol/aff/rwd خۆیان زیندووە (لیست لە API یان)؛ em/act/fla/qb/ng/cbc یەک-مۆدێڵی پشتڕاستکراون
-- deploy #44 ⏳
+- deploy #44 ✅ → /health ٨٤؛ Fly: duck-claude-haiku → «SYNC-OK» ✅ — سینک لە لۆگی Fly کاردەکات
+- commit 6547055
