@@ -324,3 +324,13 @@
 - **مینیو:** ct-gpt-5.6-luna لەگەڵ luna ی z02/act یەک دەنگ دەبێت (srv_key dedupe) → /v1/models هەر ٧٥ دەمێنێتەوە؛ MODEL_SOURCES[gpt-5-6-luna] = {act, ct, z02} → فەڵباکی خێرای هاو-مۆدێڵ
 - deploy #50 ✅ → /health ١٠١ | /v1/models ٧٥ (بەک-ئێند +١ ct؛ مینیو ct لەژێر دەنگی luna)
 - Fly: ct-gpt-5.6-luna → «CT-50-FLY-OK» ✅ (سانداکس: CT-50-OK ✅)
+
+## #51 — genspark.ai (tools/ai-chat) — داخرا ❌ login-walled
+- داواکاری بەکارهێنەر: «genspark.ai/tools/ai-chat زیادکە»
+- **ڕیکۆن:** Nuxt + Cloudflare؛ چەرەکەکان (٣٤٠) هەڵدرا ← endpoint ی چات: POST /api/agent/ask_proxy (+ ask_proxy_events) — جەستە: {type:"super_agent", project_id, messages, user_s_input, client_message_id, g_recaptcha_token, is_private, push_token}
+- **recaptcha بۆ میوان بەتاڵ دەکرێتەوە** (کۆد: `a.value||mn() ? "" : getRecaptchaToken("agent")`) — بەڵام کێشە ئەوە نییە…
+- **بەڵگەی بلۆک:** ٩ endpoint بە کوکی ڕاستەقینەی براوزەر تاقیکران ← هەمووی `401 {"status":-5,"message":"not login"}`: ask_proxy، ask_proxy_events، memo/second_brain/chat، sessions/create، project/create + ٤ ڕێڕەوی کۆن (404)
+- **تەنها گشتی:** /api/models_config (وێنە/ئۆدیۆ/ڤیدیۆ — بێ LLM)، /api/is_login ← is_login:false، /api/sug (GET)
+- **کاتالۆگەکەی (ئەگەر هەژمار بکرێت):** ٢٠ مۆدێڵی چات — Claude Opus 5/4.8/4.7/4.6، Sonnet 5/4.6، Fable 5/5.1، GPT-6 Astra، GPT-5.6 Sol/Terra/Luna، GPT-5.5/5.4، GPT-5.3 Codex، Gemini 3.8/3.7/3.6 Flash، 3.1 Pro، Kimi K2 (Fireworks) + Grok 4.6/4.5/4.20 (+Reasoning)
+- لیمیت بەپێی landing: ١٠٠ کریت/ڕۆژ بۆ هەر هەژمار — **بەبێ هەژمار هیچ ڕێگایەکی چات نییە** (یاسای «بێ login» دەبڕدرێت)
+- بڕیار: داخرین وەک monica/miniapps/chat.z.ai — بێ زانیاری نوێ دووبارە ناگەڕێیەوە؛ ئەگەر بەکارهێنەر ڕێگەی بە هەژمار بدات (شێوازی zerotwo)، کاتالۆگەکە ئامادەیە
