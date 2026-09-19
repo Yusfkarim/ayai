@@ -421,3 +421,16 @@
   - بۆ کوانتای گەورەتر: پاکەتی PROSP (بە پارە) یان زیادکردنی ڕاپۆرتی credits بۆ بەکارهێنەر
 - deploy #58 ✅ → /health ١٠٢ | /v1/models ٧٦ | TG زیندووە ✅
 - تێبینی پاڵنەوە: GitHub سکانەری نهێنی بلۆکی کرد — تۆکن لە کۆددا دابەشکرا (hf_ + باقی) و کۆمیت چاککرا → 00215fe ✅
+
+## #59 — شەپۆلی ٥ی گەڕان (١٨ پاڵپشێ) → ✅ Akash Chat (§2.24) زیادکرا
+- داواکاری بەکارهێنەر: «بەدوای سەرچاوەی نوێ بگەڕێ بۆم زۆۆۆز بەوردی لە هەموو شوێنێ»
+- **گەڕان (بەڵگە بۆ هەر یەکێک):** akash ✅ (ژێرەوە) | cerebras 404/login | felo+iask 404 (ڕێڕەو) | scira 401 «Sign in» | **t3 ← دیواری Vercel Security Checkpoint ❌** | lmarena (SPA — وەک arena.ai پارککراو) | yupp 403 ( خراپتر — پارک) | **libertai ← x402 پارەدان بە کریپتۆ (Base) ❌** | andi/gptgod/juchats/character/hyperwrite 404/DNS | nanogpt کاتالۆگ گشتی بەڵام چات پارەیی | tinywow 405
+- **✅ AKASH CHAT (chat.akash.network) — کرێکردنەوەی تەواو:**
+  - فلۆو: GET / ← GET /api/auth/session ← **session_token (٦٤-هێکس)** ← POST refresh ← POST /api/chat/ {id(12-پیت), messages[{role,content,parts:[{type:text,text}]}], model, system, temperature:0.6, topP:0.95, context:[]} ← AI-SDK v5: `0:"تۆکن"` + `e:{finishReason}`
+  - **سیستەم-پرۆمپت لە کلایەنتەوە** — خۆمان جێگیر دەکرێت (TG = دكتور التعافي؛ API = بەتاڵ→نیوتراڵ) ✅
+  - **مۆدێڵەکان (لە /api/models گشتی):** openai-gpt-oss-120b (GPT-OSS-120B) + Meta-Llama-3-3-70B-Instruct — AkashGen (وێنە) دەرباز
+  - **لیمیت:** ٨/٨ چات لە یەک سێشن ✅ + سێشنی نوێ ✅ — 403 سێشن → ڕۆتەیشنی خۆکار؛ 429 → دیلی ١٥ خولەک؛ 400/500 لە چات → lابردن لە aka_ok
+  - **§2.24:** aka_chat + aka_servers + sync_akash_models (٦ کاتژمێر — لابردنی لابراوەکان وەک HF) + زنجیرە ×٤ + LEAK_RE (\bakash\b) + model_sync (aka_ok/aka_bad)
+  - بۆنووس: gpt-oss-120b ئێستا لە ز02 (١٥/ڕۆژ) + Akash (بەرز) — فەڵباکی هاو-مۆدێڵ
+- تاقیکردنەوە: «AKA-59-A» (gpt-oss) ✅ «AKA-59-B» (llama) ✅
+- deploy #59 ✅

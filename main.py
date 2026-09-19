@@ -2062,8 +2062,8 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -2071,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -2693,6 +2693,165 @@ def sync_hf_models(force=False):
     print(f"[HF-SYNC] کاتالۆگ={len(catalog)} | نوێ={added} | لابرا={len(removed)} | hf_ok={len(MS.get('hf_ok', {}))}", flush=True)
 
 
+# ══════════ Akash Chat (chat.akash.network) — §2.24 — میوان: session_token + AI-SDK v5 ══════════
+AKA_BASE = "https://chat.akash.network"
+AKA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+AKA_LIMIT = {"until": 0.0}
+_AKA = {"ses": None, "t": 0.0}
+_AKA_NEUTRAL = "You are a helpful assistant. Follow the user's instructions precisely."
+_AKA_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+
+def _aka_headers():
+    return {"User-Agent": AKA_UA, "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
+            "Origin": AKA_BASE, "Referer": AKA_BASE + "/",
+            "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin"}
+
+
+def _aka_session(force=False):
+    """session_token: GET / → GET /api/auth/session → POST refresh (فلۆوی براوزەر)"""
+    import time as _t
+    if not force and _AKA["ses"] and _t.time() - _AKA["t"] < 43200:
+        return _AKA["ses"]
+    s = requests.Session()
+    s.headers.update(_aka_headers())
+    try:
+        s.get(AKA_BASE + "/", timeout=(10, 20))
+        r = s.get(AKA_BASE + "/api/auth/session", timeout=(10, 20))
+        if r.status_code != 200:
+            raise EMError(f"aka: session {r.status_code}")
+        s.post(AKA_BASE + "/api/auth/session/refresh/", json={}, timeout=(10, 20))
+    except EMError:
+        raise
+    except Exception as e:
+        raise EMError(f"aka: {str(e)[:60]}")
+    _AKA["ses"] = s
+    _AKA["t"] = _t.time()
+    return s
+
+
+def aka_chat(messages, model_id="openai-gpt-oss-120b", timeout=110):
+    """چاتی akash — سیستەم-پرۆمپت لە مێژوو دەهێنرێت (بەتاڵ = نیوتراڵ)؛ 403 سێشن → ڕۆتەیشن"""
+    import time as _t
+    if _t.time() < AKA_LIMIT["until"]:
+        raise EMError("aka: cooldown")
+    sys_content = ""
+    rest = []
+    for m in messages:
+        if m.get("role") == "system" and not sys_content:
+            sys_content = m.get("content") or ""
+        elif m.get("content"):
+            rest.append(m)
+    if not sys_content:
+        sys_content = _AKA_NEUTRAL
+    last_err = None
+    for attempt in range(2):
+        try:
+            s = _AKA["ses"] if (_AKA["ses"] and attempt == 0) else _aka_session(force=(attempt == 1))
+        except Exception as e:
+            last_err = e
+            continue
+        cid = "".join(random.choices(_AKA_CHARS, k=12))
+        hist = rest[-10:]
+        body = {"id": cid,
+                "messages": [{"role": m.get("role", "user"), "content": m.get("content") or "",
+                              "parts": [{"type": "text", "text": m.get("content") or ""}]} for m in hist],
+                "model": model_id, "system": sys_content, "temperature": 0.6, "topP": 0.95, "context": []}
+        try:
+            r = s.post(AKA_BASE + "/api/chat/", json=body, timeout=(15, timeout), stream=True)
+        except Exception as e:
+            last_err = EMError(f"aka: {str(e)[:60]}")
+            continue
+        if r.status_code == 403 or r.status_code == 401:
+            _AKA["ses"] = None
+            last_err = EMError(f"aka: {r.status_code} سێشن")
+            continue
+        if r.status_code == 429:
+            AKA_LIMIT["until"] = _t.time() + 900
+            raise EMError("aka: 429 → دیلی ١٥ خولەک")
+        if r.status_code != 200:
+            if r.status_code in (400, 500) and model_id in MS.get("aka_ok", {}):
+                MS["aka_ok"].pop(model_id, None)
+                MS.setdefault("aka_bad", {})[model_id] = {"code": r.status_code, "t": _t.time()}
+                _ms_save()
+            raise EMError(f"aka: {r.status_code}")
+        raw = b""
+        try:
+            for ch in r.iter_content(512):
+                raw += ch
+                if len(raw) > 120_000:
+                    break
+        except Exception:
+            pass
+        t = raw.decode("utf-8", "replace")
+        texts = re.findall(r'^0:"(.*)"', t, re.M)
+        try:
+            ans = "".join(json.loads(f'"{x}"') for x in texts)
+        except Exception:
+            ans = "".join(texts)
+        ans = ans.strip()
+        if ans:
+            return ans
+        last_err = EMError("aka: وەڵام بەتاڵ")
+    raise last_err or EMError("aka: شکست")
+
+
+def aka_servers():
+    out = []
+    for mid in list(MS.get("aka_ok", {}).keys())[:6]:
+        label = "GPT-OSS 120B" if "gpt-oss" in str(mid) else str(mid).replace("-", " ").title()
+        slug = re.sub(r'[^a-z0-9.]+', '-', str(mid).lower()).strip('-')
+        out.append({"id": f"aka-{slug}", "name": f"{label} (Akash)",
+                    "model_id": mid, "kind": "aka"})
+    return out
+
+
+def sync_akash_models(force=False):
+    """ئۆتۆ-ئەپدێتی akash: /api/models گشتی — تەنها دەقی (AkashGen/وێنە دەرباز)؛
+       لابراوەکان لە کاتالۆگ خۆکارانە لابرددرێن (یاسای بەکارهێنەر)"""
+    import time as _t
+    if not force and _t.time() - MS_T.get("aka", 0.0) < 21600:
+        return
+    MS_T["aka"] = _t.time()
+    try:
+        r = requests.get(AKA_BASE + "/api/models", headers=_aka_headers(), timeout=(10, 20))
+        items = r.json() or []
+    except Exception as e:
+        print(f"[AKA-SYNC] هەڵە: {str(e)[:70]}", flush=True)
+        return
+    text_models = {m.get("id") for m in items
+                   if m.get("id") and m.get("api_id") and "gen" not in str(m.get("id", "")).lower()
+                   and "image" not in str(m.get("description", "")).lower()}
+    removed = [mid for mid in list(MS.get("aka_ok", {}).keys()) if mid not in text_models]
+    for mid in removed:
+        MS["aka_ok"].pop(mid, None)
+        print(f"[AKA-SYNC] لابرا: {mid}", flush=True)
+    added = 0
+    for mid in text_models:
+        if mid not in MS.get("aka_ok", {}) and mid not in MS.get("aka_bad", {}):
+            try:
+                code, ans = (None, None)
+                s = _aka_session()
+                cid = "".join(random.choices(_AKA_CHARS, k=12))
+                body = {"id": cid, "messages": [{"role": "user", "content": "Reply: OK", "parts": [{"type": "text", "text": "Reply: OK"}]}],
+                        "model": mid, "system": _AKA_NEUTRAL, "temperature": 0.6, "topP": 0.95, "context": []}
+                rr = s.post(AKA_BASE + "/api/chat/", json=body, timeout=(10, 40), stream=True)
+                if rr.status_code == 200:
+                    MS.setdefault("aka_ok", {})[mid] = {"t": time.time()}
+                    added += 1
+                    print(f"[AKA-SYNC] نوێ ✅ {mid}", flush=True)
+                elif rr.status_code == 429:
+                    AKA_LIMIT["until"] = time.time() + 900
+                    break
+                else:
+                    MS.setdefault("aka_bad", {})[mid] = {"code": rr.status_code, "t": time.time()}
+            except Exception as e:
+                MS.setdefault("aka_bad", {})[mid] = {"err": str(e)[:50], "t": time.time()}
+    if added or removed:
+        _ms_save()
+    print(f"[AKA-SYNC] کاتالۆگ={len(text_models)} | نوێ={added} | لابرا={len(removed)} | aka_ok={len(MS.get('aka_ok', {}))}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -3141,6 +3300,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = hk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "hf":
                     content = hf_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "aka":
+                    content = aka_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -3191,6 +3352,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = hk_chat(nmsgs, nsrv["model_id"])
                     elif k == "hf":
                         content = hf_chat(nmsgs, nsrv["model_id"])
+                    elif k == "aka":
+                        content = aka_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -3284,7 +3447,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -3358,6 +3521,8 @@ def detect_brain(allow_fallback=True):
         servers += hk_servers()
         sync_hf_models()
         servers += hf_servers()
+        sync_akash_models()
+        servers += aka_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -3367,6 +3532,7 @@ def detect_brain(allow_fallback=True):
         sync_yl_models()
         sync_hk_models()
         sync_hf_models()
+        sync_akash_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -3720,6 +3886,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "hf"
+            if k == "aka":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = aka_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "aka"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -3809,6 +3981,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "hf"
+                if k == "aka":
+                    a = aka_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "aka"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
