@@ -490,3 +490,13 @@
 - **کوانتا:** «Lifetime <model> limit reached» (بۆ هەر مۆدێڵ) + «No free messages left» (گشتی ~٣ نامە/ئەژمێر) → limits[email][model|*] ← خولانەوە بۆ ئەکاونتی دواتر ← هەموو تەواو ← **خۆکارانە signUp** (komex82401+@duidir.com، ٢٠/ڕۆژ، ٤٠ زۆرترین) — ساینئەپ پاکی بەبێ بڕۆوەر پشتڕاستکراوە
 - **تاپۆکانی UI (ڕیکۆنی):** ناردن تەنها بە کلیکی ڕاستەقینەی دوگمەی send (Enter/پڕۆکسی-دوگمە ناکات)؛ مۆداڵی paywall دەکرێتەوە بە دوگمەی aria-label=close؛ textarea پێویستی بە native setter + input event
 - **#64 Fly-verified:** /health **195** | /v1/models **138** (١١ ناوازەی ca-* + ١٣ مێرجکراو لەگەڵ هەمان مۆدێڵی سەرچاوەی تر) | چات لە Fly: ca-gpt-5-6-sol «25» ✅ | خولانەوە+ساینئەپ لە سەندبۆکس ✅ (komex82401) | head **565b2f1**
+
+## #65 — AskAI ✅ (§2.31) — askaichat.app + حەوزی ئەکاونت + خۆکار-ساینئەپ
+- داواکاری: askaichat.app/chat + هەمان شێواز؛ ئەکاونت komex82398@duidir.com (پاسۆرد=ئیمێڵ)
+- **پلاتفۆرم:** هەمان خێزانی chatbotai.co (Nuxt + cerebro) — Firebase key AIzaSyBIjexOfpMhsws3weHS6Hko4d5Arin3Zzs (پرۆژە chatapp-ffb0c)، ڕێچکەکان هەمان /api/chat/message/send + /api/session/get-all
+- **دیواری سەرەکی (٥ تاقیکردنەوە):** نەوەکە بە پاکی "compacting→compacted" دەمایەوە و نامەی ئەسستانیان نەدەهێنا — چارەسەر: **پرۆفایلی cerebro (gateway.cerebroapi.com/user/web) + user/set بە cerebroId** ← دوای ئەوە نەوەکە ١-٣ چرکە تەواو دەبێت
+- **وەرگرتنی وەڵام:** get-all نامە نایەنێت — **GET /api/session/stream?sessionId=X&isTool=false&isAssistant=false** (SSE) → snapshot.data.messages[role=assistant][-1].message کاتێک status=="completed"
+- **کوانتا:** max_free_messages=3 بۆ هەر ئەکاونت + تەنها GPT-5.4 Nano خۆڕاییە (free_lifetime_message_limit>0) — ٢٥ مۆدێڵی تر پرۆن («Lifetime claude limit reached» بۆ ئەکاونتی نوێش) → کاتالۆگ تەنها limit>0 تۆمار دەکات (ئۆتۆئەپدێت ئەگەر زیادکران)
+- **نەخشەی ٢٦ مۆدێڵ لە HTML** (هەمان پارسەری Nuxt) — kimi-k2.6-thinking + gpt-5.4-mini-deep-research زیاترن لە chatbotai.co
+- ساینئەپ پاکی: signUp ← cerebro bootstrap ← حەوز (komex82407+، ٢٠/ڕۆژ، ٤٠ زۆرترین)
+- **#65 Fly-verified:** /health **197** | /v1/models **137** (ac-gpt-5-4-nano = دووەکی لەگەڵ ca-nano → فەڵباکی هەمان-مۆدێڵ) | چات لە Fly: ac-gpt-5-4-nano **«32»** ✅ (٤.١s) | سەندبۆکس: nano «81» (٢s) | head **ecebd5d**
