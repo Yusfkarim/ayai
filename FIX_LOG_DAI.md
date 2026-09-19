@@ -270,7 +270,7 @@
 - **poe/mistral/helixmind:** 403 CF | deepseek 202-b0 | typegpt/freegpt/aiwnie: DNS مردوو
 - سیستەم نەگۆڕا — هێشتا #45 (٨٨/٦٨) لەسەرە
 
-## #47 — سکان ی گەورەی سەرچاوەی بچووک → LLM7.io زیادکرا — deploy ⏳
+## #47 — سکان ی گەورەی سەرچاوەی بچووک → LLM7.io زیادکرا — deploy ✅ ٩٢/٧١
 - داواکاری بەکارهێنەر: «سەرچاوە بچووکە نوێیەکان بە ژمارەی زۆر سکان بکە»
 - سکرای ١٥+ کاندید: poe/mistral/helixmind ٤٠٣ CF، qwen login-wall، monica signup-wall، arena.ai reCAPTCHA v3، naga.ac/hcap ٤٠١ کلیل، api.navy ٤٠١، OVHcloud ٤٢٩ بەردەوام (کلیلی نایەت)
 - **✅ براوە: LLM7.io (api.llm7.io/v1)** — فەرمی، بێ کلیل بۆ میوان (١٠ داواکاری/خولەک، ٦٠/کاتژمێر بە IP)، OpenAI-سازگار
@@ -280,4 +280,5 @@
 - ٨ پاچە: بلۆک + detect_brain + TG dispatch + TG smart_rebind + API loop + API rebind + زنجیرە ×٢ + LEAK_RE (llm7)
 - GLM-5.3-Flash لە مینیو یەکگراوە لەگەڵ GLM ە سەرچاوەی تر (کلیل: glm-5-3-flash) — بەک-ئێند ٢ سەرچاوە
 - **بەک-ئێند: ٩٢ سەرچاوە | مینیو: ٧١ مۆدێڵ**
-- deploy #47 ⏳
+- deploy #47 ✅ → /health ٩٢ | /v1/models ٧١ (l7 ×٣ + GLM لەژێر دەنگی GLM ەکەی تر)
+- Fly: l7-codestral → «L7-FLY-OK» ✅ | commit ed4dfa9
