@@ -1719,6 +1719,77 @@ def ak_chat(model_id, messages, timeout=110):
     raise EMError(obj.get("error") or "ak: failed", obj.get("code"))
 
 
+
+# ════════════════════════════════════════════════════════════
+# ٢.١٥) notegpt.io — AI Answer Generator — Gemini بێ تۆمار
+#      POST /api/v2/homework/stream (SSE: data:{"text":...}) — بێ چەلەنجە، بێ کوکی
+#      flash-lite: کراوە (~٩ نامە/IP/ڕۆژ) — pro: لیمیت ڕۆژانەی توند (٤٢٩٠١٦)
+# ════════════════════════════════════════════════════════════
+
+NG_LIMIT = {"until": 0.0}
+
+
+def ng_servers():
+    return [{"id": "ng-gemini-flash-lite", "name": "Gemini 3.1 Flash Lite (NoteGPT)",
+             "model_id": "gemini-3.1-flash-lite", "kind": "ng"}]
+
+
+def ng_chat(messages, timeout=110):
+    """چاتی notegpt — مێژوو بۆ یەک نامە؛ template ی homework یش لابردن"""
+    import time as _t
+    if _t.time() < NG_LIMIT["until"]:
+        raise EMError("ng: cooldown")
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    user_txt = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_txt = m["content"]
+            break
+    if not user_txt:
+        user_txt = " ".join(m.get("content", "") for m in messages)[-2000:]
+    if sys_txt:
+        user_txt = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{user_txt}"
+    try:
+        r = requests.post("https://notegpt.io/api/v2/homework/stream",
+                          json={"message": user_txt, "language": "auto", "model": "gemini-3.1-flash-lite",
+                                "tone": "default", "length": "moderate",
+                                "conversation_id": str(__import__("uuid").uuid4())},
+                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                                   "Origin": "https://notegpt.io",
+                                   "Referer": "https://notegpt.io/ai-answer-generator"},
+                          timeout=(15, timeout), stream=True)
+    except Exception as e:
+        raise EMError(f"ng: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code == 429:
+            NG_LIMIT["until"] = _t.time() + 1800
+        raise EMError(f"ng: {r.status_code}")
+    text = []
+    limit_hit = False
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data: "):
+            continue
+        try:
+            d = json.loads(line[6:])
+        except Exception:
+            continue
+        if isinstance(d.get("text"), str):
+            text.append(d["text"])
+        if d.get("code") == 164016:
+            limit_hit = True
+    ans = "".join(text).strip()
+    if limit_hit and not ans:
+        NG_LIMIT["until"] = _t.time() + 1800
+        raise EMError("ng: لیمیت ڕۆژانە")
+    # template ی homework پاک بکەوە
+    ans = re.sub(r"^###\s*Question\s*\d*\s*", "", ans)
+    ans = re.sub(r"\n?###\s*(Answer|Solution Steps|[^\n]*)\s*", "\n", ans)
+    ans = ans.strip()
+    if ans:
+        return ans
+    raise EMError("ng: وەڵام نەگەڕایەوە")
+
+
 # ─── یەکسانکردنی مۆدێڵ بۆ fallback — هەمان خێزان لە سەرچاوەیەکی تر ───
 _MODEL_HINTS = [
     ("gemini", "gemini"), ("claude", "claude"), ("grok", "grok"),
@@ -2023,6 +2094,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = duck_chat(cand["model_id"], history + [{"role": "user", "content": q}])
                 elif kind == "ak":
                     content = ak_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                elif kind == "ng":
+                    content = ng_chat(history + [{"role": "user", "content": q}])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2059,6 +2132,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = duck_chat(nsrv["model_id"], nmsgs)
                     elif k == "ak":
                         content = ak_chat(nsrv["model_id"], nmsgs)
+                    elif k == "ng":
+                        content = ng_chat(nmsgs)
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2152,7 +2227,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2213,6 +2288,10 @@ def detect_brain(allow_fallback=True):
         servers += ak_servers()
     except Exception as e:
         print(f"[BRAIN] ak fail: {e}", flush=True)
+    try:
+        servers += ng_servers()
+    except Exception as e:
+        print(f"[BRAIN] ng fail: {e}", flush=True)
     # pol هەمیشە لە زنجیرەکەدا بێت — لێگی کۆتایی (نەک تەنها فەڵباکی کۆتایی)
     try:
         pol_list = get_pol_servers()
@@ -2479,6 +2558,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "ak"
+            if k == "ng":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ng_chat(msgs)
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "ng"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -2533,6 +2618,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "ak"
+                if k == "ng":
+                    a = ng_chat(nmsgs)
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "ng"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)

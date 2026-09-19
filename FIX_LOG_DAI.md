@@ -223,3 +223,13 @@
 - LEAK_RE: anakin|ئەنەکین؛ Dockerfile: COPY ی دوو فایلە نوێیەکە
 - deploy #42 ✅ → /health ٨٣ (٨١+٢)؛ Fly: ak-gemini-2.5-flash → «13» بۆ 6+7 ✅ + lite → «AK-FINAL» ✅
 - commit 375884f
+
+## #43 — notegpt.io — AI Answer Generator — Gemini 3.1 Flash Lite بێ تۆمار — deploy ⏳
+- سەرچاوەی نوێ: ng — notegpt.io/ai-answer-generator → POST /api/v2/homework/stream (SSE: data:{"text"})
+- **ساکارترین سەرچاوە تا ئێستا:** بێ چەلەنجە، بێ واژوو، بێ کوکی — تەنها Origin/Referer
+- body: {message, language:"auto", model, tone:"default", length:"moderate", conversation_id:uuid}
+- مۆدێڵەکان: UI تەنها ٢ی هەیە — gemini-3.1-flash-lite (basic) ✅ + gemini-3.1-pro-preview (premium، لیمیت ڕۆژانەی توند ١٦٤٠١٦ «Please login»)
+- تاقیکردنەوە: sandbox «OK»، «25» بۆ 12+13؛ Fly «42» بۆ 20+22 ✅ — ~٩ نامە/IP/ڕۆژ پاشان 164016
+- لیستی گەورەی مۆدێڵ لە HTML (gpt-5.6-sol، claude-sonnet-5، kimi-k3...) تەنها بۆ ماڵپەڕی ناساندنە — API ی guest دوویان قبوڵ دەکات (دژە-دزە: تەنها flash-lite زیادکرا)
+- template ی وەڵام («### Question 1 ... ### Answer») دەپاکڕێتەوە؛ LEAK_RE: notegpt|نۆت‌جی‌پی‌تی
+- ng_chat: cooldown ی ٣٠ خولەک دوای ١٦٤٠١٦/٤٢٩ — فەڵباکی زنجیرە ناتەکانێت
