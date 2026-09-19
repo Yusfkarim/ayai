@@ -480,3 +480,13 @@
 - «No agent mapping» → مۆدێڵ دەبردرێت (کاتالۆگ دەگۆڕدرێت لەلایەنیان)
 - مێژوو فلێت: [Instructions]/[User]/[Assistant] — ١٢ ترە
 - **#63 Fly-verified:** /health **162** | /v1/models **117** (٢٦ی cb ی ناوازە + ١٧ مێرجکراو لەگەڵ هەمان مۆدێڵی سەرچاوەی تر) | چات «cb-gemini-2-5-flash» ✅ لە Fly | head **c7747cc**
+
+## #64 — ChatbotAI ✅ (§2.30) — chatbotai.co + ٢٤ مۆدێڵ + حەوزی ئەکاونت + خۆکار-ساینئەپ
+- داواکاری: chatbotai.co/chat + هەموو مۆدێڵەکان + بێ لیمیت + ئۆتۆئەپدێت؛ هەمان ئەکاونتی #63: komex82398@duidir.com (پاسۆرد=ئیمێڵ)
+- **ریکۆنی (Playwright + پاکی):** Firebase key ی خۆی لە HTML: AIzaSyDHatafp1HL1DKD0Id1UVHPGQY8m_eseAk (پرۆژە holypicchatweb) — تێبینی: كلیلی #63 بەکارنەهێنرا
+- **فلۆو:** identitytoolkit signInWithPassword ← idToken ← **POST chatbotai.co/api/chat/message/send {message, model:<کلیل>, temporaryChat:false, modelVersion:<وەشان>} + سەرەکی authorization:<idToken ی خام>** ← {success, sessionId} ← **پۆڵ: POST /api/session/get-all {}** ← sessions[].messages ی sessionId ی هاوتا ← messages[-1].content کاتێک finish_reason=="stop" (٢-٥ چرکە)
+- **نەخشەی ٢٤ مۆدێڵ لە HTML ی /chat (Nuxt payload — multi_language_model_config):** کلیل → وەشان: gpt-5.4-nano, gpt-5.4-instant-2026-03-05, gpt-5.5-2026-04-23, gpt-5.6-sol/terra/luna, gpt-6-astra, gpt-4o-2024-08-06, gpt-4o-mini-2024-07-18, gpt-4.1-2025-04-14, o3, gemini-3.1-pro-preview, gemini-3.8-flash, claude-sonnet-5, claude-opus-5, claude-fable-5-1, grok-4.6, deepseek-4-pro-0813(+thinking), kimi-k2.6, kimi-k3(+thinking), llama-4-maverick, sonar
+- **پارسەری sync:** نەخشەکە لە values ی idMap دایە نەک پاش کلیلی — گەڕان بە گشت HTML بۆ `{\\"is_active` → دەرهێنانی ستڕینگی هاوسەنگ → دوو json.loads → کۆنفیگەکەی models ≥٣ → MS["ca_ok"]؛ sync ی ٦ کاتژمێر + CA_FALLBACK (٢٤) لە کۆد
+- **کوانتا:** «Lifetime <model> limit reached» (بۆ هەر مۆدێڵ) + «No free messages left» (گشتی ~٣ نامە/ئەژمێر) → limits[email][model|*] ← خولانەوە بۆ ئەکاونتی دواتر ← هەموو تەواو ← **خۆکارانە signUp** (komex82401+@duidir.com، ٢٠/ڕۆژ، ٤٠ زۆرترین) — ساینئەپ پاکی بەبێ بڕۆوەر پشتڕاستکراوە
+- **تاپۆکانی UI (ڕیکۆنی):** ناردن تەنها بە کلیکی ڕاستەقینەی دوگمەی send (Enter/پڕۆکسی-دوگمە ناکات)؛ مۆداڵی paywall دەکرێتەوە بە دوگمەی aria-label=close؛ textarea پێویستی بە native setter + input event
+- **#64 Fly-verified:** /health **195** | /v1/models **138** (١١ ناوازەی ca-* + ١٣ مێرجکراو لەگەڵ هەمان مۆدێڵی سەرچاوەی تر) | چات لە Fly: ca-gpt-5-6-sol «25» ✅ | خولانەوە+ساینئەپ لە سەندبۆکس ✅ (komex82401) | head **565b2f1**
