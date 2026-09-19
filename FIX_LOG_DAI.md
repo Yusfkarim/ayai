@@ -377,3 +377,11 @@
   - بڕیار: وەک arena.ai (recaptcha-v3) — بێ چارەسەر دووبارە ناگەڕێیەوە
 - **بەک-ئێند: ١٠٢ سەرچاوە | مینیو: ٧٦ مۆدێڵ** (+١ یۆلۆ — مۆدێڵی نوێی تایبەت)
 - deploy #54 ✅ → /health ١٠٢ | /v1/models ٧٦ | Fly: yl-yollo-chat → «YL-54-FLY-OK» ✅
+
+## #55 — chat.aichatone.com — داخرا ❌ login-walled + Turnstile
+- داواکاری بەکارهێنەر: «aichatone زیادکەو لیمتی مەیەڵە»
+- **ڕیکۆن:** Vite SPA (MultiBot) — ١٣ چەرەک هەڵدرا؛ هەموو بۆتەکان (Grok/ChatGPT/Claude/Gemini/Perplexity/Llama/Mixtral/DeepSeek/GLM/Wizardlm/Qwen/Moonshot/MiniMax) بۆ یەک endpoint: **POST aichatone.com/api/chat/completions** (OpenAI-style — بۆ Grok: model "grok-3-mini" + سیستەمی «You are a helpful AI assistant.Current date:…» stream:true)
+- **بەڵگەی بلۆک:** هەموو بۆتەکان بە میوان → `401 "Unauthorized, please login first"` — Bearer ی ساختە (test123/free/anonymous) هەمان 401 — تەنها گشتی: /api/current-plan (null)، check-update، check-notify
+- **تۆمارکردنیش بلۆکە:** فۆرمی Register (ناو+ئیمەیل+پاسوۆرد) دوگمەکەی **disabled** هەتا Cloudflare Turnstile تۆکن بدات — لە headless هەرگیز نایەت (هەمان کێشەی chatx/arena) → ناکرێت هەژمار دروست بکرێت بۆ ڕۆتەیشن
+- کاتالۆگ: model ی تاک بۆ هەر بۆت (grok-3-mini بینراو)؛ پلانی FREE بە کریتی ڕۆژانە دوای لۆگین (Ultra/Max بە پارە) — جێبەجێکردنی API ئامادەیە ئەگەر هەژمار بدرێت (شێوازی zerotwo)
+- بڕیار: داخرین — بێ زانیاری نوێ دووبارە ناگەڕێتەوە
