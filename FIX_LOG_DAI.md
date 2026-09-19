@@ -435,3 +435,17 @@
 - تاقیکردنەوە: «AKA-59-A» (gpt-oss) ✅ «AKA-59-B» (llama) ✅
 - deploy #59 ✅ → /health ١٠٤ | /v1/models ٧٨ (+٢ ئاکاش: گپ-ئۆسس + لامای ٧٠B)
 - Fly: aka-openai-gpt-oss-120b → «AKA-59-FLY-OK» ✅ (لە IP ی داتاسەنتەریش کار دەکات)
+
+## #60 — Hotbot ✅ (§2.25) + GadegetKit ✅ (§2.26) + 1min.ai ❌
+- داواکاری بەکارهێنەر: «سیانە زیادبکە + لیمێتی مەیەڵە + ئۆتۆئەپدێت بۆ API»
+- **✅ Hotbot (www.hotbot.com) — §2.25:**
+  - فلۆو: GET / ← POST /api/moderate {text, imageUrls, chatId, requestType:text} ← flagged:false ← **POST /api/chat {messages:[{role,content}], model:"hotbot-chat", chatId:uuid, effort:"light", camp:false}** ← SSE: `data:{"content":"…"}` + `data: [DONE]` (فۆرمات: `: chunk` بۆشایی)
+  - **مۆدێڵ: یەک (hotbot-chat)** — سیستەم-پرۆمپت: بە Body نییە (سێرڤەر خودی) — بەڵام پرسیارەکان ڕاستەوخۆ
+  - **لیمیت: ٤ چات بە IP (چاتیدی نوێ کاری ناکات)** → 429 بەرز نییە، بەڵکوو بەتاڵی 200 — دیاری: ٤ چات/٥خولەک؛ دیلی تا ٥ خولەک لە بەتاڵی دووەم
+  - تاقیکراوە: «HB-60-OK» ✅ | 4 بەخۆڕایی بە IP — ئەگەر لیمیت ئەوەندە کەم بێت، کۆنترۆڵکراوە وەک zerotwo
+- **✅ GadegetKit (gadegetkit.com/ai-tools/chatbot) — §2.26:**
+  - فلۆو: POST /api/internal/generate-signature {timestamp, path:"/api/ai-text/chat"} ← signature ← **POST /api/ai-text/chat {messages, locale:"en"} بە x-timestamp + x-signature** ← JSON {success, text, model:"glm-4-flash", webSearchResults}
+  - **مۆدێڵ: glm-4-flash** (یەک) — سیستەم-پرۆمپتی خۆمان لە messages
+  - **لیمیت: ١٢/١٢ ✅ هیچ دیارینەکراو** — ئۆتۆ-سینک: هەر کات signature چالاک بێت ئیش دەکات (6h)
+  - تاقیکراوە: «GKX-1» ✅ | ١٢/١٢ ✅
+- **❌ 1min.ai:** app.1min.ai ← لۆگین-واڵی تەواو (Join Waitlist)؛ API ەکەیان: api.1min.ai ← هەموو ڕێڕەوەکان 404 (تەنها بە API-key ی پارەدار) — داخرا
