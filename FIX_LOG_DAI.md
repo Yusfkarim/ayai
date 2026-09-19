@@ -334,3 +334,19 @@
 - **کاتالۆگەکەی (ئەگەر هەژمار بکرێت):** ٢٠ مۆدێڵی چات — Claude Opus 5/4.8/4.7/4.6، Sonnet 5/4.6، Fable 5/5.1، GPT-6 Astra، GPT-5.6 Sol/Terra/Luna، GPT-5.5/5.4، GPT-5.3 Codex، Gemini 3.8/3.7/3.6 Flash، 3.1 Pro، Kimi K2 (Fireworks) + Grok 4.6/4.5/4.20 (+Reasoning)
 - لیمیت بەپێی landing: ١٠٠ کریت/ڕۆژ بۆ هەر هەژمار — **بەبێ هەژمار هیچ ڕێگایەکی چات نییە** (یاسای «بێ login» دەبڕدرێت)
 - بڕیار: داخرین وەک monica/miniapps/chat.z.ai — بێ زانیاری نوێ دووبارە ناگەڕێیەوە؛ ئەگەر بەکارهێنەر ڕێگەی بە هەژمار بدات (شێوازی zerotwo)، کاتالۆگەکە ئامادەیە
+
+## #52 — شەپۆلی ٤ی گەڕان (بەدوای هی نوێ) — سفر زیادکرا + پشکنینی لیمیتەکان
+- داواکاری بەکارهێنەر: «بەردەوام بە، بەس لیمیتی مەیەڵە»
+- **گەڕان (١٤+ پاڵپشێت):** theb.ai (DNS مردوو)، thinkany (DNS)، typegpt (DNS)، fresedgpt (DNS)، gptforlove (DNS)، hostux (DNS)، safone (DNS)، lambdalift (DNS)، answeroverflow (DNS)
+  - blackbox 404 (ڕێڕەو مردوو)، pizzagpt 404، hika.fyi 404، qewertyy CF 530، phind CF 403
+  - api.airforce ← ئێستا 402 «subscription» (پارەیی — داخرا بۆ هەمیشە)
+  - TheOldAPI ← $7/مانگ (پارەیی)، venice ← کلیل (models گشتییە بەڵام inference نا)
+  - **morphic (chat.morphic.sh) ← 500 «retryable» بەردەوام** — سەرەوەکەیان شکاو (٤ شێوە + stream هەوڵدرا)
+  - cf-playground ← بووە پەڕەی benchmark/MCP — چاتی نییە
+  - yupp هێشتا 429 — پارککراوەوە
+- **پشکنینی لیمیتەکان (داواکاری «لیمیتی مەیەڵە»):** هەموو سەرچاوە چالاکەکان کۆنترۆڵکراون:
+  - chattide ← ڕۆتەیشنی ناسنامە (نوێ #50) ✅ | g4f ← بەیکەری خۆکار ✅ | llm7 ← 600s + 10RPM ✅
+  - anakin ← 600s | notegpt ← 1800s | zerotwo ← ڕۆتەیشنی هەژمار | rwd ← 19-UA | pol ← بێ کلیل/بێ هەژمار ✅
+  - **pollinations ئێستا تەنها ١ مۆدێڵیان ماوە (openai-fast/GPT-OSS-20B)** — کۆدی ئێمە لایڤە، خۆکارانە دەیهێنێت
+- دەرەنجام: هیچ سەرچاوەیەکی نوێی بێ-کلیل لەم شەپۆلە — کانگاکانی ناو سیستەم (١٠١) هێشتا زیندوون
+- deploy نەکرا — هیچ گۆڕانکارییەک لە کۆدا نەبوو
