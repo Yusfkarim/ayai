@@ -449,3 +449,4 @@
   - **لیمیت: ١٢/١٢ ✅ هیچ دیارینەکراو** — ئۆتۆ-سینک: هەر کات signature چالاک بێت ئیش دەکات (6h)
   - تاقیکراوە: «GKX-1» ✅ | ١٢/١٢ ✅
 - **❌ 1min.ai:** app.1min.ai ← لۆگین-واڵی تەواو (Join Waitlist)؛ API ەکەیان: api.1min.ai ← هەموو ڕێڕەوەکان 404 (تەنها بە API-key ی پارەدار) — داخرا
+- **#60 Fly-verified:** /health **115** | /v1/models **89** (+`hb-hotbot-chat`, +`gk-glm-4-flash`) | چات لە Fly: hb «HB-60-FLY» ✅ | gk ✅ | head **2c3faa3** | 1min.ai داخرا (لۆگین-واڵ + API پارەدار)
