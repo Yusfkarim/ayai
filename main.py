@@ -3023,7 +3023,7 @@ GZ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 # ناسنامەی نەناسراو (کوکی pfb9) — سەرڤەر بەند بە IP نییە
 GZ_PFB9 = "c7380813ca955a386914044983fbcf6a082dbf2bea2eb91917b37ba33d6ff05b"
 GZ_SKIP = {"dynamic"}  # dynamic لە ڕێپلەی 400 دەدات (resolve ی session ی وێب دەوێت)
-GZ_COOLDOWN = {"quota": 3700.0, "login": 86400.0}
+GZ_COOLDOWN = {"quota": 3700.0, "login": 3700.0}  # 401 = دوای کوانتاش دێتەوە → کاتژمێر
 _GZ_BADC = {}  # model → cooldown تا
 _GZ_SYNC = {"t": 0.0, "thread": None, "labels": {}}
 
