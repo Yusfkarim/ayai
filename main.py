@@ -2063,7 +2063,7 @@ def ng_chat(messages, timeout=110):
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
 MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}}
-MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0}
+MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0}
 MS_LOCK = threading.Lock()
 
 
@@ -3928,6 +3928,326 @@ def sync_ca_models(force=False):
         print(f"[CA-SYNC] {str(e)[:80]}", flush=True)
 
 
+# ══════════ AskAI (askaichat.app) — §2.31 — Firebase + cerebroId + حەوزی ئەکاونت + خۆکار-ساینئەپ ══════════
+AC_KEY = "AIzaSyBIjexOfpMhsws3weHS6Hko4d5Arin3Zzs"
+AC_BASE = "https://askaichat.app"
+AC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+AC_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ac_accounts.json")
+AC_ST = {"tok": None, "tok_t": 0.0, "idx": 0, "next_num": 82407,
+         "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
+                      {"email": "komex82406@duidir.com", "password": "komex82406@duidir.com"}],
+         "limits": {}, "signups": {"date": "", "n": 0}}
+_AC_SYNC = {"t": 0.0}
+# کاتالۆگی بنەڕەتی — تەنها ئەوانەی سنووری خۆڕاییان هەیە (چاکەکان limit=0 ئەنجام نادەن)
+AC_FALLBACK = {
+    "gpt-5.4-nano": ("gpt-5.4-nano", "GPT-5.4 Nano"),
+}
+
+
+def _ac_load_acc():
+    import json as _j
+    try:
+        d = _j.load(open(AC_ACC_FILE, encoding="utf-8"))
+        AC_ST["accounts"] = d.get("accounts") or AC_ST["accounts"]
+        AC_ST["idx"] = int(d.get("idx") or 0)
+        AC_ST["next_num"] = int(d.get("next_num") or 82407)
+        AC_ST["limits"] = d.get("limits") or {}
+        AC_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+    except Exception:
+        pass
+
+
+def _ac_save_acc():
+    import json as _j
+    try:
+        _j.dump({"accounts": AC_ST.get("accounts") or [], "idx": AC_ST["idx"],
+                 "next_num": AC_ST["next_num"], "limits": AC_ST.get("limits") or {},
+                 "signups": AC_ST.get("signups") or {"date": "", "n": 0}},
+                open(AC_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception:
+        pass
+
+
+_ac_load_acc()
+
+
+def _ac_firebase(ep, email, pw):
+    r = requests.post(f"https://identitytoolkit.googleapis.com/v1/accounts:{ep}?key={AC_KEY}",
+                      json={"email": email, "password": pw, "returnSecureToken": True},
+                      headers={"User-Agent": AC_UA}, timeout=(10, 25))
+    if r.status_code != 200:
+        return None
+    j = r.json() or {}
+    tok = j.get("idToken")
+    if not tok:
+        return None
+    return tok, j.get("localId") or ""
+
+
+def _ac_bootstrap(tok, uid, email):
+    """پرۆفایلی cerebro + user/set بە cerebroId — بەبێ ئەمە نەوەکە ناگوزەرێت"""
+    import random as _r, string as _s
+    cid = "web_" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=9))
+    try:
+        requests.post("https://gateway.cerebroapi.com/user/web",
+                      json={"user_id": cid, "app_id": "com.codeway.chatappweb", "version": "1.0.0",
+                            "operating_system": "Windows", "properties": {"userAgent": AC_UA}},
+                      headers={"User-Agent": AC_UA}, timeout=(10, 20))
+    except Exception:
+        pass
+    import time as _t
+    try:
+        requests.post(AC_BASE + "/api/user/set",
+                      json={"userId": uid, "firebaseUserId": uid, "email": email,
+                            "createdAt": int(_t.time() * 1000), "cerebroId": cid,
+                            "providerData": [{"providerId": "password", "uid": email, "displayName": None,
+                                              "email": email, "phoneNumber": None, "photoURL": None}],
+                            "originOnboarding": "Home", "emailConsent": True,
+                            "temporaryChatOnboarding": True},
+                      headers={"authorization": tok, "User-Agent": AC_UA, "Origin": AC_BASE,
+                               "Referer": AC_BASE + "/", "Content-Type": "application/json"},
+                      timeout=(10, 25))
+    except Exception:
+        pass
+
+
+def _ac_signup_new():
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    sg = AC_ST.get("signups") or {"date": "", "n": 0}
+    if sg.get("date") != today:
+        sg = {"date": today, "n": 0}
+    if sg.get("n", 0) >= 20 or len(AC_ST.get("accounts") or []) >= 40:
+        return None
+    n = AC_ST["next_num"]
+    for _ in range(6):
+        email = f"komex{n}@duidir.com"
+        res = _ac_firebase("signUp", email, email)
+        if res:
+            acc = {"email": email, "password": email, "boot": True}
+            try:
+                _ac_bootstrap(res[0], res[1], email)
+            except Exception:
+                pass
+            AC_ST["accounts"] = (AC_ST.get("accounts") or []) + [acc]
+            AC_ST["idx"] = len(AC_ST["accounts"]) - 1
+            AC_ST["next_num"] = n + 1
+            sg["n"] = sg.get("n", 0) + 1
+            AC_ST["signups"] = sg
+            AC_ST["tok"] = None
+            _ac_save_acc()
+            print(f"[AC] ئەکاونتی نوێ ✅ {email}", flush=True)
+            return res
+        n += 1
+    AC_ST["next_num"] = n
+    _ac_save_acc()
+    return None
+
+
+def _ac_token():
+    import time as _t
+    if AC_ST.get("tok") and _t.time() - AC_ST.get("tok_t", 0) < 2700:
+        return AC_ST["tok"]
+    accs = AC_ST.get("accounts") or []
+    if accs:
+        acc = accs[AC_ST["idx"] % len(accs)]
+        res = _ac_firebase("signInWithPassword", acc["email"], acc["password"])
+        if res:
+            AC_ST["tok"] = res[0]
+            AC_ST["tok_t"] = _t.time()
+            if not acc.get("boot"):
+                try:
+                    _ac_bootstrap(res[0], res[1], acc["email"])
+                except Exception:
+                    pass
+                acc["boot"] = True
+                _ac_save_acc()
+            return AC_ST["tok"]
+    resn = _ac_signup_new()
+    if not resn:
+        raise EMError("ac: هیچ ئەکاونت")
+    AC_ST["tok"] = resn[0]
+    AC_ST["tok_t"] = _t.time()
+    return AC_ST["tok"]
+
+
+def _ac_rotate(model_key):
+    accs = AC_ST.get("accounts") or []
+    lim = AC_ST.get("limits") or {}
+    for _ in range(len(accs)):
+        AC_ST["idx"] = (AC_ST["idx"] + 1) % len(accs)
+        acc = accs[AC_ST["idx"]]
+        em = lim.get(acc["email"]) or {}
+        if not em.get(model_key) and not em.get("*"):
+            AC_ST["tok"] = None
+            _ac_save_acc()
+            return True
+    return bool(_ac_signup_new())
+
+
+def _ac_catalog():
+    cat = {}
+    for k, v in (MS.get("ac_ok") or {}).items():
+        cat[k] = (v.get("version") or k, v.get("label") or k)
+    for k, v in AC_FALLBACK.items():
+        cat.setdefault(k, v)
+    return cat
+
+
+def ac_chat(messages, model_id, timeout=110):
+    """چاتی AskAI — send + SSE stream ی session + حەوزی ئەکاونت + خۆکار-ساینئەپ"""
+    import time as _t
+    cat = _ac_catalog()
+    if model_id not in cat:
+        raise EMError("ac: مۆدێڵ نییە")
+    mkey, mver = model_id, cat[model_id][0]
+    lines = []
+    for m in messages[-12:]:
+        role = m.get("role")
+        c = (m.get("content") or "").strip()
+        if not c:
+            continue
+        if role == "system":
+            lines.append("[Instructions] " + c)
+        elif role == "user":
+            lines.append("[User] " + c)
+        else:
+            lines.append("[Assistant] " + c)
+    if not lines:
+        raise EMError("ac: هیچ نامە")
+    lines.append("[Assistant]")
+    prompt = "\n".join(lines)[-6000:]
+    last_err = ""
+    for attempt in range(8):
+        try:
+            tok = _ac_token()
+        except EMError:
+            if not _ac_rotate(mkey):
+                raise
+            continue
+        H = {"User-Agent": AC_UA, "Content-Type": "application/json", "authorization": tok,
+             "Origin": AC_BASE, "Referer": AC_BASE + "/", "accept": "text/event-stream"}
+        try:
+            r = requests.post(AC_BASE + "/api/chat/message/send",
+                              json={"message": prompt, "model": mkey, "temporaryChat": False,
+                                    "modelVersion": mver}, headers=H, timeout=(15, 40))
+        except Exception as e:
+            raise EMError(f"ac: {str(e)[:60]}")
+        ok = False
+        sid = ""
+        err = ""
+        try:
+            j = r.json() or {}
+            ok = bool(j.get("success"))
+            sid = str(j.get("sessionId") or "")
+            err = str(j.get("error") or "")
+        except Exception:
+            err = r.text[:80]
+        if not ok:
+            last_err = err or str(r.status_code)
+            low = last_err.lower()
+            if "limit" in low or "free message" in low or "no free" in low:
+                accs = AC_ST.get("accounts") or []
+                if accs:
+                    acc = accs[AC_ST["idx"] % len(accs)]
+                    lm = AC_ST.setdefault("limits", {}).setdefault(acc["email"], {})
+                    lm[mkey] = True
+                    if "lifetime" not in low:
+                        lm["*"] = True
+                    _ac_save_acc()
+                if not _ac_rotate(mkey):
+                    raise EMError("ac: سنووری هەموو ئەکاونتەکان")
+                continue
+            if r.status_code in (401, 403):
+                AC_ST["tok"] = None
+                if not _ac_rotate(mkey):
+                    raise EMError("ac: توکن")
+                continue
+            raise EMError(f"ac: {last_err[:60]}")
+        # SSE stream — snapshot ی نشست
+        ans = ""
+        deadline = _t.time() + min(timeout, 100)
+        try:
+            r2 = requests.get(AC_BASE + "/api/session/stream",
+                              params={"sessionId": sid, "isTool": "false", "isAssistant": "false"},
+                              headers=H, timeout=(15, 100), stream=True)
+            for line in r2.iter_lines(decode_unicode=True):
+                if _t.time() > deadline:
+                    break
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    d = json.loads(line[5:].strip())
+                except Exception:
+                    continue
+                if d.get("type") != "snapshot":
+                    continue
+                data = d.get("data") or {}
+                ms = data.get("messages") or []
+                am = [x for x in ms if x.get("role") == "assistant"]
+                if am and data.get("status") == "completed":
+                    ans = (am[-1].get("message") or "").strip()
+                    break
+            try:
+                r2.close()
+            except Exception:
+                pass
+        except Exception as e:
+            last_err = str(e)[:60]
+            AC_ST["tok"] = None
+            continue
+        if ans:
+            return ans
+        last_err = "بەتاڵ/درەنگ"
+        AC_ST["tok"] = None
+    raise EMError(f"ac: {last_err[:60] or 'شکست'}")
+
+
+def ac_servers():
+    src = MS.get("ac_ok") or {k: {"version": v[0], "label": v[1]} for k, v in AC_FALLBACK.items()}
+    out = []
+    for k in sorted(src):
+        lbl = (src[k] or {}).get("label") or k
+        out.append({"id": f"ac-{re.sub(r'[^a-z0-9]+', '-', k.lower()).strip('-')}",
+                    "name": f"{lbl} (AC)", "model_id": k, "kind": "ac"})
+    return out
+
+
+def sync_ac_models(force=False):
+    """ئۆتۆ-ئەپدێتی AskAI: نەخشەی مۆدێڵەکان لە HTML — ٦ کاتژمێر (هەمان پارسەری Nuxt)"""
+    import time as _t
+    if not force and _t.time() - _AC_SYNC["t"] < 21600:
+        return
+    _AC_SYNC["t"] = _t.time()
+    try:
+        r = requests.get(AC_BASE + "/chat", headers={"User-Agent": AC_UA, "Accept": "text/html",
+                                                     "Referer": AC_BASE + "/"}, timeout=(15, 40))
+        if r.status_code != 200:
+            print(f"[AC-SYNC] HTML {r.status_code}", flush=True)
+            return
+        models = _ca_extract_models(r.text)
+        if not models:
+            print("[AC-SYNC] نەخشە نەدۆزرایەوە — کاتی کۆن دەمێنێتەوە", flush=True)
+            return
+        ok = {}
+        for k, v in models.items():
+            try:
+                if not (v or {}).get("is_active"):
+                    continue
+                # تەنها ئەوانەی سنووری خۆڕاییان هەیە — ئەوانی تر پرۆن و هەمیشە شکست دەخۆن
+                if not (v.get("free_lifetime_message_limit") or 0) > 0:
+                    continue
+                ok[k] = {"version": v.get("version") or k, "label": v.get("display_name") or k}
+            except Exception:
+                continue
+        if len(ok) >= 1:
+            MS["ac_ok"] = ok
+            _ms_save()
+            print(f"[AC-SYNC] کاتالۆگ {len(ok)} مۆدێڵی خۆڕایی", flush=True)
+    except Exception as e:
+        print(f"[AC-SYNC] {str(e)[:80]}", flush=True)
+
+
 def _ms_dup(servers, model_id):
     """ئایا ئەم مۆدێڵە پێشتر لە سەرچاوەیەکی تر هەیە؟ — دژە-دووبارە"""
     n = norm_model(model_id)
@@ -4390,6 +4710,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = cb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "ca":
                     content = ca_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "ac":
+                    content = ac_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -4454,6 +4776,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = cb_chat(nmsgs, nsrv["model_id"])
                     elif k == "ca":
                         content = ca_chat(nmsgs, nsrv["model_id"])
+                    elif k == "ac":
+                        content = ac_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -4547,7 +4871,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|\bchattide\b|\byollo\b|\bheck\b|\bhuggingface\b|\bakash\b|\bhotbot\b|\bgadegetkit\b|\bgiz\b|pi\.ai|chatbotapp|chatbotai|askaichat|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -4635,6 +4959,8 @@ def detect_brain(allow_fallback=True):
         servers += cb_servers()
         sync_ca_models()
         servers += ca_servers()
+        sync_ac_models()
+        servers += ac_servers()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -4651,6 +4977,7 @@ def detect_brain(allow_fallback=True):
         sync_pi_models()
         sync_cb_models()
         sync_ca_models()
+        sync_ac_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -5046,6 +5373,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "ca"
+            if k == "ac":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ac_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "ac"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -5170,6 +5503,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "ca"
+                if k == "ac":
+                    a = ac_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "ac"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
