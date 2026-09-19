@@ -1771,6 +1771,145 @@ def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
     return (m.get("content") or "").strip()
 
 
+# ══════════ G4F Space (g4f.space) — کریتی PoW §2.18 ══════════
+G4F_LIMIT = {"until": 0.0}
+G4F_BASE = "https://g4f.space"
+_G4F_CREDIT = {"v": 0}
+_G4F_BAKE_LOCK = threading.Lock()
+
+
+def _g4f_headers():
+    return {"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+            "Content-Type": "application/json",
+            "Referer": "https://g4f.dev/"}
+
+
+def _cake_pow(uuid, salt, difficulty, max_nonce=120_000_000):
+    """PoW: sha256(uuid:salt:nonce) ≥ difficulty بتی سیفر لە سەرەتا"""
+    import hashlib as _hl
+    pre = f"{uuid}:{salt}:".encode()
+    thr = (1 << (32 - difficulty)) if 0 < difficulty < 32 else 1
+    n = 0
+    digest = _hl.sha256
+    while n < max_nonce:
+        end = n + 200000
+        for nn in range(n, end):
+            d = digest(pre + str(nn).encode()).digest()
+            if int.from_bytes(d[:4], "big") < thr:
+                return nn, d.hex()
+        n = end
+    return None, None
+
+
+def _g4f_status():
+    r = requests.get(G4F_BASE + "/cake/status", headers=_g4f_headers(), timeout=(10, 15))
+    return r.json() if r.status_code == 200 else {}
+
+
+def _g4f_bake_one(uuid, difficulty):
+    nonce, hx = _cake_pow(uuid, "0", difficulty)
+    if not nonce:
+        return 0
+    try:
+        rb = requests.post(G4F_BASE + "/cake/bake", headers=_g4f_headers(),
+                           json={"uuid": uuid, "salt": "0", "nonce": nonce, "hash": hx},
+                           timeout=(10, 20))
+        if rb.status_code == 200:
+            j = rb.json() or {}
+            return int(j.get("total_credit_cents") or j.get("credit_cents") or 0)
+    except Exception:
+        pass
+    return 0
+
+
+def _g4f_ensure_credits(min_credits=6, bake_max=2):
+    """کەیک بنێژە ئەگەر کریت کەمە (١ کەیک = ٥ کریت، ~٥-١٥ چرکە)"""
+    with _G4F_BAKE_LOCK:
+        try:
+            st = _g4f_status()
+        except Exception:
+            return
+        _G4F_CREDIT["v"] = int(st.get("credit_cents") or 0)
+        if _G4F_CREDIT["v"] >= min_credits:
+            return
+        diff = int(st.get("difficulty") or 24)
+        try:
+            r = requests.get(G4F_BASE + "/cake/issue?n=" + str(bake_max),
+                             headers=_g4f_headers(), timeout=(10, 15))
+            uuids = (r.json() or {}).get("uuids") or []
+        except Exception:
+            return
+        for uuid in uuids:
+            tot = _g4f_bake_one(uuid, diff)
+            if tot:
+                _G4F_CREDIT["v"] = tot
+            time.sleep(0.3)
+            if _G4F_CREDIT["v"] >= min_credits:
+                break
+
+
+def _g4f_baker_daemon():
+    """پاشبنەما: کریت ≥ ١٠ ڕابگرێت (١٠٠ کەیک/ڕۆژ بۆ هەر IP)"""
+    time.sleep(20)
+    while True:
+        try:
+            st = _g4f_status()
+            if int(st.get("credit_cents") or 0) < 10 and int(st.get("baked_today") or 0) < int(st.get("limit_per_day") or 100):
+                _g4f_ensure_credits(min_credits=12, bake_max=3)
+        except Exception:
+            pass
+        time.sleep(90)
+
+
+def _g4f_models():
+    """لیستی داینامیکی — مۆدێڵی هەڵبژێردراو لە /v1/models"""
+    PREFER = [("openai/gpt-oss-120b", "GPT-OSS 120B"),
+              ("gpt-4o-mini", "GPT-4o mini"),
+              ("models/gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
+              ("nemotron-3-ultra", "Nemotron 3 Ultra"),
+              ("gpt-5-6-luna", "GPT-5.6 Luna")]
+    out, seen = [], set()
+    try:
+        r = requests.get(G4F_BASE + "/v1/models", headers=_g4f_headers(), timeout=(10, 20))
+        items = (r.json() or {}).get("data") or []
+    except Exception:
+        items = []
+    for tail, label in PREFER:
+        for it in items:
+            sid = str(it.get("id") or "")
+            if sid == tail or sid.endswith(":" + tail):
+                slug = re.sub(r"[^a-z0-9.]+", "-", tail.lower()).strip("-")
+                if slug not in seen:
+                    seen.add(slug)
+                    out.append({"id": f"g4f-{slug}", "name": f"{label} (G4F)",
+                                "model_id": sid, "kind": "g4f"})
+                break
+    return out
+
+
+def g4f_chat(messages, model_id, timeout=110):
+    """چاتی g4f.space — کریتی PoW؛ ٤٠٢/٤٢٩ → ١٥ خولەک cooldown"""
+    import time as _t
+    if _t.time() < G4F_LIMIT["until"]:
+        raise EMError("g4f: cooldown")
+    if _G4F_CREDIT["v"] < 4:
+        _g4f_ensure_credits(min_credits=4, bake_max=1)
+    try:
+        r = requests.post(G4F_BASE + "/v1/chat/completions",
+                          json={"model": model_id, "messages": messages},
+                          headers=_g4f_headers(), timeout=(15, timeout))
+    except Exception as e:
+        raise EMError(f"g4f: {str(e)[:60]}")
+    if r.status_code != 200:
+        if r.status_code in (402, 429):
+            G4F_LIMIT["until"] = _t.time() + 900
+        raise EMError(f"g4f: {r.status_code}")
+    try:
+        return (r.json()["choices"][0]["message"].get("content") or "").strip()
+    except Exception:
+        raise EMError("g4f: parse")
+
+
 def ng_servers():
     return [{"id": "ng-gemini-flash-lite", "name": "Gemini 3.1 Flash Lite (NoteGPT)",
              "model_id": "gemini-3.1-flash-lite", "kind": "ng"}]
@@ -2272,7 +2411,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-        for kind in ("em", "aff", "cbc", "rwd", "l7", "pol"):
+        for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
                 if cand and cand not in order:
@@ -2306,6 +2445,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = ng_chat(history + [{"role": "user", "content": q}])
                 elif kind == "l7":
                     content = l7_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "g4f":
+                    content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -2346,6 +2487,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = ng_chat(nmsgs)
                     elif k == "l7":
                         content = l7_chat(nmsgs, nsrv["model_id"])
+                    elif k == "g4f":
+                        content = g4f_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content:
@@ -2439,7 +2582,7 @@ BRAIN = {"mode": None, "servers": []}
 
 # دەستنیشانکردنی لێکدانی ناوی مۆدێڵ — هەرگیز ناوی مۆدێڵ ناکرێتەوە
 _LEAK_NORM = str.maketrans({"ي": "ی", "ێ": "ی", "ى": "ی", "ك": "ک"})
-LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
+LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mistral)[\w.\-]*\b|o4[\s\-]?mini|\bzerotwo\b|zero\s?two|\bquillbot\b|\bduckai\b|duck\s*\.?\s*ai\b|\banakin\b|ئەنەکین|\bnotegpt\b|\bllm7\b|\bg4f\b|نۆت\s?جی\s?پی\s?تی|(قوین|جی\s*بی\s*تی|جیمینی|دیب\s*سیک|کلود|میسترال|زێرۆ\s?تۆ|کویل|داک)\s*\d*", re.I)
 
 
 def leaks(s):
@@ -2503,6 +2646,7 @@ def detect_brain(allow_fallback=True):
     try:
         servers += ng_servers()
         servers += l7_servers()
+        servers += _g4f_models()
     except Exception as e:
         print(f"[BRAIN] ng fail: {e}", flush=True)
     # ئۆتۆ-سینک — ئەگەر سەرچاوەیەک مۆدێڵی نوێ زیاد کردبێت یان گۆڕیبێت
@@ -2754,7 +2898,7 @@ def ask(session, question):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-    for kind in ("em", "aff", "cbc", "rwd", "l7", "pol"):
+    for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
         if srv and srv.get("kind") == kind:
             continue
         cand = pick_in_kind(BRAIN["servers"], kind, srv["id"] if srv else "gpt")
@@ -2830,6 +2974,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "l7"
+            if k == "g4f":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = g4f_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "g4f"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
@@ -2894,6 +3044,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "l7"
+                if k == "g4f":
+                    a = g4f_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "g4f"
                 return pol_chat(nsrv["id"], nmsgs), "pol"
         except Exception as e2:
             print(f"[BRAIN] دیلی نەوە شکستی هێنا: {str(e2)[:80]}", flush=True)
@@ -3109,6 +3264,10 @@ def main():
         print("❌ تۆکن هەڵەیە یان ئینتەرنێت نییە:", me.get("description"), flush=True)
         return
     print(f"✅ بۆت: @{me['result']['username']} ({me['result']['first_name']})", flush=True)
+
+    # کەیک-بەیکەری G4F — پاشبنەما
+    threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
+    print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
 
     # دەستنیشانکردنی مێشک
     print("🧠 دەستنیشانکردنی سەرچاوەی AI…", flush=True)
