@@ -3400,22 +3400,22 @@ def _cb_signup_new():
     if len(CB_ST.get("accounts") or []) >= 70:
         return None
     n = CB_ST["next_num"]
-    for _ in range(6):
-        email = f"komex{n}@duidir.com"
+    for off in (0, 3, 13, 40, 100, 250):
+        email = f"komex{n + off}@duidir.com"
         res = _fb_signup(CB_KEY, email, email, CB_UA)
         if res:
             CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email}]
             CB_ST["idx"] = len(CB_ST["accounts"]) - 1
-            CB_ST["next_num"] = n + 1
+            CB_ST["next_num"] = n + off + 1
             sg["n"] = sg.get("n", 0) + 1
             CB_ST["signups"] = sg
             _cb_save_acc()
             CB_ST["tok"] = None
             print(f"[CB] ئەکاونتی نوێ ✅ {email}", flush=True)
             return res
-        n += 1
-    CB_ST["next_num"] = n
+    CB_ST["next_num"] = n + 300
     _cb_save_acc()
+    print(f"[CB] هیچ شوێن — بازدا بۆ {CB_ST['next_num']}", flush=True)
     return None
 
 
@@ -3711,25 +3711,25 @@ def _ca_signup_new():
     if sg.get("n", 0) >= 120 or len(CA_ST.get("accounts") or []) >= 70:
         return None
     n = CA_ST["next_num"]
-    # دوو پێشەکی: komex (کۆن) + heal (نوێ — نەخشەی komex پڕە)
+    # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
+    offs = (0, 3, 13, 40, 100, 250)
     for pref in ("komex", "heal"):
-        for _ in range(30):
-            email = f"{pref}{n}@duidir.com"
+        for off in offs:
+            email = f"{pref}{n + off}@duidir.com"
             res = _fb_signup(CA_KEY, email, email, CA_UA)
             if res:
                 CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
                 CA_ST["idx"] = len(CA_ST["accounts"]) - 1
-                CA_ST["next_num"] = n + 1
+                CA_ST["next_num"] = n + off + 1
                 sg["n"] = sg.get("n", 0) + 1
                 CA_ST["signups"] = sg
                 CA_ST["tok"] = None
                 _ca_save_acc()
                 print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
                 return res
-            n += 1
-        n = max(n, 82450)  # بۆ heal — نەخشەی نوێ
-    CA_ST["next_num"] = n
+    CA_ST["next_num"] = n + 300
     _ca_save_acc()
+    print(f"[CA] هیچ شوێن — بازدا بۆ {CA_ST['next_num']}", flush=True)
     return None
 
 
@@ -4492,26 +4492,23 @@ def _nv_signup_new():
         return None
     import time as _ts
     n = NV_ST["next_num"]
-    for attempt in range(2):
-        for _ in range(6):
-            email = f"komex{n}@duidir.com"
-            res = _fb_signup(NV_KEY, email, email, NV_UA)
-            if res:
-                NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
-                NV_ST["idx"] = len(NV_ST["accounts"]) - 1
-                NV_ST["next_num"] = n + 1
-                sg["n"] = sg.get("n", 0) + 1
-                NV_ST["signups"] = sg
-                NV_ST["tok"] = None
-                _nv_save_acc()
-                print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
-                return res
-            n += 1
-            _ts.sleep(1.5)
-        NV_ST["next_num"] = n
-        if attempt == 0:
-            _ts.sleep(5)  # rate-limit — دووبارە
+    for off in (0, 3, 13, 40, 100, 250):
+        email = f"komex{n + off}@duidir.com"
+        res = _fb_signup(NV_KEY, email, email, NV_UA)
+        if res:
+            NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
+            NV_ST["idx"] = len(NV_ST["accounts"]) - 1
+            NV_ST["next_num"] = n + off + 1
+            sg["n"] = sg.get("n", 0) + 1
+            NV_ST["signups"] = sg
+            NV_ST["tok"] = None
+            _nv_save_acc()
+            print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
+            return res
+        _ts.sleep(1.2)
+    NV_ST["next_num"] = n + 300
     _nv_save_acc()
+    print(f"[NV] هیچ شوێن — بازدا بۆ {NV_ST['next_num']}", flush=True)
     return None
 
 
