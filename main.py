@@ -6445,10 +6445,10 @@ def get_session(user_id):
             s = {"server": default, "history": [], "mkey": (srv_key(dflt) if dflt else (norm_model(default) if default else None))}
             sessions[user_id] = s
         # #88: هەڵبژاردنی ئەدمین بۆ هەموو بەکارهێنەران جێبەجێ دەکرێت
-        if user_id != ADMIN_TG and GLOBAL_MODEL.get("server"):
+        if GLOBAL_MODEL.get("server"):
             s["server"] = GLOBAL_MODEL["server"]
             s["mkey"] = GLOBAL_MODEL.get("mkey") or s.get("mkey")
-        elif user_id != ADMIN_TG and GLOBAL_MODEL.get("mkey"):
+        elif GLOBAL_MODEL.get("mkey"):
             # #91G: سەرچاوە گۆڕاوە — هەمان مۆدێڵ لە هەر سەرچاوەیەکی زیندوو
             _mk = GLOBAL_MODEL["mkey"]
             _alt = next((x for x in BRAIN["servers"] if srv_key(x) == _mk), None)
@@ -7006,7 +7006,7 @@ def handle_message(msg):
         parts_out = [f"🤖 <b>قائمة الموديلات</b> — {len(uniq)} موديل (المكرر بين المصادر مدموج):\n\n"]
         cur = parts_out[0]
         for i, x in enumerate(uniq, 1):
-            mark = " ✅" if x["id"] == s["server"] else ""
+            mark = " ✅" if x["id"] == (GLOBAL_MODEL.get("server") or s["server"]) else ""
             ln = f"{i}. <code>{x['id']}</code>{mark}\n"
             if len(cur) + len(ln) > 3700:
                 parts_out.append(cur)
@@ -7566,6 +7566,11 @@ def main():
             print(f"👤 مۆدێڵی هەمیشەیی ئەدمین گەڕایەوە: {GLOBAL_MODEL.get('server') or _gm.get('mkey')}", flush=True)
     except Exception:
         pass
+    # #91D: بنەڕەتی هەمیشەیی — openai/gpt-5.5 (داواکاری ئەدمین)
+    if not GLOBAL_MODEL.get("server") and not GLOBAL_MODEL.get("mkey"):
+        GLOBAL_MODEL["server"] = "openai/gpt-5.5"
+        GLOBAL_MODEL["mkey"] = "gpt-5-5"
+        print("👤 بنەڕەتی: openai/gpt-5.5", flush=True)
     if new["mode"] == "aff":
         print(f"🟢 مێشکی سەرەکی: aifreeforever ({len(new['servers'])} سێرڤەر)", flush=True)
     elif new["mode"] == "pol":
