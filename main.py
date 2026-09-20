@@ -3769,7 +3769,7 @@ def _ca_signup_new():
 
 # ════════ #82/#83: حەوزی ئەکاونت — هەرسێکە (CA+CB+NV) — ٥٠ بۆ هەر یەکێک + پرۆکسی ════════
 _SAVE_LOCK = threading.Lock()  # نووسینی هاوبەشی فایلەکان — تەردی چات + دیمۆن
-PROXY_ST = {"list": [], "src_t": 0.0, "bad": set()}
+PROXY_ST = {"list": [], "src_t": 0.0, "bad": set(), "pool": {}, "raw": [], "cur": 0}
 _PROXY_GET_STATE = {"loaded": False}
 
 
@@ -3838,11 +3838,10 @@ def _proxy_fetch_all():
     return list(dict.fromkeys([x for x in raw if x]))
 
 
-def _proxy_check(pxs, cap=18):
-    """#91P کڕاک: شەپۆلی خێرا (generate_204) → ڕیزکردن بەپێی خێرایی → پشتڕاستکردنەوەی گەرمەکان"""
+def _proxy_screen(batch, tmo=8):
+    """#91H: شەپۆلێک تاقیکردنەوەی خێرا — ئەوانەی 204 یان دەگەن + پێوانەی خێرایی"""
     res = []
     _lk = threading.Lock()
-    tmo = _PROXY_TEST["timeout"] = 8
 
     def _one(px):
         try:
@@ -3854,41 +3853,119 @@ def _proxy_check(pxs, cap=18):
         except Exception:
             pass
 
-    def _wave(batch):
-        ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in batch]
-        for t in ths:
-            t.start()
-        for t in ths:
-            t.join(tmo + 3)
+    ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in batch]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join(tmo + 3)
+    return res
 
-    batch = pxs[:min(180, cap * 8)]
-    _wave(batch)
-    if len(res) < cap and len(pxs) > len(batch):
-        _wave(pxs[len(batch):len(batch) + 180])  # #91P: شەپۆلی دووەم — تا پڕ ببێت
+
+def _proxy_check(pxs, cap=18):
+    """#91H کڕاک: شەپۆلی خێرا → ڕیزکردن بەپێی خێرایی — دوو شەپۆل تا پڕ ببێت"""
+    res = _proxy_screen(pxs[:min(180, cap * 8)])
+    if len(res) < cap and len(pxs) > 180:
+        res += _proxy_screen(pxs[180:360])
     res.sort()
-    good = [p for _, p in res[:cap]]
-    # پشتڕاستکردنەوەی گەرم: خێراترین ١٠ لە ئامانجی دووەم تاقی دەکرێنەوە
-    if good and cap >= 10:
-        def _ok2(px):
-            try:
-                return requests.get(_PROXY_TARGETS[0], proxies={"http": px, "https": px}, timeout=tmo).status_code < 500
-            except Exception:
-                return False
-        return [p for p in good]  # کۆتایی — گەرمەکان لە بەکارهێنانی ڕاستەقینە پشتڕاست دەکرێنەوە
-    return good
+    return [p for _, p in res[:cap]]
+
+
+def _proxy_mark_bad(px):
+    """#91H: مردوو لە باد-سێت و حەوز یەکسان لادەبرێت"""
+    b = px.replace("http://", "")
+    PROXY_ST["bad"].add(b)
+    try:
+        PROXY_ST.get("pool", {}).pop(b, None)
+    except Exception:
+        pass
+
+
+def _proxy_pool_save():
+    try:
+        json.dump({"pool": PROXY_ST.get("pool") or {}, "bad": sorted(PROXY_ST["bad"])[:600], "t": time.time()},
+                  open(os.path.join(DATA_DIR, "proxy_pool.json"), "w"))
+    except Exception:
+        pass
+
+
+def _proxy_pool_load():
+    """#91H: حەوزی پاشەکەوتکراو لە /data — ڕیستارت = یەکسان پرۆکسی ئامادە"""
+    try:
+        d = json.load(open(os.path.join(DATA_DIR, "proxy_pool.json")))
+        now = time.time()
+        PROXY_ST["pool"] = {k: v for k, v in (d.get("pool") or {}).items() if now - (v or {}).get("t", 0) < 2700}
+        for b in (d.get("bad") or [])[:600]:
+            PROXY_ST["bad"].add(b)
+        print(f"[HARVESTER] حەوزی پاشەکەوتکراو: {len(PROXY_ST['pool'])} زیندوو | {len(PROXY_ST['bad'])} مردوو", flush=True)
+    except Exception:
+        try:
+            for b in json.load(open(os.path.join(DATA_DIR, "proxy_bad.json"))) or []:
+                PROXY_ST["bad"].add(b)
+        except Exception:
+            pass
+
+
+def _harvest_wave(wave=160):
+    """#91H: یەک شەپۆل — خولانەوەی لیستی ڕاو بەبێ دووبارە، تا هەموو پرۆکسییەکان پشکنراون"""
+    now = time.time()
+    raw = PROXY_ST.get("raw") or []
+    if now - PROXY_ST["src_t"] > 900 or not raw:
+        raw = _proxy_fetch_all()
+        PROXY_ST["raw"] = raw
+        PROXY_ST["src_t"] = now
+        PROXY_ST["cur"] = 0
+        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ١٦ سەرچاوە", flush=True)
+    if not raw:
+        return
+    bad, pool = PROXY_ST["bad"], PROXY_ST.setdefault("pool", {})
+    cur = int(PROXY_ST.get("cur") or 0) % len(raw)
+    batch, i, scanned = [], cur, 0
+    while len(batch) < wave and scanned < len(raw):
+        px = raw[i % len(raw)]
+        i += 1
+        scanned += 1
+        if px in bad or px in pool:
+            continue
+        batch.append(px)
+    PROXY_ST["cur"] = i % len(raw)
+    if not batch:
+        PROXY_ST["cur"] = 0  # هەموو لیست پشکنراوە — لە سەرەتاوە بە قۆناغی نوێ
+        return
+    res = _proxy_screen(batch)
+    for lat, px in res:
+        pool[px] = {"t": now, "lat": round(lat, 2)}
+    PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
+    if len(PROXY_ST["pool"]) > 80:
+        keep = sorted(PROXY_ST["pool"].items(), key=lambda kv: kv[1].get("lat", 9))[:80]
+        PROXY_ST["pool"] = dict(keep)
+    _proxy_pool_save()
+    print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
+
+
+def _proxy_harvester_daemon():
+    """#91H: بەردەوام — هەر ٤ خولەک شەپۆلێک کراک → گەورەترین و تازەترین حەوز بەبێ وەستان"""
+    time.sleep(45)
+    while True:
+        try:
+            _harvest_wave(160)
+        except Exception as e:
+            print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
+        time.sleep(240)
 
 
 def _proxy_get(n=4):
     """پرۆکسی: proxies.json (دەستی) → سەرچاوە خۆڕاییەکان → **پشکنینی زیندوو** — تەنها ئەکتیڤ"""
     import time as _t
     now = _t.time()
-    if not PROXY_ST["bad"] and not _PROXY_GET_STATE.get("loaded"):
+    if not _PROXY_GET_STATE.get("loaded"):
         _PROXY_GET_STATE["loaded"] = True
-        try:
-            for b in json.load(open(os.path.join(DATA_DIR, "proxy_bad.json"))) or []:
-                PROXY_ST["bad"].add(b)
-        except Exception:
-            pass
+        _proxy_pool_load()
+    pool = PROXY_ST.get("pool") or {}
+    if pool:
+        ranked = sorted(pool.items(), key=lambda kv: (kv[1] or {}).get("lat", 9))
+        out = [(k if "://" in k else "http://" + k) for k, _ in ranked if k not in PROXY_ST["bad"]]
+        if out:
+            return out[:n]
     if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
         manual = []
         for _pf in (os.path.join(DATA_DIR, "proxies.json"),
@@ -3908,10 +3985,7 @@ def _proxy_get(n=4):
         good = _proxy_check(raw, cap=30)
         if manual and not good:
             good = [p if "://" in p else "http://" + p for p in manual[:6]]  # دەستیلەکان با هەوڵیان لەسەر بکرێت
-        try:  # #91P: مردووەکان پاشەکەوت دەکرێن — دووبارە تاقی نەکرێنەوە
-            json.dump(sorted(PROXY_ST["bad"])[:400], open(os.path.join(DATA_DIR, "proxy_bad.json"), "w"))
-        except Exception:
-            pass
+        _proxy_pool_save()
         PROXY_ST["list"] = good
         PROXY_ST["bad"].clear()
         PROXY_ST["src_t"] = now
@@ -3949,12 +4023,12 @@ def _fb_signup(key, email, pw, ua):
         try:
             r2 = _call(px)
         except Exception:
-            PROXY_ST["bad"].add(px.replace("http://", ""))
+            _proxy_mark_bad(px)
             continue
         if r2 and r2[0] != "BLOCKED":
             print(f"[FB] signUp بە پرۆکسی ✅ {px[:28]}", flush=True)
             return r2
-        PROXY_ST["bad"].add(px.replace("http://", ""))
+        _proxy_mark_bad(px)
     return None
 
 
@@ -5606,7 +5680,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
                 "pools": {"ca": _n2("ca_accounts.json"), "cb": _n2("cb_accounts.json"), "nv": _n2("nv_accounts.json")},
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
-                "proxies": len(PROXY_ST.get("list") or []),
+                "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
             }
             return self._send(200, body)
         if self.path in ("/", "/health"):
@@ -7076,8 +7150,8 @@ def proxy_keeper_daemon():
     while True:
         try:
             _proxy_refresh_sources()
-            n = len(PROXY_ST.get("list") or [])
-            print(f"[PROXY-KEEPER] {n} پرۆکسی زیندوو ئامادە (کڕاککراو — فرە-ئامانج)", flush=True)
+            n = len(PROXY_ST.get("pool") or PROXY_ST.get("list") or [])
+            print(f"[PROXY-KEEPER] حەوزی کڕاککراو: {n} — خێراترین و تازەترین", flush=True)
         except Exception as e:
             print(f"[PROXY-KEEPER] هەڵە: {str(e)[:60]}", flush=True)
         cyc += 1
@@ -7320,6 +7394,7 @@ def main():
     threading.Thread(target=_pool_daemon, daemon=True).start()
     threading.Thread(target=self_heal_daemon, daemon=True).start()
     threading.Thread(target=proxy_keeper_daemon, daemon=True).start()
+    threading.Thread(target=_proxy_harvester_daemon, daemon=True).start()
     threading.Thread(target=_xarq_watchdog, daemon=True).start()
     threading.Thread(target=_daily_report, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
