@@ -7822,6 +7822,148 @@ def _chaos_daemon():
 
 
 
+
+# ═══════════ #91F2: FORTRESS — پێنج چینی کۆتایی ═══════════
+_STATE_PERSIST = {"t": 0.0}
+
+
+def _state_persist_daemon():
+    """#91F2-1: پاشەکەوتی دۆخ — breaker+perf لە /data — ڕیستارت = بیرەوەری ناوەکە دەمێنێتەوە"""
+    # لۆدی دۆخی پێشوو
+    try:
+        d = json.load(open(os.path.join(DATA_DIR, "state.json")))
+        for k, v in (d.get("breaker") or {}).items():
+            if v > time.time():
+                _BREAKER[k] = v
+        p = d.get("perf") or {}
+        if p:
+            _PERF["req"] += p.get("req", 0)
+            _PERF["ok"] += p.get("ok", 0)
+            _PERF["fail"] += p.get("fail", 0)
+    except Exception:
+        pass
+    while True:
+        try:
+            now = time.time()
+            if now - _STATE_PERSIST["t"] > 120:
+                _STATE_PERSIST["t"] = now
+                json.dump({"breaker": {k: v for k, v in _BREAKER.items() if v > now},
+                           "perf": {"req": _PERF["req"], "ok": _PERF["ok"], "fail": _PERF["fail"]}},
+                          open(os.path.join(DATA_DIR, "state.json"), "w"))
+        except Exception:
+            pass
+        time.sleep(120)
+
+
+def _disk_guard_daemon():
+    """#91F2-2: پارێزی دیسک — ئەگەر /data پڕ بێت → پاککردنەوەی کۆنەکان (قەت پڕ نابێت)"""
+    time.sleep(600)
+    while True:
+        try:
+            total = 0
+            files = []
+            for f in os.listdir(DATA_DIR):
+                try:
+                    p = os.path.join(DATA_DIR, f)
+                    if os.path.isfile(p):
+                        sz = os.path.getsize(p)
+                        total += sz
+                        files.append((sz, p, os.path.getmtime(p)))
+                except Exception:
+                    pass
+            if total > 80 * 1024 * 1024:  # 80MB — سنووری ئاگاداری
+                files.sort()  # کۆنترین + گەورەترین سەرەتا
+                freed = 0
+                for sz, p, mt in files:
+                    if freed > 40 * 1024 * 1024:
+                        break
+                    if "accounts" in p or "state.json" in p or "webshare" in p or "global_model" in p:
+                        continue  # فایلی ڕەسەن — دەست نادرێت
+                    try:
+                        os.remove(p)
+                        freed += sz
+                    except Exception:
+                        pass
+                print(f"[DISK] 🧹 {freed // 1024}KB ئازادکرا — کۆی: {total // 1024 // 1024}MB", flush=True)
+        except Exception:
+            pass
+        time.sleep(1800)
+
+
+def _rescue_daemon():
+    """#91F2-3: ڕزگارکەر — ئەگەر هەموو سەرچاوەکان breaker بوون → breaker ەکانی سەرچاوە سەرەکییەکان بسڕەوە"""
+    time.sleep(300)
+    while True:
+        try:
+            now = time.time()
+            active = [k for k, v in _BREAKER.items() if v > now]
+            if len(active) >= 4:  # زۆربەی سەرچاوەکان لە پشوودان
+                # سەرچاوە حەوزدارەکان هەمیشە ئازاد بن — ئەوان ئەکاونتیان هەیە
+                for k in ("ca", "cb", "nv"):
+                    if k in _BREAKER:
+                        _BREAKER.pop(k, None)
+                        print(f"[RESCUE] 🔓 breaker ی {k} لابرا — حەوز هەمیشە ئازادە", flush=True)
+        except Exception:
+            pass
+        time.sleep(120)
+
+
+def _hot_model_daemon():
+    """#91F2-4: گەرمکردنی مۆدێڵەکان — هەر ٣٠ خولەک مۆدێڵی بەکارهێنراو گەرم دەکرێت (کاش)"""
+    time.sleep(600)
+    while True:
+        try:
+            # سێ مۆدێڵی سەرەکی — پێش داواکاری ڕاستەقینە گەرم بن
+            warm = ["openai/gpt-5.5", "deepseek/deepseek-v3.2", "google/gemini-2.5-pro"]
+            for mid in warm:
+                try:
+                    srv = next((x for x in API_BRAIN["servers"] if x.get("id") == mid), None)
+                    if not srv:
+                        continue
+                    k = srv.get("kind")
+                    fn = globals().get(f"{k}_chat")
+                    if fn:
+                        msgs = [{"role": "user", "content": "ping"}]
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02"):
+                            fn(msgs, srv.get("model_id") or mid, timeout=25)
+                except Exception:
+                    pass
+                time.sleep(5)
+            print("[WARM] 🔥 مۆدێڵە گرنگەکان گەرم کران", flush=True)
+        except Exception:
+            pass
+        time.sleep(1800)
+
+
+_API_KEYS_LOG = {"n": 0}
+
+
+def _usage_snapshot_daemon():
+    """#91F2-5: تۆماری بەکارهێنان — ڕاپۆرتی کاتژمێری ورد بۆ ئەدمین (تەنها ئەگەر چالاک بوو)"""
+    time.sleep(3600)
+    _last_req = 0
+    while True:
+        try:
+            now = int(time.time())
+            hr = time.strftime("%H:00", time.gmtime(now - 3600))
+            delta = _PERF["req"] - _last_req
+            _last_req = _PERF["req"]
+            if delta > 0:
+                lat = _PERF["lat"]
+                avg = (sum(lat) / len(lat)) if lat else 0
+                st = _HEAL_STATE.get("status", {})
+                okn = sum(1 for v in st.values() if v.get("ok"))
+                tg("sendMessage", chat_id=ADMIN_TG, parse_mode="HTML",
+                   text=(f"📊 <b>کاتژمێری {hr} UTC</b>\n"
+                         f"⚡ داواکاری: {delta}\n"
+                         f"✅ سەرچاوە: {okn}/{len(st)}\n"
+                         f"⏳ تێکڕا: {avg:.1f}s\n"
+                         f"💾 کاش: {len(_ANS_CACHE)}"))
+        except Exception:
+            pass
+        time.sleep(3600)
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -7844,6 +7986,11 @@ def main():
     threading.Thread(target=_limit_dawn_daemon, daemon=True).start()
     threading.Thread(target=_self_check_daemon, daemon=True).start()
     threading.Thread(target=_chaos_daemon, daemon=True).start()
+    threading.Thread(target=_state_persist_daemon, daemon=True).start()
+    threading.Thread(target=_disk_guard_daemon, daemon=True).start()
+    threading.Thread(target=_rescue_daemon, daemon=True).start()
+    threading.Thread(target=_hot_model_daemon, daemon=True).start()
+    threading.Thread(target=_usage_snapshot_daemon, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
