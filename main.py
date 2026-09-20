@@ -12,7 +12,6 @@ import html
 import http.server
 import json
 import os
-import queue
 import random
 import re
 import socketserver
@@ -2063,7 +2062,7 @@ def ng_chat(messages, timeout=110):
 # ════════════════════════════════════════════════════════════
 
 MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
-MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}, "aiml_ok": {}, "ar_ok": {}}
+MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}, "aiml_ok": {}}
 MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0, "al": 0.0}
 MS_LOCK = threading.Lock()
 
@@ -2072,7 +2071,7 @@ def _ms_load():
     try:
         with open(MODEL_SYNC_FILE, "r", encoding="utf-8") as f:
             d = json.load(f)
-        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad", "al_ok", "al_bad", "aiml_ok", "ar_ok"):
+        for k in ("duck", "ak_ok", "ak_block", "l7_ok", "l7_bad", "ct_ok", "ct_bad", "yl_ok", "yl_bad", "hk_ok", "hk_bad", "hf_ok", "hf_bad", "aka_ok", "aka_bad", "hb_ok", "hb_bad", "gk_ok", "gk_bad", "gz_ok", "gz_bad", "pi_ok", "pi_bad", "cb_ok", "cb_bad", "nv_ok", "nv_bad", "al_ok", "al_bad", "aiml_ok"):
             v = d.get(k)
             if isinstance(v, dict):
                 MS[k].update(v)
@@ -5356,7 +5355,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-        for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "ar", "pol"):
+        for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
                 if cand and cand not in order:
@@ -5422,8 +5421,6 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "aiml":
                     content = aiml_chat(history + [{"role": "user", "content": q}], cand["model_id"])
-                elif kind == "ar":
-                    content = ar_chat(history + [{"role": "user", "content": q}], cand.get("model_id"))
                 else:
                     content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
                 if content:
@@ -5597,444 +5594,6 @@ def leaks(s):
 _lock = threading.Lock()
 
 
-# ════════════════════════════════════════════════════════════
-# ٢.٣٦) arena.ai (#77) — LMArena battle — playwright/chromium
-#      login = POST /nextjs-api/sign-in/email (بێ captcha) → 200
-#      chat = battle: دوو مۆدێڵی نەناسراو (A/B) — A وەردەگیرێت، ئەگەر بەتاڵ بوو B
-#      recaptcha Enterprise v3 تەنها لەناو وێبگەڕ دروست دەبێت (action نهێنییە،
-#      تۆکنی دەرەکی → ٤٠٣ replay) — بۆیە ناردن بە خۆی لە براوزەردا دەکرێت
-#      و تەنها وەڵامەکە دەخوێنرێتەوە (SSE: a0=A, b0=B)
-#      لیمیت: ~١-٢ نامە/چەند خولەک بۆ هەژمار → ٤٢٩ → cooldown ٣٦٠s
-#      براوزەر: وەستاو (lazy) + ٣٠٠s بێ کار → دادەخرێت (ڕامی Fly)
-# ════════════════════════════════════════════════════════════
-ARENA_EMAIL = "negebo3462@findize.com"
-ARENA_PASS = "negebo3462@findize.comA"
-ARENA_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-AR_COOLDOWN = {"until": 0.0}
-_ARQ = {"q": None, "worker": False}
-_AR_SPAWN = threading.Lock()
-
-
-def _ar_parse(raw):
-    """وەڵامی SSE-ی arena: a0:"…" = A، b0:"…" = B"""
-    a, b = [], []
-    for line in (raw or "").split("\n"):
-        m = re.match(r"^(a0|b0):(.*)$", (line or "").strip())
-        if m:
-            try:
-                (a if m.group(1) == "a0" else b).append(json.loads(m.group(2)))
-            except Exception:
-                pass
-    return "".join(a).strip(), "".join(b).strip()
-
-
-def _ar_uuid7():
-    import os as _os
-    ts = int(time.time() * 1000)
-    raw = bytearray(ts.to_bytes(6, "big") + _os.urandom(10))
-    raw[6] = (raw[6] & 0x0F) | 0x70
-    raw[8] = (raw[8] & 0x3F) | 0x80
-    h = raw.hex()
-    return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
-
-
-_AR_SYNC = {"t": 0.0}
-
-
-def _ar_ensure_mode(pg, want):
-    """کۆمپۆزەر بخەە دۆخی battle یان direct (دوگمە + مینیو)"""
-    mode = pg.evaluate("""() => {
-        const bs = Array.from(document.querySelectorAll('button')).filter(x => x.offsetParent !== null);
-        if (bs.find(x => x.textContent.trim().startsWith('Direct'))) return 'direct';
-        if (bs.find(x => x.textContent.includes('Battle'))) return 'battle';
-        return '?';
-    }""")
-    if mode == want:
-        return
-    menu_item = "Direct" if want == "direct" else "Battle Mode"
-    pg.evaluate("""(mi) => {
-        const bs = Array.from(document.querySelectorAll('button')).filter(x => x.offsetParent !== null);
-        const cur = bs.find(x => x.textContent.trim().startsWith('Direct')) ||
-                    bs.find(x => x.textContent.includes('Battle'));
-        if (cur) cur.click();
-    }""", menu_item)
-    pg.wait_for_timeout(1300)
-    pg.evaluate("""(mi) => {
-        const els = Array.from(document.querySelectorAll('button,[role="menuitem"],[role="option"]'))
-            .filter(x => x.offsetParent !== null);
-        const d = els.find(x => x.textContent.trim().startsWith(mi));
-        if (d) d.click();
-    }""", menu_item)
-    pg.wait_for_timeout(1600)
-
-
-def _ar_flight_models(html):
-    """کاتالۆگی مۆدێلەکان لە flight-data ی SSR — {name: {id, org, display}} — تەنها text→text"""
-    try:
-        import json5 as _j5
-    except Exception:
-        _j5 = None
-    out = {}
-    try:
-        parts = re.findall(r'self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)', html or "")
-        try:
-            flight = "".join(p.encode("latin-1", "ignore").decode("unicode_escape") for p in parts)
-        except Exception:
-            flight = ""
-        n = len(flight)
-        for m in re.finditer(r'\{"id":"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}","organization":"', flight):
-            s = m.start()
-            depth = 0
-            j = s
-            end = -1
-            in_str = False
-            while j < n:
-                c = flight[j]
-                if in_str:
-                    if c == "\\":
-                        j += 1
-                    elif c == '"':
-                        in_str = False
-                elif c == '"':
-                    in_str = True
-                elif c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = j
-                        break
-                j += 1
-            if end < 0:
-                continue
-            try:
-                if _j5:
-                    obj = _j5.loads(flight[s:end + 1])
-                else:
-                    obj = json.loads(flight[s:end + 1])
-            except Exception:
-                continue
-            if not (isinstance(obj, dict) and obj.get("name") and obj.get("id")):
-                continue
-            caps = obj.get("capabilities") or {}
-            ic = caps.get("inputCapabilities") or {}
-            oc = caps.get("outputCapabilities") or {}
-            if not (ic.get("text") and oc.get("text")):
-                continue  # وێنە/ڤیدیۆ — بەفیڕۆیان بەهێڵە
-            out[obj["name"]] = {"id": obj["id"], "org": obj.get("organization") or "",
-                                "display": obj.get("displayName") or obj["name"]}
-    except Exception as e:
-        print(f"[AR-SYNC] parse: {str(e)[:70]}", flush=True)
-    return out
-
-
-def sync_arena_models(force=False):
-    """ئۆتۆ-سینکی کاتالۆگی arena.ai — هەر ٦ کاتژمێر — هەموو مۆدێڵە text-ەکان tier f"""
-    import time as _t
-    if not force and _t.time() - _AR_SYNC["t"] < 21600:
-        return
-    _AR_SYNC["t"] = _t.time()
-    try:
-        s = requests.Session()
-        s.headers.update({"User-Agent": ARENA_UA})
-        s.post("https://arena.ai/nextjs-api/sign-in/email",
-               json={"email": ARENA_EMAIL, "password": ARENA_PASS}, timeout=(15, 30))
-        r = s.get("https://arena.ai/", timeout=(15, 45))
-        if r.status_code != 200:
-            print(f"[AR-SYNC] html {r.status_code}", flush=True)
-            return
-        mods = _ar_flight_models(r.text)
-        ok = {}
-        for name, m in mods.items():
-            sid = re.sub(r"[^a-z0-9._\-]+", "-", name.lower()).strip("-")[:60]
-            if not sid:
-                continue
-            ok[name] = {"id": m["id"], "org": m["org"], "display": m["display"], "sid": sid}
-        if ok:
-            MS["ar_ok"] = ok
-            _ms_save()
-        print(f"[AR-SYNC] {len(ok)} مۆدێڵی arena", flush=True)
-    except Exception as e:
-        print(f"[AR-SYNC] {str(e)[:80]}", flush=True)
-
-
-def _ar_worker():
-    """تەردی تایبەت بە براوزەر — sync_playwright تەنها لە هەمان تەرددا کاردەکات"""
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception as e:
-        print(f"[AR] playwright import شکاند: {e}", flush=True)
-        _ARQ["worker"] = False
-        return
-    pw = sync_playwright().start()
-    st = {"browser": None, "ctx": None, "page": None}
-
-    def kill():
-        for k in ("ctx", "browser"):
-            try:
-                if st.get(k):
-                    getattr(st[k], "close")()
-            except Exception:
-                pass
-        st.update({"browser": None, "ctx": None, "page": None})
-
-    def login():
-        s = requests.Session()
-        s.headers.update({"User-Agent": ARENA_UA})
-        r = s.post("https://arena.ai/nextjs-api/sign-in/email",
-                   json={"email": ARENA_EMAIL, "password": ARENA_PASS},
-                   timeout=(15, 30))
-        if r.status_code != 200:
-            raise RuntimeError(f"ar: login {r.status_code}")
-        cks = [{"name": c.name, "value": c.value, "domain": c.domain or "arena.ai",
-                "path": c.path or "/"} for c in s.cookies]
-        if not cks:
-            raise RuntimeError("ar: login بێ کوکی")
-        return cks
-
-    def ensure():
-        if st.get("page"):
-            try:
-                st["page"].title()
-                return st["page"]
-            except Exception:
-                kill()
-        cks = login()
-        b = pw.chromium.launch(headless=True, args=[
-            "--no-sandbox", "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled"])
-        ctx = b.new_context(user_agent=ARENA_UA, viewport={"width": 1366, "height": 850},
-                            locale="en-US")
-        ctx.add_cookies(cks)
-        pg = ctx.new_page()
-        pg.add_init_script("""
-            (() => {
-                if (window.__arHooked) return;
-                window.__arHooked = true;
-                const orig = window.fetch;
-                window.fetch = async (...args) => {
-                    const res = await orig(...args);
-                    try {
-                        const u = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-                        if (u.includes('/nextjs-api/stream/') && res && res.body) {
-                            window.__arStatus = res.status;
-                            window.__arDec = new TextDecoder();
-                            window.__arReader = res.clone().body.getReader();
-                        }
-                    } catch (e) {}
-                    return res;
-                };
-            })();
-        """)
-        pg.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=60000)
-        pg.wait_for_timeout(6000)
-        st.update({"browser": b, "ctx": ctx, "page": pg})
-        print("[AR] براوزەر ئامادە", flush=True)
-        return pg
-
-    while True:
-        try:
-            job = _ARQ["q"].get(timeout=3600)
-        except Exception:
-            kill()  # ٦٠ خولەک بێ کار — ڕام پاک بکەوە
-            continue
-        out, err, code = "", "", ""
-        try:
-            pg = ensure()
-            msgs = job["messages"]
-            model_name = job.get("model")
-            direct = bool(model_name and model_name != "battle")
-            sys_txt = " ".join(m.get("content", "") for m in msgs if m.get("role") == "system")[:2500]
-            conv = []
-            for m in msgs:
-                if m.get("role") in ("user", "assistant") and m.get("content"):
-                    who = "User" if m.get("role") == "user" else "Assistant"
-                    conv.append(f"[{who}]: {m['content']}")
-            content = (f"[System instructions — follow strictly: {sys_txt}]\n\n" if sys_txt else "")
-            content += "\n".join(conv)[-8000:]
-            holder, ev = {}, threading.Event()
-
-            def on_resp(r):
-                try:
-                    if ("/nextjs-api/stream/" in r.url and r.request.method == "POST"
-                            and ("create-evaluation" in r.url or "post-to-evaluation" in r.url)):
-                        if not holder:
-                            holder["r"] = r
-                            ev.set()
-                except Exception:
-                    pass
-
-            pg.on("response", on_resp)
-            rewrote = {"on": False}
-            try:
-                # page پێشتر hydration کراوە (لە کۆتایی جوبی پێشوودا — بێ goto لێرە = خێرا)
-                if direct:
-                    tgt = (MS.get("ar_ok") or {}).get(model_name) or {}
-                    tid = tgt.get("id")
-                    if not tid:
-                        direct = False  # مۆدێڵ نەدۆزرایەوە → battle
-                    else:
-                        _ar_ensure_mode(pg, "direct")
-
-                        def _rewrite(route, request):
-                            try:
-                                bd = json.loads(request.post_data or "{}")
-                                bd["modelAId"] = tid
-                                bd["userMessageId"] = _ar_uuid7()
-                                bd["modelAMessageId"] = _ar_uuid7()
-                                um = dict(bd.get("userMessage") or {})
-                                um["content"] = content
-                                bd["userMessage"] = um
-                                route.continue_(post_data=json.dumps(bd))
-                            except Exception:
-                                try:
-                                    route.continue_()
-                                except Exception:
-                                    pass
-                        pg.route("**/nextjs-api/stream/create-evaluation", _rewrite)
-                        rewrote["on"] = True
-                if not direct:
-                    _ar_ensure_mode(pg, "battle")
-                trig = "x" if direct else content
-                pg.evaluate("""(txt) => {
-                    const ta = document.querySelector('textarea');
-                    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-                    set.call(ta, txt);
-                    ta.dispatchEvent(new Event('input', {bubbles: true}));
-                }""", trig)
-                pg.wait_for_timeout(300)
-                pg.evaluate("""() => {
-                    const ta = document.querySelector('textarea');
-                    ta.focus();
-                    ta.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true}));
-                }""")
-                # 📡 خوێندنەوەی ستریم — کۆتایی یەکەم وەڵام (A/B) = ئامادە (چاوەڕێی B ناکەین)
-                t0 = time.time()
-                tos_done = False
-                acc, a, b2, status = "", "", "", None
-                while time.time() - t0 < job.get("timeout", 150):
-                    if ev.is_set() and holder.get("r") and status is None:
-                        try:
-                            status = holder["r"].status
-                        except Exception:
-                            pass
-                    tap = pg.evaluate("""async () => {
-                        try {
-                            const s = window.__arStatus || null;
-                            if (!window.__arReader) return {s: s, c: null};
-                            const v = await window.__arReader.read();
-                            return {s: s, c: v.done ? "AR_END" : window.__arDec.decode(v.value, {stream: true})};
-                        } catch (e) { return {s: null, c: null}; }
-                    }""")
-                    if tap.get("s") and status is None:
-                        status = tap["s"]
-                    c = tap.get("c")
-                    if c == "AR_END":
-                        a, b2 = _ar_parse(acc)
-                        break
-                    if c:
-                        acc += c
-                        a, b2 = _ar_parse(acc)
-                        done_mark = re.search(r'[ab]d:\{"finishReason', acc)
-                        if (a and done_mark) or (b2 and re.search(r'bd:\{"finishReason', acc)):
-                            break
-                    # مۆدالی ToS لە یەکەم ناردن — بە coordinate کلیک بکە
-                    if not tos_done and time.time() - t0 > 3:
-                        box = pg.evaluate("""() => {
-                            const bs = Array.from(document.querySelectorAll('button'))
-                                .filter(x => x.offsetParent !== null);
-                            const agree = bs.find(x => x.textContent.trim() === 'Agree');
-                            if (!agree) return null;
-                            const r = agree.getBoundingClientRect();
-                            return {x: r.x + r.width/2, y: r.y + r.height/2};
-                        }""")
-                        if box:
-                            pg.mouse.click(box["x"], box["y"])
-                            tos_done = True
-                    pg.wait_for_timeout(300)
-                if status is None and not acc:
-                    raise RuntimeError("ar: وەڵام نەگەیشت")
-                code = str(status or "")
-                have = a or b2
-                if status == 429:
-                    err = "ar: 429 لیمیت"
-                    AR_COOLDOWN["until"] = time.time() + 360
-                elif have:
-                    out = have
-                elif status in (401, 403):
-                    err = f"ar: http {status} — کوکی کۆن"
-                    kill()
-                elif status and status != 200:
-                    err = f"ar: http {status}"
-                else:
-                    err = "ar: stream بەتاڵ"
-            finally:
-                try:
-                    pg.remove_listener("response", on_resp)
-                except Exception:
-                    pass
-                if rewrote.get("on"):
-                    try:
-                        pg.unroute("**/nextjs-api/stream/create-evaluation")
-                    except Exception:
-                        pass
-        except Exception as e:
-            err = err or f"ar: {str(e)[:120]}"
-            es = str(e)
-            if "login" in es or "Target closed" in es or "Session closed" in es:
-                try:
-                    kill()
-                except Exception:
-                    pass
-        job["out"] = {"ok": bool(out), "text": out, "err": err, "code": code}
-        try:
-            job["ev"].set()
-        except Exception:
-            pass
-        # 🔄 پێش-ئامادەکردن بۆ جوبی داهاتوو — لە پاشبنەمادا (بەکارهێنەر چاوەڕێ ناکات)
-        try:
-            cur = st.get("page")
-            if cur:
-                cur.goto("https://arena.ai/", wait_until="domcontentloaded", timeout=45000)
-                cur.wait_for_timeout(3500)
-        except Exception:
-            try:
-                kill()
-            except Exception:
-                pass
-
-
-def ar_servers():
-    """battle + هەموو مۆدێڵە دایرێکتەکانی کاتالۆگ (MS.ar_ok)"""
-    out = [{"id": "ar-battle", "name": "Arena Battle (arena.ai)",
-            "model_id": "battle", "kind": "ar", "tier": "f"}]
-    for name, m in (MS.get("ar_ok") or {}).items():
-        sid = m.get("sid") or re.sub(r"[^a-z0-9._\-]+", "-", name.lower())[:60]
-        out.append({"id": f"ar-{sid}", "name": f"{m.get('display') or name} (Arena)",
-                    "model_id": name, "kind": "ar", "tier": "f"})
-    return out
-
-
-def ar_chat(messages, model_id=None, timeout=165):
-    """چات لە ڕێگەی براوزەری وەستاو — battle یان direct (مۆدێڵی دیاریکراو)"""
-    if time.time() < AR_COOLDOWN["until"]:
-        raise EMError("ar: cooldown")
-    with _AR_SPAWN:
-        if not _ARQ.get("worker"):
-            _ARQ["q"] = queue.Queue()
-            threading.Thread(target=_ar_worker, daemon=True).start()
-            _ARQ["worker"] = True
-    job = {"messages": messages, "model": model_id or "battle", "timeout": timeout,
-           "ev": threading.Event(), "out": None}
-    _ARQ["q"].put(job)
-    if not job["ev"].wait(timeout + 30):
-        raise EMError("ar: queue timeout")
-    o = job["out"] or {}
-    if o.get("ok") and o.get("text"):
-        return o["text"]
-    raise EMError(o.get("err") or "ar: failed")
-
 
 def tg(method, **params):
     try:
@@ -6090,11 +5649,6 @@ def detect_brain(allow_fallback=True):
     except Exception as e:
         print(f"[BRAIN] ak fail: {e}", flush=True)
     try:
-        sync_arena_models()
-        servers += ar_servers()
-    except Exception as e:
-        print(f"[BRAIN] ar fail: {e}", flush=True)
-    try:
         servers += ng_servers()
         sync_l7_models()
         servers += l7_servers()
@@ -6149,7 +5703,6 @@ def detect_brain(allow_fallback=True):
         sync_nv_models()
         sync_al_models()
         sync_aiml_models()
-        sync_arena_models()
         sync_duck_models(servers)
     except Exception as e:
         print(f"[SYNC] duck fail: {e}", flush=True)
@@ -6397,7 +5950,7 @@ def ask(session, question):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-    for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "ar", "pol"):
+    for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
         if srv and srv.get("kind") == kind:
             continue
         cand = pick_in_kind(BRAIN["servers"], kind, srv["id"] if srv else "gpt")
@@ -6569,12 +6122,6 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "aiml"
-            if k == "ar":
-                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
-                a = ar_chat(msgs, cand.get("model_id"))
-                if leaks(a):
-                    raise EMError("identity leak")
-                return a, "ar"
             msgs = [sys_msg] + list(history[-20:]) + [{"role": "user", "content": question}]
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:

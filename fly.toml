@@ -15,6 +15,5 @@ primary_region = "fra"
   min_machines_running = 1
 
 [vm]
-  # ⚠️ chromium (arena.ai) پێویستی بە dedicated CPU + ڕامی زۆر — shared-cpu هەڵدەوەستێت
-  size = "performance-2x"
-  memory = "4096mb"
+  size = "shared-cpu-1x"
+  memory = "256mb"

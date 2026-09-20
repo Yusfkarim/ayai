@@ -579,3 +579,9 @@
 - دۆخی sync: `ar_ok` زیادکرا بۆ MS + load list.
 - **OOM لە 2GB**: arena.ai + chromium لە performance-1x (2GB) OOM دەکەوێت → **performance-2x**
   (2 CPU + 4GB) — تاقیکراوە: ar-kiteki «FLY-DIRECT-78» ✅ + ar-battle «BATTLE-78» ✅.
+
+## #80 (2026-09-20) — arena.ai بەتەواوی لابرا (داواکاری بەکارهێنەر)
+- kind="ar" + §2.36 + sync_arena_models + ar dispatch (TG/API/chain) + MS.ar_ok — هەمووی لابرا.
+- fly.toml گەڕایەوە shared-cpu-1x/256mb (performance-2x تەنها بۆ chromium بوو).
+- ARENA_RECIPE_CAPTCHA.md وەک ڕیسێپی ماوەتەوە بۆ گەڕاندنەوەی خێرا (ئەگەر داواکرا).
+- هۆکار: تێچووی VM + خاوی وەڵامەکان (~١٥s بچووترین).
