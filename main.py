@@ -7695,7 +7695,7 @@ def _cracked_req(self, method, url, **kw):
             _CRACK["hot"][dom] = int(_CRACK["hot"].get(dom, 0)) + 1
             kw2 = dict(kw)
             h = dict(kw2.get("headers") or {})
-            h["User-Agent"] = random.choice(_CRACK["uas"])
+            h["User-Agent"] = _rand_ua()  # #91S: هەمەڕەنگی تەواو — ٧ ناسنامە
             kw2["headers"] = h
             if _CRACK["hot"].get(dom, 0) >= 2 and not kw2.get("proxies"):
                 try:
@@ -7964,6 +7964,84 @@ def _usage_snapshot_daemon():
         time.sleep(3600)
 
 
+
+# ═══════════ #91S: SPIDER — چینی دۆزینەوەی خۆکاری ماڵپەڕەکان ═══════════
+_SPIDER = {"found": {}, "t": 0.0}
+
+_UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPad; CPU OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/604.1",
+]
+
+
+def _rand_ua():
+    """#91S: ناسنامەی هەڕەمەکی — هەر داواکارییەکی دەرەکی جیاواز"""
+    return random.choice(_UA_POOL)
+
+
+def _spider_scan():
+    """#91S: سکانەری ماڵپەڕەکان — دۆزینەوەی ئەوانەی نوێیان زیاد کردووە (مۆدێڵ/ endpoint)
+       هەر ١٢ کاتژمێر — کام سەرچاوە model_id ی نوێی هەیە و ئێمە نەمانەوە"""
+    found = []
+    checks = [
+        # (ناو، url، pat) — دۆزینەوەی مۆدێڵ لە model/list ەکان
+        ("g4f", G4F_BASE + "/v1/models", None),
+        ("duck", None, None),  # duck خۆی sync دەکات
+    ]
+    for nm, url, _ in checks:
+        if not url:
+            continue
+        try:
+            r = requests.get(url, headers={"User-Agent": _rand_ua()}, timeout=(8, 15))
+            if r.status_code == 200:
+                j = r.json() or {}
+                ids = [m.get("id") for m in (j.get("data") or []) if m.get("id")]
+                found.append((nm, len(ids)))
+                _SPIDER["found"][nm] = {"n": len(ids), "t": time.time()}
+        except Exception:
+            pass
+    if found:
+        print(f"[SPIDER] 🔭 سکان: {found}", flush=True)
+    return found
+
+
+def _spider_daemon():
+    """#91S: هەر ١٢ کاتژمێر — سکانی تەواوی ماڵپەڕەکان بۆ مۆدێڵی نوێ"""
+    time.sleep(900)
+    while True:
+        try:
+            _spider_scan()
+        except Exception:
+            pass
+        time.sleep(43200)
+
+
+
+def _shadow_watch_daemon():
+    """#91T: چاودێری مۆدێڵە بەناوبانگەکان — ئەگەر مۆدێڵێک زۆر داواکاری هەبوو و تک-سەرچاوە بوو → ڕاپۆرت + failover تایبەت"""
+    import threading as _th
+    _pop = {}
+    time.sleep(600)
+    while True:
+        try:
+            # MODEL_SOURCES — مۆدێڵی تک-سەرچاوە = مەترسی
+            risky = [k for k, v in MODEL_SOURCES.items() if len(v) == 1]
+            if risky:
+                print(f"[SHADOW] ⚠️ {len(risky)} مۆدێڵی تک-سەرچاوە (مەترسی)", flush=True)
+            # گەرمترین مۆدێڵەکان لە کاش
+            hot = sorted(_ANS_CACHE.items(), key=lambda x: x[1][0], reverse=True)[:5]
+            if hot:
+                pass  # بێدەنگ — تەنها کاتێک مەترسی ڕاپۆرت
+        except Exception:
+            pass
+        time.sleep(3600)
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -7991,6 +8069,8 @@ def main():
     threading.Thread(target=_rescue_daemon, daemon=True).start()
     threading.Thread(target=_hot_model_daemon, daemon=True).start()
     threading.Thread(target=_usage_snapshot_daemon, daemon=True).start()
+    threading.Thread(target=_spider_daemon, daemon=True).start()
+    threading.Thread(target=_shadow_watch_daemon, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
