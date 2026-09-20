@@ -3770,37 +3770,114 @@ def _ca_signup_new():
 # ════════ #82/#83: حەوزی ئەکاونت — هەرسێکە (CA+CB+NV) — ٥٠ بۆ هەر یەکێک + پرۆکسی ════════
 _SAVE_LOCK = threading.Lock()  # نووسینی هاوبەشی فایلەکان — تەردی چات + دیمۆن
 PROXY_ST = {"list": [], "src_t": 0.0, "bad": set()}
+_PROXY_GET_STATE = {"loaded": False}
 
 
 _PROXY_TEST = {"url": "https://identitytoolkit.googleapis.com/", "timeout": 6}
+# #91P: ئامانجەکانی تاقیکردنەوە — پرۆکسی دەبێت لانیکەم ٢ لە ٣ ببات
+_PROXY_TARGETS = [
+    "https://identitytoolkit.googleapis.com/",
+    "http://www.google.com/generate_204",
+    "https://cloudflare.com/cdn-cgi/trace",
+]
 
 
-def _proxy_check(pxs, cap=18):
-    """تاقیکردنەوەی ڕاستەقینە — تەنها ئەوانەی بە google دەگەن ڕادەگیرێن (نوێ + ئەکتیڤ)"""
-    ok = []
-
-    def _one(px):
+def _proxy_fetch_all():
+    """#91P: هەموو سەرچاوە بەقوەتەکان — لیستە ئاشکراکان + API ەکان (هەندان+وێبشەیر ئەگەر تۆکەن هەبێت)"""
+    raw = []
+    urls = [
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+        "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=8000",
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
+        "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+        "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",
+        "https://raw.githubusercontent.com/vakhov/fresh-proxy-list/master/http.txt",
+        "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
+        "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+        "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+        "https://www.proxy-list.download/api/v1/get?type=http",
+        "https://proxyspace.pro/http.txt",
+        "https://openproxylist.xyz/http.txt",
+        "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/http_proxies.txt",
+    ]
+    def _pull(u):
         try:
-            r = requests.get(_PROXY_TEST["url"], proxies={"http": px, "https": px},
-                             timeout=_PROXY_TEST["timeout"])
-            if r.status_code < 500:
-                return px
+            r = requests.get(u, timeout=(8, 16))
+            if r.status_code == 200:
+                return [x.strip() for x in r.text.split() if 6 < len(x.strip()) < 60]
         except Exception:
-            return None
-        return None
-
-    ths = [threading.Thread(target=lambda p=px: (ok.append(r)) if (r := _one(p)) else None) for px in pxs[:cap * 3]]
+            pass
+        return []
+    ths = [threading.Thread(target=lambda u=u: raw.extend(_pull(u))) for u in urls]
     for t in ths:
         t.start()
     for t in ths:
-        t.join(_PROXY_TEST["timeout"] + 3)
-    return ok[:cap]
+        t.join(20)
+    # Geonode API — JSON، گەورەترین سەرچاوە
+    try:
+        r = requests.get("https://proxylist.geonode.com/api/proxy-list?protocols=http%2Chttps&limit=500&sort_by=lastChecked&sort_type=desc", timeout=(8, 16))
+        if r.status_code == 200:
+            for x in (r.json() or {}).get("data") or []:
+                raw.append(f"{x.get('ip')}:{x.get('port')}")
+    except Exception:
+        pass
+    # وێبشەیر — ئەگەر تۆکەن لە /data/webshare.json هەبێت → ١٠ پرۆکسی DC ی هەمیشەیی
+    try:
+        ws = json.load(open(os.path.join(DATA_DIR, "webshare.json")))
+        tk = (ws or {}).get("token")
+        if tk:
+            r = requests.get("https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=25",
+                             headers={"Authorization": "Token " + tk}, timeout=(8, 16))
+            if r.status_code == 200:
+                for x in (r.json() or {}).get("results") or []:
+                    raw.append(f"{x.get('proxy_address')}:{x.get('port')}")
+                print(f"[PROXY-WS] وێبشەیر: {len((r.json() or {}).get('results') or [])} پرۆکسی DC", flush=True)
+    except Exception:
+        pass
+    return list(dict.fromkeys([x for x in raw if x]))
+
+
+def _proxy_check(pxs, cap=18):
+    """#91P کڕاک: تاقیکردنەوەی فرە-ئامانج + پێوانەی خێرایی — خێراترینەکان دەمێننەوە"""
+    res = []
+    _lk = threading.Lock()
+
+    def _one(px):
+        wins, lat = 0, 99.0
+        for u in _PROXY_TARGETS:
+            try:
+                t0 = time.time()
+                r = requests.get(u, proxies={"http": px, "https": px}, timeout=_PROXY_TEST["timeout"])
+                if r.status_code < 500:
+                    wins += 1
+                    lat = min(lat, time.time() - t0)
+            except Exception:
+                pass
+        if wins >= 2:
+            with _lk:
+                res.append((lat, px))
+
+    ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in pxs[:cap * 4]]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join(_PROXY_TEST["timeout"] * len(_PROXY_TARGETS) + 4)
+    res.sort()
+    return [p for _, p in res[:cap]]
 
 
 def _proxy_get(n=4):
     """پرۆکسی: proxies.json (دەستی) → سەرچاوە خۆڕاییەکان → **پشکنینی زیندوو** — تەنها ئەکتیڤ"""
     import time as _t
     now = _t.time()
+    if not PROXY_ST["bad"] and not _PROXY_GET_STATE.get("loaded"):
+        _PROXY_GET_STATE["loaded"] = True
+        try:
+            for b in json.load(open(os.path.join(DATA_DIR, "proxy_bad.json"))) or []:
+                PROXY_ST["bad"].add(b)
+        except Exception:
+            pass
     if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
         manual = []
         for _pf in (os.path.join(DATA_DIR, "proxies.json"),
@@ -3815,19 +3892,15 @@ def _proxy_get(n=4):
                 pass
         raw = list(manual)
         if not raw:
-            for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-                      "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=8000",
-                      "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
-                      "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"):
-                try:
-                    r = requests.get(u, timeout=(8, 14))
-                    raw += [x.strip() for x in r.text.split() if 6 < len(x.strip()) < 60]
-                except Exception:
-                    pass
-            raw = list(dict.fromkeys(raw))
-        good = _proxy_check(raw)
+            raw = _proxy_fetch_all()
+        raw = [p for p in raw if p not in PROXY_ST["bad"]]
+        good = _proxy_check(raw, cap=30)
         if manual and not good:
             good = [p if "://" in p else "http://" + p for p in manual[:6]]  # دەستیلەکان با هەوڵیان لەسەر بکرێت
+        try:  # #91P: مردووەکان پاشەکەوت دەکرێن — دووبارە تاقی نەکرێنەوە
+            json.dump(sorted(PROXY_ST["bad"])[:400], open(os.path.join(DATA_DIR, "proxy_bad.json"), "w"))
+        except Exception:
+            pass
         PROXY_ST["list"] = good
         PROXY_ST["bad"].clear()
         PROXY_ST["src_t"] = now
@@ -6993,7 +7066,7 @@ def proxy_keeper_daemon():
         try:
             _proxy_refresh_sources()
             n = len(PROXY_ST.get("list") or [])
-            print(f"[PROXY-KEEPER] {n} پرۆکسی زیندوو ئامادە", flush=True)
+            print(f"[PROXY-KEEPER] {n} پرۆکسی زیندوو ئامادە (کڕاککراو — فرە-ئامانج)", flush=True)
         except Exception as e:
             print(f"[PROXY-KEEPER] هەڵە: {str(e)[:60]}", flush=True)
         cyc += 1
