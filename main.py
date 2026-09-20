@@ -6326,6 +6326,13 @@ def get_session(user_id):
         if user_id != ADMIN_TG and GLOBAL_MODEL.get("server"):
             s["server"] = GLOBAL_MODEL["server"]
             s["mkey"] = GLOBAL_MODEL.get("mkey") or s.get("mkey")
+        elif user_id != ADMIN_TG and GLOBAL_MODEL.get("mkey"):
+            # #91G: سەرچاوە گۆڕاوە — هەمان مۆدێڵ لە هەر سەرچاوەیەکی زیندوو
+            _mk = GLOBAL_MODEL["mkey"]
+            _alt = next((x for x in BRAIN["servers"] if srv_key(x) == _mk), None)
+            if _alt:
+                s["server"] = _alt["id"]
+                s["mkey"] = _mk
         s["user_id"] = user_id
         return s
 
@@ -6899,6 +6906,10 @@ def handle_message(msg):
         with _lock:
             GLOBAL_MODEL["server"] = srv["id"]
             GLOBAL_MODEL["mkey"] = srv["key"]
+        try:  # #91G: هەڵبژاردەی ئەدمین هەمیشەییە — دیپلۆی نایگەڕێنێتەوە
+            json.dump(dict(GLOBAL_MODEL), open(os.path.join(DATA_DIR, "global_model.json"), "w"))
+        except Exception:
+            pass
         s["server"] = srv["id"]
         s["mkey"] = srv["key"]
         s["history"].clear()
@@ -7405,6 +7416,26 @@ def main():
     new = detect_brain()
     BRAIN["mode"], BRAIN["servers"] = new["mode"], (new["servers"] or _snap_srv or BRAIN["servers"])
     rebuild_aliases(new["servers"])
+    # #91G: هەڵبژاردەی هەمیشەیی ئەدمین — دوای دیپلۆی یەکسان دەگەڕێتەوە
+    try:
+        _gm = json.load(open(os.path.join(DATA_DIR, "global_model.json")))
+        if _gm and _gm.get("server"):
+            _ids = {x["id"] for x in (BRAIN["servers"] or [])}
+            if _gm["server"] in _ids:
+                GLOBAL_MODEL["server"] = _gm["server"]
+                GLOBAL_MODEL["mkey"] = _gm.get("mkey")
+            elif _gm.get("mkey"):
+                # مۆدێڵەکە لە سەرچاوەیەکی تردا هەیە — بە کلیلی سیمانتیکی دەدۆزرێتەوە
+                GLOBAL_MODEL["server"] = None
+                GLOBAL_MODEL["mkey"] = _gm["mkey"]
+                _mk = _gm["mkey"]
+                for _x in BRAIN["servers"] or []:
+                    if srv_key(_x) == _mk:
+                        GLOBAL_MODEL["server"] = _x["id"]
+                        break
+            print(f"👤 مۆدێڵی هەمیشەیی ئەدمین گەڕایەوە: {GLOBAL_MODEL.get('server') or _gm.get('mkey')}", flush=True)
+    except Exception:
+        pass
     if new["mode"] == "aff":
         print(f"🟢 مێشکی سەرەکی: aifreeforever ({len(new['servers'])} سێرڤەر)", flush=True)
     elif new["mode"] == "pol":
