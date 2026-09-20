@@ -6010,7 +6010,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             fab = next((x for x in API_BRAIN["servers"] if x.get("id") == "ca-claude-fable"), None)
             if fab and fab not in order:
                 order.append(fab)
-        for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
+        for kind in ("em", "aff", "rwd", "l7", "g4f", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
                 if cand and cand not in order:
@@ -6277,10 +6277,11 @@ def detect_brain(allow_fallback=True):
             y = dict(x); y["kind"] = "aff"; servers.append(y)
     except Exception:
         pass
-    try:
-        servers.append({"id": "cbc-gpt5", "name": "GPT-5", "kind": "cbc"})
-    except Exception:
-        pass
+    # #91X2: cbc ڕاگیرا — لیمێتی میوانی IP ی فلای پڕە (بەیانیان خۆی دەگەڕێتەوە — کۆدەکە ماوە)
+    # try:
+    #     servers.append({"id": "cbc-gpt5", "name": "GPT-5", "kind": "cbc"})
+    # except Exception:
+    #     pass
     try:
         servers += rwd_servers()
     except Exception as e:
@@ -6676,7 +6677,7 @@ def ask(session, question):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
-    for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
+    for kind in ("em", "aff", "rwd", "l7", "g4f", "pol"):
         if srv and srv.get("kind") == kind:
             continue
         cand = pick_in_kind(BRAIN["servers"], kind, srv["id"] if srv else "gpt")
@@ -7373,7 +7374,7 @@ def self_heal_once():
         probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=45)
     if MS.get("hf_ok"):
         probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], list(MS["hf_ok"].keys())[0], timeout=45)
-    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=45)
+    # cbc لابراوە — ڕاگیراو (بڕوانە سەرەوە)
     if MS.get("ak_ok"):
         probes["ak"] = lambda: ak_chat(list(MS["ak_ok"].keys())[0], [{"role": "user", "content": "hi"}], timeout=45)
     # حەوزەکان — گرنگترین
