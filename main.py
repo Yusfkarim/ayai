@@ -3395,14 +3395,14 @@ def _cb_signup_new():
     sg = CB_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 20:
+    if sg.get("n", 0) >= 90:
         return None
-    if len(CB_ST.get("accounts") or []) >= 40:
+    if len(CB_ST.get("accounts") or []) >= 70:
         return None
     n = CB_ST["next_num"]
     for _ in range(6):
         email = f"komex{n}@duidir.com"
-        res = _cb_firebase("signUp", email, email)
+        res = _fb_signup(CB_KEY, email, email, CB_UA)
         if res:
             CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email}]
             CB_ST["idx"] = len(CB_ST["accounts"]) - 1
@@ -3708,14 +3708,14 @@ def _ca_signup_new():
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 120 or len(CA_ST.get("accounts") or []) >= 60:
+    if sg.get("n", 0) >= 120 or len(CA_ST.get("accounts") or []) >= 70:
         return None
     n = CA_ST["next_num"]
     # دوو پێشەکی: komex (کۆن) + heal (نوێ — نەخشەی komex پڕە)
     for pref in ("komex", "heal"):
         for _ in range(30):
             email = f"{pref}{n}@duidir.com"
-            res = _ca_firebase("signUp", email, email)
+            res = _fb_signup(CA_KEY, email, email, CA_UA)
             if res:
                 CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
                 CA_ST["idx"] = len(CA_ST["accounts"]) - 1
@@ -3733,35 +3733,141 @@ def _ca_signup_new():
     return None
 
 
-_CA_POOL = {"target": 50, "backoff": 0.0}
+# ════════ #82/#83: حەوزی ئەکاونت — هەرسێکە (CA+CB+NV) — ٥٠ بۆ هەر یەکێک + پرۆکسی ════════
+PROXY_ST = {"list": [], "src_t": 0.0, "bad": set()}
 
 
-def _ca_pool_daemon():
-    """#82: حەوزی ئەکاونت بۆ ٥٠ بگەیەنە — هەر ٤ خولەک یەک هەوڵ؛ شکست → ١٥ خولەک پشوو"""
-    time.sleep(90)
+def _proxy_get(n=4):
+    """پرۆکسی: یەکەم proxies.json (دەستی) → پاش فەرمانحەیزانی خۆڕایی (باشترین هەوڵ)"""
+    import time as _t
+    now = _t.time()
+    if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
+        try:
+            d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")))
+            if isinstance(d, list):
+                PROXY_ST["list"] = [str(x) for x in d if str(x).strip()]
+        except Exception:
+            pass
+        if not PROXY_ST["list"]:
+            lst = []
+            for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+                      "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=8000"):
+                try:
+                    r = requests.get(u, timeout=(8, 14))
+                    lst += [x.strip() for x in r.text.split() if 6 < len(x.strip()) < 60][:60]
+                except Exception:
+                    pass
+            PROXY_ST["list"] = list(dict.fromkeys(lst))[:80]
+        PROXY_ST["src_t"] = now
+        print(f"[PROXY] {len(PROXY_ST['list'])} پرۆکسی ئامادە", flush=True)
+    out = [p if "://" in p else "http://" + p for p in PROXY_ST["list"] if p not in PROXY_ST["bad"]]
+    return out[:n]
+
+
+_FB_BLOCK = ("TOO_MANY_ATTEMPTS_TRY_LATER", "OPERATION_NOT_ALLOWED", "QUOTA_EXCEEDED", "RESOURCE_EXHAUSTED")
+
+
+def _fb_signup(key, email, pw, ua):
+    """signUp: ڕاستەوخۆ → ئەگەر IP بلۆک بوو → بە پرۆکسی (پێشنیار+فەرمانحەیز)"""
+    def _call(px=None):
+        kw = {"json": {"email": email, "password": pw, "returnSecureToken": True},
+              "headers": {"User-Agent": ua}, "timeout": (8, 16) if px else (10, 25)}
+        if px:
+            kw["proxies"] = {"http": px, "https": px}
+        r = requests.post("https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=" + key, **kw)
+        if r.status_code == 200:
+            j = r.json() or {}
+            tok = j.get("idToken")
+            if not tok:
+                return None
+            return tok, j.get("localId") or ""
+        try:
+            msg = (r.json() or {}).get("error", {}).get("message", "")
+        except Exception:
+            msg = ""
+        return ("BLOCKED", msg) if msg in _FB_BLOCK else None
+    r = _call()
+    if r and r[0] != "BLOCKED":
+        return r
+    for px in _proxy_get(4):
+        try:
+            r2 = _call(px)
+        except Exception:
+            PROXY_ST["bad"].add(px.replace("http://", ""))
+            continue
+        if r2 and r2[0] != "BLOCKED":
+            print(f"[FB] signUp بە پرۆکسی ✅ {px[:28]}", flush=True)
+            return r2
+        PROXY_ST["bad"].add(px.replace("http://", ""))
+    return None
+
+
+def _pool_reap():
+    """سڕینەوەی ئەکاونتە تەواوبووەکان — یەکسان لادەبرێن (بەپێی داواکاری)"""
+    import datetime as _dt
+    today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    now = time.time()
+    # CA — لیمیت '*'
+    lim = CA_ST.get("limits") or {}
+    accs = CA_ST.get("accounts") or []
+    keep = [a for a in accs if not (lim.get(a.get("email")) or {}).get("*")]
+    if len(keep) != len(accs):
+        CA_ST["accounts"] = keep
+        CA_ST["tok"] = None
+        CA_ST["idx"] = CA_ST["idx"] % max(len(keep), 1)
+        _ca_save_acc()
+        print(f"[POOL-CA] {len(accs) - len(keep)} ئەکاونتی تەواوبوو سڕایەوە → {len(keep)} ماوە", flush=True)
+    # CB — ئەمڕۆ تەواوبوو (epoch ی ئەمڕۆ)
+    ex = CB_ST.get("exhausted") or {}
+    accs = CB_ST.get("accounts") or []
+    keep = [a for a in accs if not (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
+    if len(keep) != len(accs):
+        CB_ST["accounts"] = keep
+        CB_ST["tok"] = None
+        CB_ST["idx"] = CB_ST["idx"] % max(len(keep), 1)
+        _cb_save_acc()
+        print(f"[POOL-CB] {len(accs) - len(keep)} تەواوبوو سڕایەوە → {len(keep)} ماوە", flush=True)
+    # NV — ٣ جار کۆڵ لە یەک ئەکاونت → سڕینەوە
+    exc = NV_ST.get("exc") or {}
+    accs = NV_ST.get("accounts") or []
+    keep = [a for a in accs if exc.get(a.get("email"), 0) < 3]
+    if len(keep) != len(accs):
+        NV_ST["accounts"] = keep
+        NV_ST["tok"] = None
+        NV_ST["uid"] = None
+        NV_ST["idx"] = NV_ST["idx"] % max(len(keep), 1)
+        _nv_save_acc()
+        print(f"[POOL-NV] {len(accs) - len(keep)} کۆڵبوو سڕایەوە → {len(keep)} ماوە", flush=True)
+
+
+def _pool_daemon():
+    """هەرسێ حەوز بۆ ٥٠ — هەر ٢ خولەک یەک هەوڵ بۆ هەر خزمەتگوزاری + پاککردنەوە"""
+    time.sleep(60)
+    # لازەی — دوای load ی هەموو ST ەکان (CB/NV دوای ئەم بلۆکە پێناسە دەکرێن لە فایلدا)
+    import sys as _s
+    _m = _s.modules[__name__]
+    pools = (("CA", _m.CA_ST, _m._ca_signup_new, 50),
+             ("CB", _m.CB_ST, _m._cb_signup_new, 50),
+             ("NV", _m.NV_ST, _m._nv_signup_new, 50))
     while True:
         try:
-            accs = CA_ST.get("accounts") or []
-            if len(accs) >= _CA_POOL["target"]:
-                time.sleep(1800)
-                continue
-            now = time.time()
-            if now < _CA_POOL["backoff"]:
-                time.sleep(60)
-                continue
-            before = len(accs)
-            _ca_signup_new()
-            after = len(CA_ST.get("accounts") or [])
-            if after > before:
-                print(f"[CA-POOL] {after}/{_CA_POOL['target']} ئەکاونت", flush=True)
-                _CA_POOL["backoff"] = 0.0
-                time.sleep(240)  # ٤ خولەک نێوان هەر ئەکاونتێک
-            else:
-                _CA_POOL["backoff"] = now + 900  # شکست → ١٥ خولەک
-                print("[CA-POOL] هەوڵ شکا — ١٥ خولەک پشوو", flush=True)
+            _pool_reap()
         except Exception as e:
-            print(f"[CA-POOL] {str(e)[:60]}", flush=True)
-            time.sleep(600)
+            print(f"[POOL] reap: {str(e)[:60]}", flush=True)
+        for name, st, fn, tgt in pools:
+            try:
+                accs = st.get("accounts") or []
+                if len(accs) >= tgt:
+                    continue
+                before = len(accs)
+                fn()
+                after = len(st.get("accounts") or [])
+                if after > before:
+                    print(f"[POOL-{name}] {after}/{tgt} ئەکاونت", flush=True)
+                    time.sleep(75)  # پشووی نێوان سەرکەوتنەکان
+            except Exception as e:
+                print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
+        time.sleep(120)
 
 
 def _ca_token():
@@ -4382,14 +4488,14 @@ def _nv_signup_new():
     sg = NV_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 24 or len(NV_ST.get("accounts") or []) >= 60:
+    if sg.get("n", 0) >= 70 or len(NV_ST.get("accounts") or []) >= 70:
         return None
     import time as _ts
     n = NV_ST["next_num"]
     for attempt in range(2):
         for _ in range(6):
             email = f"komex{n}@duidir.com"
-            res = _nv_firebase("signUp", email, email)
+            res = _fb_signup(NV_KEY, email, email, NV_UA)
             if res:
                 NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
                 NV_ST["idx"] = len(NV_ST["accounts"]) - 1
@@ -4538,6 +4644,7 @@ def nv_chat(messages, model_id, timeout=110):
                 if accs:
                     acc = accs[NV_ST["idx"] % len(accs)]
                     NV_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 600  # کۆڵ ١٠ خولەک
+                    NV_ST.setdefault("exc", {})[acc["email"]] = (NV_ST.get("exc") or {}).get(acc["email"], 0) + 1
                 if not _nv_rotate():
                     raise EMError("nv: حەوزی ئەکاونتەکان تەواوە")
                 _t.sleep(1.5)
@@ -6579,9 +6686,9 @@ def main():
 
     # کەیک-بەیکەری G4F — پاشبنەما
     threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
-    threading.Thread(target=_ca_pool_daemon, daemon=True).start()
+    threading.Thread(target=_pool_daemon, daemon=True).start()
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
-    print("👤 حەوز-بنیاتەری CA چالاکە — ئامانج: ٥٠ ئەکاونت", flush=True)
+    print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
 
     # دەستنیشانکردنی مێشک
     print("🧠 دەستنیشانکردنی سەرچاوەی AI…", flush=True)
