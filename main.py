@@ -6855,33 +6855,33 @@ def self_heal_once():
     """یەک خولی پشکنین + چاککردنەوەی خۆکارانەی هەموو سەرچاوەکان"""
     probes = {}
     if MS.get("ct_ok"):
-        probes["ct"] = lambda: ct_chat([{"role": "user", "content": "hi"}], list(MS["ct_ok"].keys())[0], timeout=25)
+        probes["ct"] = lambda: ct_chat([{"role": "user", "content": "hi"}], list(MS["ct_ok"].keys())[0], timeout=70)
     if MS.get("hk_ok"):
-        probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=25)
-    probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], "deepseek-ai/DeepSeek-V4.1-Flash", timeout=25)
-    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=25)
-    probes["ak"] = lambda: ak_chat(336, [{"role": "user", "content": "hi"}], timeout=25) if MS.get("ak_ok") else None
+        probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=70)
+    probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], "deepseek-ai/DeepSeek-V4.1-Flash", timeout=70)
+    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=70)
+    probes["ak"] = lambda: ak_chat(336, [{"role": "user", "content": "hi"}], timeout=70) if MS.get("ak_ok") else None
     # ═ #91: فراوانکردن — هەموو سەرچاوە سەرەکییەکان (خێرا، ١ نموونە بۆ هەر یەکێک) ═
-    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=30)
-    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=30)
-    probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=30)
+    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=70)
+    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=70)
+    probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=70)
     probes["aff"] = lambda: AIFreeChat(model="gpt-5-mini").chat("hi", history=[])
-    probes["rwd"] = lambda: rwd_chat("gemini-3-1", [{"role": "user", "content": "hi"}], timeout=25)
-    probes["act"] = lambda: act_chat("grok-4", [{"role": "user", "content": "hi"}], timeout=25)
-    probes["fla"] = lambda: fla_chat([{"role": "user", "content": "hi"}], timeout=25)
-    probes["z02"] = lambda: z02_chat([{"role": "user", "content": "hi"}], "gemini-2.5-flash-lite", timeout=25)
-    probes["qb"] = lambda: qb_chat([{"role": "user", "content": "hi"}], timeout=25)
-    probes["duck"] = lambda: duck_chat("gpt-5.4-mini", [{"role": "user", "content": "hi"}], timeout=25)
-    probes["ng"] = lambda: ng_chat([{"role": "user", "content": "hi"}], timeout=25)
-    probes["l7"] = lambda: l7_chat([{"role": "user", "content": "hi"}], "minimax-m2.7", timeout=25)
-    probes["g4f"] = lambda: g4f_chat([{"role": "user", "content": "hi"}], "gpt-4o-mini", timeout=25)
-    probes["yl"] = lambda: yl_chat([{"role": "user", "content": "hi"}], "yollo-chat", timeout=25)
-    probes["aka"] = lambda: aka_chat([{"role": "user", "content": "hi"}], "openai-gpt-oss-120b", timeout=25)
-    probes["hb"] = lambda: hb_chat([{"role": "user", "content": "hi"}], "hotbot-chat", timeout=25)
-    probes["gk"] = lambda: gk_chat([{"role": "user", "content": "hi"}], "glm-4-flash", timeout=25)
-    probes["gz"] = lambda: gz_chat("gemini-flash", [{"role": "user", "content": "hi"}], timeout=25)
-    probes["pi"] = lambda: pi_chat([{"role": "user", "content": "hi"}], "pi-chat", timeout=25)
-    probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=25)
+    probes["rwd"] = lambda: rwd_chat("gemini-3-1", [{"role": "user", "content": "hi"}], timeout=70)
+    probes["act"] = lambda: act_chat("grok-4", [{"role": "user", "content": "hi"}], timeout=70)
+    probes["fla"] = lambda: fla_chat([{"role": "user", "content": "hi"}], timeout=70)
+    probes["z02"] = lambda: z02_chat([{"role": "user", "content": "hi"}], "gemini-2.5-flash-lite", timeout=70)
+    probes["qb"] = lambda: qb_chat([{"role": "user", "content": "hi"}], timeout=70)
+    probes["duck"] = lambda: duck_chat("gpt-5.4-mini", [{"role": "user", "content": "hi"}], timeout=70)
+    probes["ng"] = lambda: ng_chat([{"role": "user", "content": "hi"}], timeout=70)
+    probes["l7"] = lambda: l7_chat([{"role": "user", "content": "hi"}], "minimax-m2.7", timeout=70)
+    probes["g4f"] = lambda: g4f_chat([{"role": "user", "content": "hi"}], "gpt-4o-mini", timeout=70)
+    probes["yl"] = lambda: yl_chat([{"role": "user", "content": "hi"}], "yollo-chat", timeout=70)
+    probes["aka"] = lambda: aka_chat([{"role": "user", "content": "hi"}], "openai-gpt-oss-120b", timeout=70)
+    probes["hb"] = lambda: hb_chat([{"role": "user", "content": "hi"}], "hotbot-chat", timeout=70)
+    probes["gk"] = lambda: gk_chat([{"role": "user", "content": "hi"}], "glm-4-flash", timeout=70)
+    probes["gz"] = lambda: gz_chat("gemini-flash", [{"role": "user", "content": "hi"}], timeout=70)
+    probes["pi"] = lambda: pi_chat([{"role": "user", "content": "hi"}], "pi-chat", timeout=70)
+    probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=70)
     fixed = []
     for kind, fn in probes.items():
         if fn is None:
