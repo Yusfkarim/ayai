@@ -7126,6 +7126,15 @@ def handle_message(msg):
                       f"🧊 بریکەر (سەرچاوەی پشوو): {', '.join(f'{k}({v}s)' for k, v in br.items()) or '—'}\n"
                       f"💾 کاشی وەڵام: {len(_ANS_CACHE)} | بەکارهێنەری چالاک: {len(_USER_Q)}")
         return
+    if text.startswith("/test "):
+        if user_id != ADMIN_TG:
+            return
+        ref = text[6:].strip()
+        if not ref:
+            reply(chat_id, "✍️ نموونە: <code>/test openai/gpt-5.5</code>")
+            return
+        threading.Thread(target=_admin_test_model, args=(chat_id, ref), daemon=True).start()
+        return
     if text.startswith("/about"):
         reply(chat_id, ABOUT)
         return
@@ -7276,7 +7285,8 @@ def setup_commands():
             admin_cmds = cmds + [{"command": "server", "description": "قائمة الموديلات — الأحدث دائما"},
                             {"command": "status", "description": "📊 ڕاپۆرتی سیستەم"},
                             {"command": "heal", "description": "🩺 پشکنین و چاککردنەوە"},
-                            {"command": "stats", "description": "📈 ئامارەکانی خارق"}]
+                            {"command": "stats", "description": "📈 ئامارەکانی خارق"},
+                            {"command": "test", "description": "🧪 تاقیکردنەوەی مۆدێڵ"}]
             r = tg("setMyCommands", commands=admin_cmds, scope={"type": "chat", "chat_id": ADMIN_TG})
             print(f"[CMDS] ئەدمین-سکۆپ: {'✅' if r.get('ok') else 'شکست'}", flush=True)
             return
@@ -8048,6 +8058,107 @@ def _shadow_watch_daemon():
         except Exception:
             pass
         time.sleep(3600)
+
+
+
+# ═══════════ #91ST: STEALTH — نەناسینەوەی کراک ═══════════
+# ١) TLS fingerprint بە curl_cffi — وەک وێبگەڕی ڕاستەقینە
+_STEALTH_TLS = {"enabled": True, "n": 0}
+try:
+    from curl_cffi import requests as _cf
+    _STEALTH_TLS["lib"] = _cf
+except Exception:
+    _STEALTH_TLS["lib"] = None
+
+_CF_IMPERSONATE = ["chrome124", "chrome120", "safari17_0", "edge101", "safari15_5"]
+
+
+def stealth_get(url, **kw):
+    """#91ST: GET بە TLS ی وێبگەڕ — دژی TLS-fingerprinting (Cloudflare/Akamai)"""
+    lib = _STEALTH_TLS.get("lib")
+    if lib and _STEALTH_TLS.get("enabled"):
+        try:
+            _STEALTH_TLS["n"] += 1
+            r = lib.get(url, impersonate=random.choice(_CF_IMPERSONATE),
+                        headers={"User-Agent": _rand_ua()}, timeout=kw.pop("timeout", (8, 16)),
+                        proxies=kw.pop("proxies", None))
+            return r
+        except Exception:
+            pass
+    return requests.get(url, headers={"User-Agent": _rand_ua()}, timeout=kw.pop("timeout", (8, 16)), **kw)
+
+
+def stealth_post(url, **kw):
+    """#91ST: POST بە TLS ی وێبگەڕ"""
+    lib = _STEALTH_TLS.get("lib")
+    if lib and _STEALTH_TLS.get("enabled"):
+        try:
+            _STEALTH_TLS["n"] += 1
+            r = lib.post(url, impersonate=random.choice(_CF_IMPERSONATE),
+                         headers={"User-Agent": _rand_ua()}, timeout=kw.pop("timeout", (8, 20)),
+                         proxies=kw.pop("proxies", None), **kw)
+            return r
+        except Exception:
+            pass
+    return requests.post(url, headers={"User-Agent": _rand_ua()}, timeout=kw.pop("timeout", (8, 20)), **kw)
+
+
+# ٢) Session-Pool — سێشنی گەرم بۆ هەر دۆمەین (کوکی+warm)
+_SESSION_POOL = {}
+_SESS_LK = threading.Lock()
+
+
+def _pool_sess(dom):
+    """#91ST: سێشنی گەرم بۆ دۆمەین — کوکییەکان دەمێننەوە = بەکارهێنەری گەڕاوە"""
+    s = _SESSION_POOL.get(dom)
+    if not s:
+        s = requests.Session()
+        s.headers.update({"User-Agent": _rand_ua(),
+                          "Accept-Language": random.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8", "en;q=0.7"]),
+                          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+        _SESSION_POOL[dom] = s
+    return s
+
+
+# ٣) جیتر — کاتی هەڕەمەکی نێوان داواکارییەکان (پaternی مرۆیی)
+def _human_delay():
+    """#91ST: پاوزەی مرۆیی — 0.1 تا 0.8 چرکە هەڕەمەکی"""
+    time.sleep(random.uniform(0.1, 0.8))
+
+
+# ═══════════ /test — تاقیکردنەوەی مۆدێڵ بۆ ئەدمین ═══════════
+def _admin_test_model(chat_id, model_ref):
+    """تاقیکردنەوەی تەواوی مۆدێڵ — سەرچاوە + خێرایی + وەڵامی ڕاستەقینە"""
+    t0 = time.time()
+    reply(chat_id, f"🧪 <b>تاقیکردنەوە:</b> <code>{model_ref}</code> …")
+    try:
+        r = requests.post("http://127.0.0.1:8080/v1/chat/completions",
+                          headers={"Authorization": "Bearer sk-yf-31c00f02aa9221b336d7b4a274bb375c",
+                                   "Content-Type": "application/json"},
+                          json={"model": model_ref,
+                                "messages": [{"role": "user", "content": "تەنها بە یەک وشە وەڵام بدەوە: باشم"}]},
+                          timeout=(10, 120))
+        dt = time.time() - t0
+        try:
+            j = r.json()
+        except Exception:
+            j = {}
+        if r.status_code == 200 and j.get("choices"):
+            content = (j["choices"][0].get("message", {}) or {}).get("content", "")
+            used = j.get("model") or model_ref
+            ok = not leaks(content)
+            emoji = "✅" if ok else "⚠️"
+            reply(chat_id, f"{emoji} <b>ئەنجامی تاقیکردنەوە</b>\n"
+                          f"📤 داواکاری: <code>{model_ref}</code>\n"
+                          f"📥 وەڵام: <code>{str(content)[:60]}</code>\n"
+                          f"⏱ خێرایی: {dt:.1f} چرکە\n"
+                          f"🔌 سەرچاوەی بەکارهێنراو: <code>{used}</code>\n"
+                          f"🛡 پاک (بێ لێک‌دوانەوە): {'بەڵێ ✅' if ok else 'نەخێر ⚠️'}")
+        else:
+            err = str(j.get("error") or r.text)[:80]
+            reply(chat_id, f"❌ <b>شکستی هێنا</b> ({dt:.1f}s)\n⚠️ {err}")
+    except Exception as e:
+        reply(chat_id, f"❌ <b>هەڵە:</b> {str(e)[:80]}")
 
 
 def main():
