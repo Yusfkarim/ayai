@@ -6843,9 +6843,9 @@ _HEAL_STATE = {"t": 0.0, "status": {}}  # kind → {"ok":bool,"t":float,"err":st
 
 
 def _heal_probe(kind, fn):
-    """یەک پشکنینی کورت بۆ سەرچاوەیەک — وەڵامی کورت = زیندوو"""
+    """یەک پشکنینی کورت بۆ سەرچاوەیەک — وەڵامی کورت = زیندوو (fn() بێ-ئارگومێنت)"""
     try:
-        a = fn([{"role": "user", "content": "Reply with exactly: OK"}])
+        a = fn()
         return bool(a and len(str(a)) >= 2), ""
     except Exception as e:
         return False, str(e)[:60]
