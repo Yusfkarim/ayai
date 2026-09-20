@@ -6852,44 +6852,26 @@ def _heal_probe(kind, fn):
 
 
 def self_heal_once():
-    """یەک خولی پشکنین + چاککردنەوەی خۆکارانەی هەموو سەرچاوەکان"""
+    """یەک خولی پشکنین + چاککردنەوەی خۆکارانە — تەنها سەرچاوە کێشەدار/گرنگەکان (خێرا)"""
     probes = {}
     if MS.get("ct_ok"):
-        probes["ct"] = lambda: ct_chat([{"role": "user", "content": "hi"}], list(MS["ct_ok"].keys())[0], timeout=70)
+        probes["ct"] = lambda: ct_chat([{"role": "user", "content": "hi"}], list(MS["ct_ok"].keys())[0], timeout=45)
     if MS.get("hk_ok"):
-        probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=70)
-    probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], "deepseek-ai/DeepSeek-V4.1-Flash", timeout=70)
-    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=70)
-    probes["ak"] = lambda: ak_chat(336, [{"role": "user", "content": "hi"}], timeout=70) if MS.get("ak_ok") else None
-    # ═ #91: فراوانکردن — هەموو سەرچاوە سەرەکییەکان (خێرا، ١ نموونە بۆ هەر یەکێک) ═
-    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=70)
-    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=70)
-    probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=70)
-    probes["aff"] = lambda: AIFreeChat(model="gpt-5-mini").chat("hi", history=[])
-    probes["rwd"] = lambda: rwd_chat("gemini-3-1", [{"role": "user", "content": "hi"}], timeout=70)
-    probes["act"] = lambda: act_chat("grok-4", [{"role": "user", "content": "hi"}], timeout=70)
-    probes["fla"] = lambda: fla_chat([{"role": "user", "content": "hi"}], timeout=70)
-    probes["z02"] = lambda: z02_chat([{"role": "user", "content": "hi"}], "gemini-2.5-flash-lite", timeout=70)
-    probes["qb"] = lambda: qb_chat([{"role": "user", "content": "hi"}], timeout=70)
-    probes["duck"] = lambda: duck_chat("gpt-5.4-mini", [{"role": "user", "content": "hi"}], timeout=70)
-    probes["ng"] = lambda: ng_chat([{"role": "user", "content": "hi"}], timeout=70)
-    probes["l7"] = lambda: l7_chat([{"role": "user", "content": "hi"}], "minimax-m2.7", timeout=70)
-    probes["g4f"] = lambda: g4f_chat([{"role": "user", "content": "hi"}], "gpt-4o-mini", timeout=70)
-    probes["yl"] = lambda: yl_chat([{"role": "user", "content": "hi"}], "yollo-chat", timeout=70)
-    probes["aka"] = lambda: aka_chat([{"role": "user", "content": "hi"}], "openai-gpt-oss-120b", timeout=70)
-    probes["hb"] = lambda: hb_chat([{"role": "user", "content": "hi"}], "hotbot-chat", timeout=70)
-    probes["gk"] = lambda: gk_chat([{"role": "user", "content": "hi"}], "glm-4-flash", timeout=70)
-    probes["gz"] = lambda: gz_chat("gemini-flash", [{"role": "user", "content": "hi"}], timeout=70)
-    probes["pi"] = lambda: pi_chat([{"role": "user", "content": "hi"}], "pi-chat", timeout=70)
-    probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=70)
+        probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=45)
+    if MS.get("hf_ok"):
+        probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], list(MS["hf_ok"].keys())[0], timeout=45)
+    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=45)
+    if MS.get("ak_ok"):
+        probes["ak"] = lambda: ak_chat(list(MS["ak_ok"].keys())[0], [{"role": "user", "content": "hi"}], timeout=45)
+    # حەوزەکان — گرنگترین
+    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=50)
+    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=50)
+    probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
     for kind, fn in probes.items():
-        if fn is None:
-            continue
         ok, err = _heal_probe(kind, fn)
         _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err}
         if not ok:
-            # چاککردنەوە: sync ی توند بۆ ئەو سەرچاوەیە
             try:
                 if kind == "hk":
                     sync_hk_models(force=True)
@@ -6897,8 +6879,6 @@ def self_heal_once():
                     sync_ct_models(force=True)
                 elif kind == "hf":
                     sync_hf_models(force=True)
-                elif kind == "cbc":
-                    pass  # cbc بێ-سینکە — ڕاستەوخۆ تاقی دەکرێتەوە
                 elif kind == "ak":
                     sync_ak_models([])
                 elif kind == "ca":
@@ -6907,42 +6887,14 @@ def self_heal_once():
                     sync_cb_models(force=True)
                 elif kind == "nv":
                     sync_nv_models(force=True)
-                elif kind == "ac":
-                    sync_ac_models(force=True)
-                elif kind in ("gk",):
-                    sync_gk_models(force=True)
-                elif kind in ("gz",):
-                    sync_giz_models(force=True)
-                elif kind == "pi":
-                    sync_pi_models(force=True)
-                elif kind == "hb":
-                    sync_hb_models(force=True)
-                elif kind == "aka":
-                    sync_akash_models(force=True)
-                elif kind == "yl":
-                    sync_yl_models(force=True)
-                elif kind == "l7":
-                    sync_l7_models()
-                # ئەوانی تر static ەن — تەنها لۆگ
                 fixed.append(f"{kind}→sync")
             except Exception:
                 pass
     if fixed:
         print(f"[SELF-HEAL] 🔧 چاککردنەوە: {', '.join(fixed)}", flush=True)
-    # ئاماری کۆتایی
     st = _HEAL_STATE["status"]
     line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" for k, v in sorted(st.items()))
     print(f"[SELF-HEAL] {line}", flush=True)
-
-
-def _proxy_refresh_sources():
-    """#91: تازەکردنەوەی لیستی پرۆکسی (پشکنینی زیندوو) — بۆ دایمۆنی keeper"""
-    try:
-        _proxy_get(2)
-    except Exception:
-        pass
-    return PROXY_ST.get("list") or []
-
 
 
 def proxy_keeper_daemon():
