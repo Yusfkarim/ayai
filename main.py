@@ -579,6 +579,7 @@ def em_chat(messages, model_id, timeout=170, depth=0):
 # ════════════════════════════════════════════════════════════
 CBC_BASE = "https://chatbotchatapp.com"
 _CBC_KEY_TOKEN = "XXXXXXYYY"
+_CBC_PROXY = {"on": True}
 _CBC_STATE = {"csrf": None, "cookies": None, "t": 0.0}
 
 
@@ -628,6 +629,31 @@ def _cbc_timestamp(hdrs):
     return r.json()["timestamp"]
 
 
+
+
+def _cbc_stream_read(r, hdrs, payload, timeout, messages):
+    """#91CB: خوێندنەوەی ستریم — دەقی تەواو"""
+    out = ""
+    for line in r.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        body = line[6:] if line.startswith("data: ") else (line[3:] if line.startswith("id: ") else None)
+        if not body:
+            continue
+        try:
+            j = json.loads(body)
+        except Exception:
+            continue
+        if j.get("code"):
+            raise EMError("cbc: " + str(j.get("code")))
+        for ch in j.get("choices") or []:
+            for part in ((ch.get("content") or {}).get("parts")) or []:
+                t = part.get("text") or ""
+                out += t
+    if not out:
+        raise EMError("cbc: وەڵامی بەتاڵ")
+    return out
+
 def cbc_chat(messages, model=None, timeout=120):
     """پرسیار بۆ chatbotchatapp — GPT-5 (تەنها مۆدێڵی بێ login) — دەقی تەواو دەگەڕێنێتەوە"""
     hdrs = _cbc_headers()
@@ -645,36 +671,40 @@ def cbc_chat(messages, model=None, timeout=120):
         "id": _cbc_md5(acc), "timestamp": timestamp, "nonce": nonce,
         "messages": messages, "url": CBC_BASE + "/",
     }
-    r = requests.post(CBC_BASE + "/api", headers={**hdrs, "Content-Type": "application/json",
-                                                  "Accept": "text/event-stream"},
-                      json=payload, timeout=timeout, stream=True)
-    if r.status_code == 429:
-        raise EMError("cbc: سنووری ڕێژە (429)")
-    out = ""
-    for line in r.iter_lines(decode_unicode=True):
-        if not line:
-            continue
-        body = line[6:] if line.startswith("data: ") else (line[3:] if line.startswith("id: ") else None)
-        if not body:
-            continue
-        try:
-            j = json.loads(body)
-        except Exception:
-            continue
-        if j.get("code"):
-            code = j.get("code")
-            if code == "dailyChatLimitOfGuest":
-                raise EMError("cbc: سنووری ڕۆژانەی میوان")
-            if code == "modelRequireLogin":
-                raise EMError("cbc: خوازیاری هەژمار")
-            raise EMError("cbc: " + str(code))
-        for ch in j.get("choices") or []:
-            for part in ((ch.get("content") or {}).get("parts")) or []:
-                if part.get("text"):
-                    out += part["text"]
-    if not out:
-        raise EMError("cbc: وەڵامی بەتاڵ")
-    return out
+    # #91CB: پرۆکسی — ئەگەر لە داواکاری پێشوو لیمێتی میوان بوو، ڕاستەوخۆ بە پرۆکسی
+    px_list = _CBC_PROXY.get("on") and _proxy_get(3) or []
+    last_g = None
+    for _pxtry in range(3):
+        _kw = {"proxies": ({"http": px_list[_pxtry], "https": px_list[_pxtry]} if _pxtry < len(px_list) else None)}
+        r = requests.post(CBC_BASE + "/api", headers={**hdrs, "Content-Type": "application/json",
+                                                      "Accept": "text/event-stream"},
+                          json=payload, timeout=timeout, stream=True, **{k: v for k, v in _kw.items() if v})
+        if r.status_code == 429:
+            raise EMError("cbc: سنووری ڕێژە (429)")
+        # ستریمی کورت — code ەکە دەرکەوت → لیمێتی میوان بوو → پرۆکسی نوێ
+        _hit = False
+        for line in r.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            body = line[6:] if line.startswith("data: ") else (line[3:] if line.startswith("id: ") else None)
+            if not body:
+                continue
+            try:
+                j0 = json.loads(body)
+            except Exception:
+                continue
+            if j0.get("code") == "dailyChatLimitOfGuest":
+                _hit = True
+                break
+            # نا-لیمێت → بڕۆ بۆ خولی سەرەکی (stream ەکە داخراوە — بە دووبارەی نوێ دەگەڕێینەوە)
+            _hit = False
+            break
+        if not _hit:
+            # ئەم داواکارییە باش بوو — بەڵام stream بەکارهێنراوە — لێرەدا دەستپێبکەوە بە هەمان پرۆکسی
+            return _cbc_stream_read(r, hdrs, payload, timeout, messages)
+        last_g = _hit
+        print(f"[CBC] لیمێتی میوان لە IP — پرۆکسی {_pxtry + 2}/3…", flush=True)
+    raise EMError("cbc: سنووری ڕۆژانەی میوان (هەموو پرۆکسییەکان)")
 
 
 # ════════════════════════════════════════════════════════════
@@ -5180,6 +5210,38 @@ def _al_save_acc():
 _al_load_acc()
 
 
+
+
+def _al_signup_new():
+    """#91AA: سایناپی نوێی allchatbots (Supabase) — پۆڵی ئەکاونت دروست دەکات"""
+    try:
+        import random as _r, string as _s2
+        user = "al" + "".join(_r.choices(_s2.ascii_lowercase + _s2.digits, k=8))
+        em, pw = f"{user}@dreameg.com", "Al" + "".join(_r.choices(_s2.ascii_letters + _s2.digits, k=10)) + "!7"
+        r = requests.post(AL_SB + "/auth/v1/signup",
+                          headers={"apikey": AL_KEY, "Content-Type": "application/json"},
+                          json={"email": em, "password": pw}, timeout=(10, 25))
+        if r.status_code != 200:
+            return False
+        AL_ST.setdefault("accounts", []).append({"email": em, "password": pw})
+        AL_ST["idx"] = len(AL_ST["accounts"]) - 1
+        AL_ST["sess"] = None
+        _al_save_acc()
+        print(f"[AL] ئەکاونتی نوێ ✅ {em}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[AL] سایناپ: {str(e)[:50]}", flush=True)
+        return False
+
+
+def _al_rotate():
+    """#91AA: ئەکاونتی دواتر — ئەگەر هیچ نەما سایناپی نوێ"""
+    accs = AL_ST.get("accounts") or []
+    AL_ST["idx"] = (AL_ST.get("idx", 0) + 1) % max(len(accs), 1)
+    AL_ST["sess"] = None
+    _al_save_acc()
+    return bool(_al_signup_new())
+
 def _al_login(force=False):
     """چوونەژوورەوەی Supabase — سێشن (~٥٠ خولەک کاش)"""
     import time as _t
@@ -5196,7 +5258,13 @@ def _al_login(force=False):
     except Exception as e:
         raise EMError(f"al: {str(e)[:60]}")
     if r.status_code != 200 or not (r.json() or {}).get("access_token"):
-        raise EMError("al: چوونەژوورەوە شکست")
+        # #91AA: ئەکاونتی مردوو → ئەکاونتی دواتر/سایناپی نوێ
+        AL_ST["idx"] += 1
+        try:
+            _al_rotate()
+            return _al_login(force=True)
+        except Exception:
+            raise EMError("al: چوونەژوورەوە شکست")
     AL_ST["sess"] = r.json()
     AL_ST["sess_t"] = _t.time()
     _al_save_acc()
@@ -5451,7 +5519,18 @@ def aiml_chat(messages, model_id, timeout=110):
             _ms_save()
             raise EMError("aiml: فەندز — دەگوازرێتەوە بۆ سەرچاوەی هەمان مۆدێڵ")
         if r.status_code == 401:
-            AIML_ST["tok"] = None
+            # #91AA: token+key یەکسان نوێ بکرێنەوە — بێ دەستێوەردان
+            def _aiml_renew():
+                try:
+                    AIML_ST["tok"] = None
+                    AIML_ST["key"] = None
+                    AIML_ST["tok_t"] = 0.0
+                    _aiml_login()
+                    _aiml_ensure_key()
+                    print("[AIML] 🔁 token+key نوێ کرایەوە", flush=True)
+                except Exception:
+                    pass
+            threading.Thread(target=_aiml_renew, daemon=True).start()
             raise EMError("aiml: توکن")
         raise EMError(f"aiml: {msg or r.status_code}")
     if r.status_code == 429:
