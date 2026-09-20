@@ -4140,6 +4140,28 @@ def _fb_signup(key, email, pw, ua):
     return None
 
 
+def _lim_today():
+    """#91Z: بەرواری ئەمڕۆ UTC — بۆ تاگی لیمێت"""
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _lim_hit(em, model_key=None):
+    """#91Z: ئایا ئەم ئەکاونتە ئەمڕۆ limit ە؟ — ستار/مۆدێڵ-لیمێتی دوێنێ خۆکارانە بەسەردەچێت
+       (کۆن: True ی هەمیشەیی = ئەمڕۆ دەژمێردرێت — سبەی ئازاد دەبێت؛ تەنها lifetime هەمیشەییە)"""
+    if not em:
+        return False
+    today = _lim_today()
+    star = em.get("*")
+    if star:
+        if star is True or str(star) == today:
+            return True
+    if model_key:
+        mv = em.get(model_key)
+        if mv and (mv is True or str(mv) == today):
+            return True
+    return False
+
+
 def _pool_reap():
     """#91P2: ئەکاونتی limit — سڕینەوە نییە! پاڵنان بۆ کۆتایی (limit ی ڕۆژانە شەوانە دەگەڕێتەوە
        — سڕینەوە = بەفیڕۆدانی ئەکاونتی تەندرووست + signup ی بێ‌پێویست)"""
@@ -4149,8 +4171,8 @@ def _pool_reap():
     # CA — ئەوانەی '*' یان هەیە → کۆتایی لیست (لە سەرەتاوە کار ناکەن) — ناسێنراوەکان یەکسان کار دەکەن
     lim = CA_ST.get("limits") or {}
     accs = CA_ST.get("accounts") or []
-    live = [a for a in accs if not (lim.get(a.get("email")) or {}).get("*")]
-    done = [a for a in accs if (lim.get(a.get("email")) or {}).get("*")]
+    live = [a for a in accs if not _lim_hit(lim.get(a.get("email")) or {})]
+    done = [a for a in accs if _lim_hit(lim.get(a.get("email")) or {})]
     if done and live:
         CA_ST["accounts"] = live + done
         CA_ST["idx"] = CA_ST["idx"] % max(len(live), 1)
@@ -4254,7 +4276,7 @@ def _ca_rotate(model_key):
         CA_ST["idx"] = (CA_ST["idx"] + 1) % len(accs)
         acc = accs[CA_ST["idx"]]
         em = lim.get(acc["email"]) or {}
-        if not em.get(model_key) and not em.get("*"):
+        if not _lim_hit(em, model_key):  # #91Z: ستاری دوێنێ = ئازاد
             CA_ST["tok"] = None
             _ca_save_acc()
             return True
@@ -4327,9 +4349,11 @@ def ca_chat(messages, model_id, timeout=110):
                 if accs:
                     acc = accs[CA_ST["idx"] % len(accs)]
                     lm = CA_ST.setdefault("limits", {}).setdefault(acc["email"], {})
-                    lm[mkey] = True
+                    lm[mkey] = _lim_today()  # #91Z: بەروارکراو — سبەی خۆی بەسەر دەچێت
                     if "lifetime" not in low:
-                        lm["*"] = True  # ئەژمێرەکە بە گشتی تەواوە
+                        lm["*"] = _lim_today()  # لیمێتی ڕۆژانە — بەیانی دەگەڕێتەوە
+                    else:
+                        lm["*"] = True  # تەنها lifetime هەمیشەییە
                     _ca_save_acc()
                 if not _ca_rotate(mkey):
                     raise EMError("ca: سنووری هەموو ئەکاونتەکان")
@@ -4596,7 +4620,7 @@ def _ac_rotate(model_key):
         AC_ST["idx"] = (AC_ST["idx"] + 1) % len(accs)
         acc = accs[AC_ST["idx"]]
         em = lim.get(acc["email"]) or {}
-        if not em.get(model_key) and not em.get("*"):
+        if not _lim_hit(em, model_key):  # #91Z
             AC_ST["tok"] = None
             _ac_save_acc()
             return True
@@ -4669,8 +4693,10 @@ def ac_chat(messages, model_id, timeout=110):
                 if accs:
                     acc = accs[AC_ST["idx"] % len(accs)]
                     lm = AC_ST.setdefault("limits", {}).setdefault(acc["email"], {})
-                    lm[mkey] = True
+                    lm[mkey] = _lim_today()  # #91Z
                     if "lifetime" not in low:
+                        lm["*"] = _lim_today()
+                    else:
                         lm["*"] = True
                     _ac_save_acc()
                 if not _ac_rotate(mkey):
@@ -7264,6 +7290,17 @@ def self_heal_once():
     probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
+    # #91Z: DARK-RECOVERY — سەرچاوەی بەتاڵ (مانگانە وەک hf) هەر خولی سێیەم هەوڵی زیندووکردنەوە
+    if (_HEAL_STATE.get("cyc", 0) % 3) == 0:
+        for dk in ("hf", "hk", "ct"):
+            try:
+                if not MS.get(dk + "_ok"):
+                    globals()[f"sync_{dk}_models"](force=True)
+                    if MS.get(dk + "_ok"):
+                        fixed.append(f"{dk}→ darkness-healed ✨")
+                        print(f"[SELF-HEAL] ✨ {dk} لە تاریکییەوە گەڕایەوە!", flush=True)
+            except Exception:
+                pass
     for kind, fn in probes.items():
         fprev = int((_HEAL_STATE["status"].get(kind) or {}).get("fails", 0))
         if fprev >= 6 and (_HEAL_STATE.get("cyc", 0) % 3) != 0:
@@ -7383,7 +7420,9 @@ def ask(session, question):
             return "⚠️ رسائل كثيرة جدًا — انتظر دقيقة ثم أعد الإرسال."
         ql.append(now)
         _USER_Q[uid] = ql
-    ck = (str(session.get("mkey") or session.get("server") or ""), _uq(question))
+    _hist = session.get("history") or []
+    ck = (str(session.get("mkey") or session.get("server") or ""),
+          _uq(str(_hist[-6:]) + "||" + str(question)))  # #91Z: کۆنتێکستیش لە کلیل
     c = _ANS_CACHE.get(ck)
     if c and time.time() - c[0] < 300:
         return c[1]
@@ -7413,6 +7452,60 @@ def ask(session, question):
     return a
 
 
+
+def _limit_dawn_daemon():
+    """#91Z: بەیانی لیمیتەکان — هەموو ڕۆژێک لە 00:10 UTC:
+       ستاری دوێنێ دەسڕدرێتەوە + سەرچاوە مانگانە (hf/hk/ct) هەوڵی زیندووکردنەوەیان لێدەکرێت"""
+    while True:
+        try:
+            now = time.time()
+            nxt = (now // 86400 + 1) * 86400 + 600
+            time.sleep(max(60, nxt - now))
+            today = _lim_today()
+            n_all = 0
+            for nm, st, sv in (("CA", CA_ST, _ca_save_acc), ("AC", AC_ST, _ac_save_acc)):
+                lim = st.get("limits") or {}
+                n = 0
+                for e, v in list(lim.items()):
+                    if not isinstance(v, dict):
+                        continue
+                    for k in list(v.keys()):
+                        val = v.get(k)
+                        if val is True:
+                            continue  # هەمیشەیی (lifetime) — دەمێنێتەوە
+                        if str(val or "") < today:
+                            v.pop(k, None)
+                            n += 1
+                if n:
+                    try:
+                        sv()
+                    except Exception:
+                        pass
+                n_all += n
+                if n:
+                    print(f"[DAWN] {nm}: {n} لیمێتی دوێنێ سڕانەوە — ئەکاونتەکان گەڕانەوە", flush=True)
+            # سەرچاوە مانگانە — هەوڵی زیندووکردنەوە
+            healed = []
+            for dk in ("hf", "hk", "ct"):
+                try:
+                    if not MS.get(dk + "_ok"):
+                        globals()[f"sync_{dk}_models"](force=True)
+                        if MS.get(dk + "_ok"):
+                            healed.append(dk)
+                except Exception:
+                    pass
+            try:
+                if NV_ST.get("exc"):
+                    NV_ST["exc"] = {}
+                    _nv_save_acc()
+                    print("[DAWN] NV: کۆڵەکانی دوێنێ پاککرانەوە", flush=True)
+            except Exception:
+                pass
+            print(f"[DAWN] 🌅 خاڵی سفر — {n_all} لیمێت پاککرانەوە" + (f" + ✨ {healed}" if healed else ""), flush=True)
+        except Exception as e:
+            print(f"[DAWN] هەڵە: {str(e)[:60]}", flush=True)
+
+
 def _xarq_watchdog():
     """چاودێری خودی بۆت — ئەگەر polling ڕاوەستا ٥ خولەک → ڕیستارتی تەواو (fly یەکسان دەیگەڕێنێتەوە)"""
     time.sleep(420)
@@ -7422,7 +7515,7 @@ def _xarq_watchdog():
             t = _HB.get("t") or 0
             if t:
                 armed = True
-            if armed and t and time.time() - t > 300:
+            if armed and t and time.time() - t > 900:
                 print("[WATCHDOG] ⏰ polling وەستاویە — ڕیستارتی خودکار", flush=True)
                 os._exit(1)
         except Exception:
@@ -7571,6 +7664,7 @@ def main():
     threading.Thread(target=_proxy_harvester_daemon, daemon=True).start()
     threading.Thread(target=_xarq_watchdog, daemon=True).start()
     threading.Thread(target=_daily_report, daemon=True).start()
+    threading.Thread(target=_limit_dawn_daemon, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
