@@ -3193,7 +3193,7 @@ def gz_servers():
     return out
 
 
-def _gz_parse_catalog(raw):
+def _gz_parse_catalog__raw(raw):
     """JS-catalog → لیستی {value, label, free0} — سکەنی ئۆبجێکت-بە-ئۆبجێکت (خێرا، بێ json5)"""
     import re as _re
     i = raw.find("items:[")
@@ -3258,9 +3258,6 @@ def _gz_parse_catalog(t):
     except Exception:
         return None
 
-
-_gz_parse_catalog__raw = _gz_parse_catalog
-
 def sync_giz_models(force=False):
     """ئۆتۆ-ئەپدێتی GizAI: کاتالۆگی CDN (٦ کاتژمێر) — بێ probe (کوانتا نەسوتێت)؛
     فیلتەر: gateway/* (پارەدار) و free-limit-0 و شاراوە دەر دەکرێن"""
@@ -3273,12 +3270,20 @@ def sync_giz_models(force=False):
             print(f"[GZ-SYNC] catalog {r.status_code}", flush=True)
             return
         cands = _gz_parse_catalog(r.text)
+        if not cands:
+            print("[GZ-SYNC] parse شکستی هێنا — کاتالۆگی کۆن دەمێنێتەوە", flush=True)
+            return
         cat = {}
         for c in cands:
             v = c["value"]
             if v in GZ_SKIP or v.startswith("gateway/") or c.get("free0"):
                 continue
             cat[v] = c["label"]
+        # #91A12: NEVER-SHRINK — ئەگەر نوێ < 70% ی کۆن → کۆن بمێنێتەوە (flake ی سایت)
+        _oldc = _GZ_SYNC.get("catalog") or {}
+        if _oldc and len(cat) < len(_oldc) * 0.7:
+            print(f"[GZ-SYNC] ⚠️ نوێ زۆر بچووکە ({len(cat)} < 70% ی {len(_oldc)}) — کۆن پارێزرا", flush=True)
+            return
         _GZ_SYNC["catalog"] = cat
         _GZ_SYNC["t"] = _t.time()
         print(f"[GZ-SYNC] کاتالۆگ {len(cands)} → تۆمارکراو {len(cat)}", flush=True)
@@ -4491,7 +4496,7 @@ def ca_servers():
     return out
 
 
-def _ca_extract_models(html):
+def _ca_extract_models__raw(html):
     """نەخشەی مۆدێڵەکان لە payload ی Nuxt ی HTML — کۆنفیگی multi_language (idMap: نرخ لە شوێنی تر)"""
     i = 0
     while True:
@@ -4539,9 +4544,6 @@ def _ca_extract_models(html):
         return _ca_extract_models__raw(html)
     except Exception:
         return None
-
-
-_ca_extract_models__raw = _ca_extract_models
 
 def sync_ca_models(force=False):
     """ئۆتۆ-ئەپدێتی ChatbotAI: نەخشەی مۆدێڵەکان لە HTML ی /chat — ٦ کاتژمێر"""
