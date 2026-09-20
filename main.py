@@ -5733,8 +5733,22 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
         api_brain_ensure()
         if not _resolve_server(ref):
-            return self._send(400, {"error": f"خادم غير معروف: {ref} — راجع /v1/models"})
-        srv = _resolve_server(ref)
+            # #91F: مۆدێڵەکە ون بووە (سەرچاوەکەی لابرا) → بە خێزان/کلیل جێگۆڕ دەکرێت — وەڵام هەر دەگەڕێتەوە
+            _mk = SRV_KEY_BY_ID.get(ref) or norm_model(ref)
+            _fam = _model_family(ref)
+            _cands = list(API_BRAIN["servers"] or [])
+            _alt = next((x for x in _cands if srv_key(x) == _mk), None)
+            if not _alt and _fam:
+                _alt = pick_in_kind(_cands, _fam, ref)
+            if not _alt:
+                _alt = next((x for x in _cands if x.get("kind") == "em"), None) or (_cands[0] if _cands else None)
+            if not _alt:
+                return self._send(400, {"error": f"خادم غير معروف: {ref} — راجع /v1/models"})
+            print(f"[API] 🧬 مۆدێڵی ون ({ref}) → جێگۆڕ: {_alt['id']}", flush=True)
+            srv = dict(_alt)
+            srv["alias"] = srv["id"]
+        else:
+            srv = _resolve_server(ref)
 
         print(f"[API] server={srv['id']} q={q[:50]}", flush=True)
 
