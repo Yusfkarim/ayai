@@ -3939,7 +3939,7 @@ def _pool_daemon():
                     time.sleep(75)  # پشووی نێوان سەرکەوتنەکان
             except Exception as e:
                 print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
-        time.sleep(120)
+        time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
 
 
 def _ca_token():
@@ -5507,6 +5507,24 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}")
 
     def do_GET(self):
+        # #91: health endpoint — چاودێری خێرا
+        if self.path.split("?")[0] == "/health":
+            st = _HEAL_STATE.get("status", {})
+            def _n2(f):
+                try:
+                    d = json.load(open(os.path.join(DATA_DIR, f)))
+                    return len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
+                except Exception:
+                    return 0
+            body = {
+                "ok": True,
+                "time": int(time.time()),
+                "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
+                "pools": {"ca": _n2("ca_accounts.json"), "cb": _n2("cb_accounts.json"), "nv": _n2("nv_accounts.json")},
+                "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
+                "proxies": len(PROXY_ST.get("list") or []),
+            }
+            return self._send(200, body)
         if self.path in ("/", "/health"):
             api_brain_ensure()
             self._send(200, {"ok": True, "service": "smart-chatbot-api",
@@ -6843,6 +6861,27 @@ def self_heal_once():
     probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], "deepseek-ai/DeepSeek-V4.1-Flash", timeout=25)
     probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=25)
     probes["ak"] = lambda: ak_chat(336, [{"role": "user", "content": "hi"}], timeout=25) if MS.get("ak_ok") else None
+    # ═ #91: فراوانکردن — هەموو سەرچاوە سەرەکییەکان (خێرا، ١ نموونە بۆ هەر یەکێک) ═
+    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=30)
+    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=30)
+    probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=30)
+    probes["aff"] = lambda: AIFreeChat(model="gpt-5-mini").chat("hi", history=[])
+    probes["rwd"] = lambda: rwd_chat("gemini-3-1", [{"role": "user", "content": "hi"}], timeout=25)
+    probes["act"] = lambda: act_chat("grok-4", [{"role": "user", "content": "hi"}], timeout=25)
+    probes["fla"] = lambda: fla_chat([{"role": "user", "content": "hi"}], timeout=25)
+    probes["z02"] = lambda: z02_chat([{"role": "user", "content": "hi"}], "gemini-2.5-flash-lite", timeout=25)
+    probes["qb"] = lambda: qb_chat([{"role": "user", "content": "hi"}], timeout=25)
+    probes["duck"] = lambda: duck_chat("gpt-5.4-mini", [{"role": "user", "content": "hi"}], timeout=25)
+    probes["ng"] = lambda: ng_chat([{"role": "user", "content": "hi"}], timeout=25)
+    probes["l7"] = lambda: l7_chat([{"role": "user", "content": "hi"}], "minimax-m2.7", timeout=25)
+    probes["g4f"] = lambda: g4f_chat([{"role": "user", "content": "hi"}], "gpt-4o-mini", timeout=25)
+    probes["yl"] = lambda: yl_chat([{"role": "user", "content": "hi"}], "yollo-chat", timeout=25)
+    probes["aka"] = lambda: aka_chat([{"role": "user", "content": "hi"}], "openai-gpt-oss-120b", timeout=25)
+    probes["hb"] = lambda: hb_chat([{"role": "user", "content": "hi"}], "hotbot-chat", timeout=25)
+    probes["gk"] = lambda: gk_chat([{"role": "user", "content": "hi"}], "glm-4-flash", timeout=25)
+    probes["gz"] = lambda: gz_chat("gemini-flash", [{"role": "user", "content": "hi"}], timeout=25)
+    probes["pi"] = lambda: pi_chat([{"role": "user", "content": "hi"}], "pi-chat", timeout=25)
+    probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=25)
     fixed = []
     for kind, fn in probes.items():
         if fn is None:
@@ -6862,6 +6901,29 @@ def self_heal_once():
                     pass  # cbc بێ-سینکە — ڕاستەوخۆ تاقی دەکرێتەوە
                 elif kind == "ak":
                     sync_ak_models([])
+                elif kind == "ca":
+                    sync_ca_models(force=True)
+                elif kind == "cb":
+                    sync_cb_models(force=True)
+                elif kind == "nv":
+                    sync_nv_models(force=True)
+                elif kind == "ac":
+                    sync_ac_models(force=True)
+                elif kind in ("gk",):
+                    sync_gk_models(force=True)
+                elif kind in ("gz",):
+                    sync_giz_models(force=True)
+                elif kind == "pi":
+                    sync_pi_models(force=True)
+                elif kind == "hb":
+                    sync_hb_models(force=True)
+                elif kind == "aka":
+                    sync_akash_models(force=True)
+                elif kind == "yl":
+                    sync_yl_models(force=True)
+                elif kind == "l7":
+                    sync_l7_models()
+                # ئەوانی تر static ەن — تەنها لۆگ
                 fixed.append(f"{kind}→sync")
             except Exception:
                 pass
@@ -6871,6 +6933,29 @@ def self_heal_once():
     st = _HEAL_STATE["status"]
     line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" for k, v in sorted(st.items()))
     print(f"[SELF-HEAL] {line}", flush=True)
+
+
+def _proxy_refresh_sources():
+    """#91: تازەکردنەوەی لیستی پرۆکسی (پشکنینی زیندوو) — بۆ دایمۆنی keeper"""
+    try:
+        _proxy_get(2)
+    except Exception:
+        pass
+    return PROXY_ST.get("list") or []
+
+
+
+def proxy_keeper_daemon():
+    """#91: چاودێری پرۆکسی — هەر ٣٠ خولەک لیستی زیندوو تازە دەکاتەوە تا قەت بەتاڵ نەبێت"""
+    time.sleep(120)
+    while True:
+        try:
+            _proxy_refresh_sources()
+            n = len(PROXY_ST.get("list") or [])
+            print(f"[PROXY-KEEPER] {n} پرۆکسی زیندوو ئامادە", flush=True)
+        except Exception as e:
+            print(f"[PROXY-KEEPER] هەڵە: {str(e)[:60]}", flush=True)
+        time.sleep(1800)
 
 
 def self_heal_daemon():
@@ -6900,6 +6985,7 @@ def main():
     threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
     threading.Thread(target=_pool_daemon, daemon=True).start()
     threading.Thread(target=self_heal_daemon, daemon=True).start()
+    threading.Thread(target=proxy_keeper_daemon, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
