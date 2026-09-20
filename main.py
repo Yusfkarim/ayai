@@ -5601,6 +5601,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
         content, last_err = "", None
         for cand in order:
+            if cand is not srv and time.time() < _BREAKER.get(cand.get("kind"), 0):
+                continue
             try:
                 kind = cand.get("kind")
                 if kind == "em":
@@ -5667,6 +5669,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     break
             except Exception as e:
                 last_err = e
+                _BREAKER[cand.get("kind")] = time.time() + (300 if _is_limit_err(e) else 90)
                 _limit_recharge(cand.get("kind"), e)
                 print(f"[API] {cand.get('kind')} هەڵە: {str(e)[:90]}", flush=True)
         if not content:
@@ -6166,6 +6169,7 @@ def get_session(user_id):
         if user_id != ADMIN_TG and GLOBAL_MODEL.get("server"):
             s["server"] = GLOBAL_MODEL["server"]
             s["mkey"] = GLOBAL_MODEL.get("mkey") or s.get("mkey")
+        s["user_id"] = user_id
         return s
 
 
@@ -6251,6 +6255,8 @@ def ask(session, question):
             order.append(cand)
     last = None
     for cand in order:
+        if cand is not srv and time.time() < _BREAKER.get(cand.get("kind"), 0):
+            continue
         try:
             k = cand.get("kind")
             if k == "em":
@@ -6419,6 +6425,7 @@ def ask(session, question):
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
             last = e
+            _BREAKER[cand.get("kind")] = time.time() + (300 if _is_limit_err(e) else 90)
             _limit_recharge(cand.get("kind"), e)
             print(f"[BRAIN] {cand.get('kind', '?')} ({cand.get('id', '?')}) هەڵە: {str(e)[:80]}", flush=True)
     # ═══ دیلی نەوە: هەموو زنجیرەکە بۆ ئەم مۆدێڵە مردووە → نوێترین نەوە بپشکنە ═══
@@ -6661,6 +6668,20 @@ def handle_message(msg):
         threading.Thread(target=_heal_work, daemon=True).start()
         return
 
+    if text.startswith("/stats"):
+        if user_id != ADMIN_TG:
+            return
+        lat = _PERF["lat"]
+        avg = (sum(lat) / len(lat)) if lat else 0
+        br = {k: int(v - time.time()) for k, v in _BREAKER.items() if v > time.time()}
+        up = int(time.time() - BOOT_T)
+        reply(chat_id, f"📈 <b>ئامارەکانی سیستەمی خارق</b>\n"
+                      f"⏱ کاراک: {up // 3600} کاتژمێر\n"
+                      f"⚡ داواکاری: {_PERF['req']} — ✅ {_PERF['ok']} / ❌ {_PERF['fail']}\n"
+                      f"⏳ تێکڕای وەڵام: {avg:.1f} چرکە\n"
+                      f"🧊 بریکەر (سەرچاوەی پشوو): {', '.join(f'{k}({v}s)' for k, v in br.items()) or '—'}\n"
+                      f"💾 کاشی وەڵام: {len(_ANS_CACHE)} | بەکارهێنەری چالاک: {len(_USER_Q)}")
+        return
     if text.startswith("/about"):
         reply(chat_id, ABOUT)
         return
@@ -6799,7 +6820,8 @@ def setup_commands():
             # #88: /server تەنها لە مێنیوی ئەدمین
             admin_cmds = cmds + [{"command": "server", "description": "قائمة الموديلات — الأحدث دائما"},
                             {"command": "status", "description": "📊 ڕاپۆرتی سیستەم"},
-                            {"command": "heal", "description": "🩺 پشکنین و چاککردنەوە"}]
+                            {"command": "heal", "description": "🩺 پشکنین و چاککردنەوە"},
+                            {"command": "stats", "description": "📈 ئامارەکانی خارق"}]
             r = tg("setMyCommands", commands=admin_cmds, scope={"type": "chat", "chat_id": ADMIN_TG})
             print(f"[CMDS] ئەدمین-سکۆپ: {'✅' if r.get('ok') else 'شکست'}", flush=True)
             return
@@ -6949,8 +6971,9 @@ def self_heal_once():
 
 
 def proxy_keeper_daemon():
-    """#91: چاودێری پرۆکسی — هەر ٣٠ خولەک لیستی زیندوو تازە دەکاتەوە تا قەت بەتاڵ نەبێت"""
+    """#91: چاودێری پرۆکسی — هەر ٣٠ خولەک + 🔭 دۆزینەوەی مۆدێڵی نوێ هەر ٦ کاتژمێر"""
     time.sleep(120)
+    cyc = 0
     while True:
         try:
             _proxy_refresh_sources()
@@ -6958,6 +6981,25 @@ def proxy_keeper_daemon():
             print(f"[PROXY-KEEPER] {n} پرۆکسی زیندوو ئامادە", flush=True)
         except Exception as e:
             print(f"[PROXY-KEEPER] هەڵە: {str(e)[:60]}", flush=True)
+        cyc += 1
+        if cyc % 12 == 0:
+            def _sweep():
+                done = []
+                for nm in ("ca", "cb", "nv", "duck", "l7", "ac", "gk", "gz", "pi", "hb", "yl", "aka"):
+                    try:
+                        f = globals().get(f"sync_{nm}_models")
+                        if not f:
+                            continue
+                        try:
+                            f(force=True)
+                        except TypeError:
+                            f([])
+                        done.append(nm)
+                        time.sleep(3)
+                    except Exception:
+                        pass
+                print(f"[DISCOVERY] 🔭 گەڕان بۆ مۆدێڵی نوێ تەواو بوو: {', '.join(done)}", flush=True)
+            threading.Thread(target=_sweep, daemon=True).start()
         time.sleep(1800)
 
 
@@ -6970,6 +7012,112 @@ def self_heal_daemon():
         except Exception as e:
             print(f"[SELF-HEAL] هەڵە: {str(e)[:60]}", flush=True)
         time.sleep(600)
+
+
+
+# ═══════════ #91+ خارق: چینەکانی بەهێزکردنی کۆتایی ═══════════
+BOOT_T = time.time()
+_PERF = {"req": 0, "ok": 0, "fail": 0, "lat": []}
+_BREAKER = {}
+_ANS_CACHE = {}
+_USER_Q = {}
+_HB = {"t": 0.0}
+_DAILY = {"day": None}
+
+
+def _uq(text):
+    import hashlib
+    return hashlib.md5(str(text).encode("utf-8", "ignore")).hexdigest()
+
+
+_ask_orig = ask
+
+
+def ask(session, question):
+    """خارق: throttle + کاشی وەڵام + ئامار — لەسەر سەرەوەی ask ی ئەصلی"""
+    uid = session.get("user_id")
+    if uid and uid != ADMIN_TG:
+        now = time.time()
+        ql = [t for t in _USER_Q.get(uid, []) if now - t < 60]
+        if len(ql) >= 12:
+            return "⚠️ رسائل كثيرة جدًا — انتظر دقيقة ثم أعد الإرسال."
+        ql.append(now)
+        _USER_Q[uid] = ql
+    ck = (str(session.get("mkey") or session.get("server") or ""), _uq(question))
+    c = _ANS_CACHE.get(ck)
+    if c and time.time() - c[0] < 300:
+        return c[1]
+    t0 = time.time()
+    try:
+        a = _ask_orig(session, question)
+    except Exception:
+        _PERF["req"] += 1
+        _PERF["fail"] += 1
+        raise
+    dt = time.time() - t0
+    _PERF["req"] += 1
+    _PERF["ok"] += 1
+    _PERF["lat"].append(dt)
+    if len(_PERF["lat"]) > 200:
+        del _PERF["lat"][:100]
+    if a:
+        _ANS_CACHE[ck] = (time.time(), a)
+        if len(_ANS_CACHE) > 400:
+            for k2, _ in sorted(_ANS_CACHE.items(), key=lambda x: x[1][0])[:200]:
+                _ANS_CACHE.pop(k2, None)
+    return a
+
+
+def _xarq_watchdog():
+    """چاودێری خودی بۆت — ئەگەر polling ڕاوەستا ٥ خولەک → ڕیستارتی تەواو (fly یەکسان دەیگەڕێنێتەوە)"""
+    time.sleep(420)
+    armed = False
+    while True:
+        try:
+            t = _HB.get("t") or 0
+            if t:
+                armed = True
+            if armed and t and time.time() - t > 300:
+                print("[WATCHDOG] ⏰ polling وەستاویە — ڕیستارتی خودکار", flush=True)
+                os._exit(1)
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+def _daily_report():
+    """ڕاپۆرتی ڕۆژانە بۆ ئەدمین — هەر ٢٤ کاتژمێر"""
+    while True:
+        try:
+            day = time.strftime("%Y-%m-%d", time.gmtime())
+            if _DAILY["day"] != day:
+                _DAILY["day"] = day
+                up = int(time.time() - BOOT_T)
+                lat = _PERF["lat"]
+                avg = (sum(lat) / len(lat)) if lat else 0
+                st = _HEAL_STATE.get("status", {})
+                okn = sum(1 for v in st.values() if v.get("ok"))
+                po = {}
+                for nm, f in (("CA", "ca_accounts.json"), ("CB", "cb_accounts.json"), ("NV", "nv_accounts.json")):
+                    try:
+                        d = json.load(open(os.path.join(DATA_DIR, f)))
+                        po[nm] = len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
+                    except Exception:
+                        po[nm] = 0
+                try:
+                    nm = len(dedupe_servers(BRAIN["servers"]))
+                except Exception:
+                    nm = 0
+                msg = (f"🌅 <b>ڕاپۆرتی ڕۆژانەی سیستەمی خارق</b> — {day}\n"
+                       f"⏱ کاراک: {up // 3600} کاتژمێر\n"
+                       f"🧠 مۆدێڵ: {nm}\n"
+                       f"✅ سەرچاوەی زیندوو: {okn}/{len(st)}\n"
+                       f"💰 حەوز: CA {po['CA']} · CB {po['CB']} · NV {po['NV']}\n"
+                       f"⚡ داواکاری: {_PERF['req']} (تێکڕای وەڵام {avg:.1f} چرکە)")
+                tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
+        except Exception as e:
+            print(f"[DAILY] {str(e)[:60]}", flush=True)
+        time.sleep(3600)
 
 
 
@@ -6989,6 +7137,8 @@ def main():
     threading.Thread(target=_pool_daemon, daemon=True).start()
     threading.Thread(target=self_heal_daemon, daemon=True).start()
     threading.Thread(target=proxy_keeper_daemon, daemon=True).start()
+    threading.Thread(target=_xarq_watchdog, daemon=True).start()
+    threading.Thread(target=_daily_report, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
@@ -7019,6 +7169,7 @@ def main():
             if cycle % 10 == 1:
                 print(f"[LOOP] زیندووە — cycle {cycle}, offset={offset}", flush=True)
 
+            _HB["t"] = time.time()
             r = tg("getUpdates", offset=offset, timeout=8, allowed_updates=["message"])
             if not r.get("ok"):
                 print(f"[POLL] ok=false: {r.get('description', '?')}", flush=True)
