@@ -25,6 +25,10 @@ import requests
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
 
+# #88: /server (گۆڕینی مۆدێڵ) = تەنها ئەدمین — هەڵبژاردنی ئەدمین بۆ هەموو بەکارهێنەران جێبەجێ دەکرێت
+ADMIN_TG = 8381536661
+GLOBAL_MODEL = {"server": None, "mkey": None}
+
 # ════════════════════════════════════════════════════════════
 # ١) مێشکی یەکەم — aifreeforever.com
 # ════════════════════════════════════════════════════════════
@@ -5780,7 +5784,6 @@ WELCOME = (
     "أنا معك خطوة بخطوة في رحلة التعافي — اكتب أي شيء وسأسمعك\n\n"
     "🔹 <b>الأوامر:</b>\n"
     "/new — محادثة جديدة\n"
-    "/server — قائمة الموديلات (الأحدث دائما)\n"
     "/about — معلومات عن البوت"
 )
 
@@ -5791,7 +5794,6 @@ ABOUT = (
     "كل محادثاتكم محفوظة ومشفرة ولا يمكن لأحد الاطلاع عليها حتى مالك البوت نفسه لا يستطيع رؤيتها\n\n"
     "👤 صُنع بواسطة: <b>يوسف الكردي</b>\n"
     "❤️ لخدمة المدمنين على الإباحة وعادة الاستمناء\n\n"
-    "🤖 /server — قائمة الموديلات\n"
     "💬 /new — محادثة جديدة"
 )
 
@@ -6141,6 +6143,10 @@ def get_session(user_id):
             dflt = next((x for x in BRAIN["servers"] if x["id"] == default), None)
             s = {"server": default, "history": [], "mkey": (srv_key(dflt) if dflt else (norm_model(default) if default else None))}
             sessions[user_id] = s
+        # #88: هەڵبژاردنی ئەدمین بۆ هەموو بەکارهێنەران جێبەجێ دەکرێت
+        if user_id != ADMIN_TG and GLOBAL_MODEL.get("server"):
+            s["server"] = GLOBAL_MODEL["server"]
+            s["mkey"] = GLOBAL_MODEL.get("mkey") or s.get("mkey")
         return s
 
 
@@ -6543,6 +6549,9 @@ def handle_message(msg):
         return
 
     if text.startswith("/server"):
+        # #88: تەنها ئەدمین — بۆ بەکارهێنەری تر بێدەنگ پشتگوێ دەخرێت
+        if user_id != ADMIN_TG:
+            return
         reply(chat_id, "🔄 <b>يتم جلب أحدث قائمة…</b>")
         new = detect_brain()
         if not new["servers"]:
@@ -6576,9 +6585,11 @@ def handle_message(msg):
                 reply(chat_id, p)
         return
 
-    # هەڵبژاردنی سێرڤەر بە ژمارە
+    # هەڵبژاردنی سێرڤەر بە ژمارە — #88: تەنها ئەدمین + هەڵبژاردنی ئەدمین = بۆ هەموو بەکارهێنەران
     s = get_session(user_id)
     if text.isdigit():
+        if user_id != ADMIN_TG:
+            return  # بێدەنگ — بۆ بەکارهێنەری تر ژمارە وەک نامەی ئاسایی نادرێتەوە
         p = pending.get(user_id)
         if not p:
             reply(chat_id, "🤖 اكتب <code>/server</code> أولا لعرض قائمة الموديلات.")
@@ -6587,10 +6598,13 @@ def handle_message(msg):
             reply(chat_id, f"⚠️ اكتب رقما بين <code>1</code> و <code>{len(p)}</code>.")
             return
         srv = p[str(int(text))]
+        with _lock:
+            GLOBAL_MODEL["server"] = srv["id"]
+            GLOBAL_MODEL["mkey"] = srv["key"]
         s["server"] = srv["id"]
         s["mkey"] = srv["key"]
         s["history"].clear()
-        reply(chat_id, f"✅ تم التبديل إلى الموديل <code>{srv['id']}</code> بنجاح")
+        reply(chat_id, f"✅ تم التبديل إلى الموديل <code>{srv['id']}</code> — مطبق على جميع المستخدمين")
         return
 
     # پرسیاری ئاسایی
@@ -6644,7 +6658,6 @@ def setup_commands():
     cmds = [
         {"command": "start", "description": "بدء المحادثة مع البوت"},
         {"command": "new", "description": "محادثة جديدة"},
-        {"command": "server", "description": "قائمة الموديلات — الأحدث دائما"},
         {"command": "about", "description": "معلومات عن البوت"},
     ]
     # فەرمانەکان لە هەموو سکۆپەکاندا دانراو — تا فەرمانی کۆنی هیچ سیستەمێکی تر ون نەمێنێت
@@ -6661,7 +6674,11 @@ def setup_commands():
                 ok = False
                 print(f"[CMDS] {sc.get('type')} شکستی هێنا", flush=True)
         if ok:
-            print("✅ فەرمانەکانی مێنیو لە هەموو سکۆپەکان دانران", flush=True)
+            print("✅ فەرمانەکانی مێنیو لە هەموو سکۆپەکان دانران (بێ /server)", flush=True)
+            # #88: /server تەنها لە مێنیوی ئەدمین
+            admin_cmds = cmds + [{"command": "server", "description": "قائمة الموديلات — الأحدث دائما"}]
+            r = tg("setMyCommands", commands=admin_cmds, scope={"type": "chat", "chat_id": ADMIN_TG})
+            print(f"[CMDS] ئەدمین-سکۆپ: {'✅' if r.get('ok') else 'شکست'}", flush=True)
             return
         print(f"[CMDS] هەوڵ {attempt+1} — دووبارە…", flush=True)
         time.sleep(2)
