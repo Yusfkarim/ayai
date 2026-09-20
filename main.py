@@ -533,8 +533,8 @@ def em_servers():
              "tier": m.get("tier", "basic"), "kind": "em"} for m in live]
 
 
-def em_chat(messages, model_id, timeout=170):
-    """پرسیار بۆ easemate — node client (ساین + session + SSE)"""
+def em_chat(messages, model_id, timeout=170, depth=0):
+    """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی + ناسنامەی نوێ"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     try:
         p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
@@ -550,6 +550,23 @@ def em_chat(messages, model_id, timeout=170):
         raise EMError("easemate bad output")
     if obj.get("ok") and obj.get("answer"):
         return obj["answer"]
+    # #87: لیمیت (6101) → spawn بە پرۆکسی + ناسنامەی نوێ (تا ٣ هەوڵ)
+    code = str(obj.get("code") or "")
+    if (code == "6101" or "free tokens" in str(obj.get("error", "")).lower()) and depth < 3:
+        try:
+            px = _proxy_get(1)
+            if px:
+                env = dict(os.environ, EM_PROXY=px[0], EM_ROTATE=str(depth + 1), EM_FRESH_ID="1")
+                p2 = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
+                                    capture_output=True, timeout=timeout, env=env)
+                l2 = [l for l in (p2.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+                if l2:
+                    o2 = json.loads(l2[-1])
+                    if o2.get("ok") and o2.get("answer"):
+                        print(f"[EM] 6101 → پرۆکسی ✅ {px[0][:24]}", flush=True)
+                        return o2["answer"]
+        except Exception as e2:
+            print(f"[EM] rotate: {str(e2)[:60]}", flush=True)
     raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
 
 

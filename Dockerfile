@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
  && python3 -m playwright install --with-deps chromium
 
+COPY package.json ./
 COPY main.py .
 COPY easemate_client.mjs .
 COPY easemate_sign.wasm .
@@ -18,6 +19,7 @@ COPY anakin_objecthash.js .
 COPY model_sync.json .
 COPY deepai_client.mjs .
 COPY README.md .
+RUN npm install --omit=dev --no-audit --no-fund
 
 ENV PYTHONUNBUFFERED=1
 

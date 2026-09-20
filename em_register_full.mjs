@@ -187,7 +187,7 @@ function foldMessages(messages) {
 
 // ─── سەرەکی ───
 const chunks = [];
-function emit(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
+function __unused_emit(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 
 // مۆدی models: لیستی مۆدێلەکان دەگەڕێنێتەوە
 async function listModels() {
@@ -206,166 +206,100 @@ async function listModels() {
   emit({ ok: true, models: out });
 }
 
-async function main() {
-  if (process.argv[2] === 'models') return listModels();
-  let input = '';
-  for await (const d of process.stdin) input += d;
-  const req = JSON.parse(input || '{}');
-  const modelId = Number(req.model_id) || 6;
-  const messages = req.messages || [{ role: 'user', content: 'hello' }];
-  const hasSys = (messages || []).some((m) => m.role === 'system');
-  let op = foldMessages(messages);
 
-  await getIdentity();
+export { getSigns, post, getIdentity, VISITOR_ID };
 
-  const sr = await post('/api2/task/create_pure_session', { model_id: modelId });
-  const sj = await sr.json();
-  if (sj?.code !== 200 || !sj?.data?.session_id) {
-    emit({ ok: false, code: sj?.code, error: sj?.message || 'create_pure_session failed' });
-    process.exit(0);
-  }
-  const sid = sj.data.session_id;
-
-  const body = { model_id: modelId, session_id: sid, operation_info: { operation: op, id: 10000 } };
-  const { sign, timestamp } = await getSigns(body);
-  const h = baseHeaders();
-  h['sign'] = sign; h['timestamp'] = timestamp;
-  h['identity-id'] = IID;
-  h['Accept'] = 'text/event-stream';
-  h['Cache-Control'] = 'no-cache';
-
-  const ctrl = new AbortController();
-  const kill = setTimeout(() => ctrl.abort(), 150000);
-  let full = '';
-  let lastErr = null;
-  try {
-    const res = await fetch(API + '/api2/stream/exec_operation', {
-      method: 'POST', headers: h, body: JSON.stringify(body), signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      emit({ ok: false, error: 'HTTP ' + res.status });
-      return;
-    }
-    // ئەگەر وەڵام SSE نەبوو — JSON ـە (6101 = توکن تەواو → ناسنامەی نوێ + ٣ هەوڵ)
-    const ctype = res.headers.get('content-type') || '';
-    if (!ctype.includes('event-stream')) {
-      const txt = await res.text();
-      let code = 0, msg = '';
-      try { const j = JSON.parse(txt); code = j?.code || 0; msg = j?.message || ''; } catch { msg = txt.slice(0, 100); }
-      if ((code === 6101 || /free tokens|upgrade/i.test(msg))) {
-        const tries = Number(process.env.EM_ROTATE || '0');
-        if (tries < 3) {
-          const { spawn } = await import('node:child_process');
-          const child = spawn(process.execPath, [new URL(import.meta.url).pathname],
-                              { env: { ...process.env, EM_ROTATE: String(tries + 1), EM_FRESH_ID: '1' },
-                                stdio: ['pipe', 'pipe', 'pipe'] });
-          let out = '';
-          child.stdout.on('data', (d) => { out += d; });
-          child.stderr.on('data', () => {});
-          child.on('close', () => {
-            try {
-              const lines = out.trim().split('\n').filter((x) => x.trim());
-              const obj = JSON.parse(lines[lines.length - 1]);
-              obj.rotated = tries + 1;
-              emit(obj);
-            } catch (e2) { emit({ ok: false, code: 6101, error: 'rotate-spawn bad output: ' + out.slice(0, 90) }); }
-          });
-          child.stdin.write(JSON.stringify(req));
-          child.stdin.end();
-          return;
-        }
-        emit({ ok: false, code: 6101, error: 'token-exhausted after ' + tries + ' rotations' });
-        return;
-      }
-      emit({ ok: false, code: code, error: msg || 'non-SSE response' });
-      return;
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    const dbg = process.env.EM_DEBUG === '1';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let idx;
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
-        if (dbg) console.error('[RAW]', line.slice(0, 300));
-        if (!line.startsWith('data:')) continue;
-        const pl = line.slice(5).trim();
-        if (!pl || pl === '[DONE]') continue;
-        try {
-          const j = JSON.parse(pl);
-          if (typeof j.data === 'string' && (j.code === 200 || j.code === undefined || j.code === 10000)) {
-            const inner = JSON.parse(j.data);
-            if (inner.answer) { full += inner.answer; emit({ t: inner.answer }); }
-            if (inner.message && !inner.answer) lastErr = { code: j.code, error: inner.message };
-          } else if (j?.code && j.code !== 200) {
-            lastErr = { code: j.code, error: j.message || 'stream code ' + j.code };
-          }
-        } catch {}
-      }
-    }
-  } catch (e) {
-    lastErr = lastErr || { error: String(e && e.message || e) };
-  } finally {
-    clearTimeout(kill);
-  }
-
-  if (full && !(hasSys && LEAK_RE.test(full))) emit({ ok: true, answer: full });
-  else if (full && hasSys && LEAK_RE.test(full)) {
-    // هەوڵی دووەم — بەهێزترین
-    const sys = (messages || []).filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
-    const rest = (messages || []).filter((m) => m.role !== 'system').slice(-16);
-    const mod = [{ role: 'system', content: ULTRA_PREFIX + sys + PERSONA_LOCK }].concat(
-      rest.map((m, i) => {
-        const isLast = i === rest.length - 1 && m.role !== 'assistant';
-        return { role: m.role, content: isLast ? (m.content + USER_REMINDER) : m.content };
-      })
-    );
-    // دووبارە — سێشن و ستریم
-    try {
-      const sid2 = (await (await post('/api2/task/create_pure_session', { model_id: modelId })).json())?.data?.session_id;
-      if (!sid2) throw new Error('no session 2');
-      const body2 = { model_id: modelId, session_id: sid2, operation_info: { operation: foldMessages(mod), id: 10000 } };
-      const { sign: s2, timestamp: t2 } = await getSigns(body2);
-      const h2 = baseHeaders();
-      h2['sign'] = s2; h2['timestamp'] = t2; h2['identity-id'] = IID;
-      h2['Accept'] = 'text/event-stream'; h2['Cache-Control'] = 'no-cache';
-      const res2 = await fetch(API + '/api2/stream/exec_operation', { method: 'POST', headers: h2, body: JSON.stringify(body2) });
-      let full2 = '';
-      if (res2.ok && (res2.headers.get('content-type') || '').includes('event-stream')) {
-        const reader2 = res2.body.getReader();
-        const dec2 = new TextDecoder();
-        let buf2 = '';
-        while (true) {
-          const { done, value } = await reader2.read();
-          if (done) break;
-          buf2 += dec2.decode(value, { stream: true });
-          let ix;
-          while ((ix = buf2.indexOf('\n')) >= 0) {
-            const ln = buf2.slice(0, ix).trim(); buf2 = buf2.slice(ix + 1);
-            if (!ln.startsWith('data:')) continue;
-            const pl = ln.slice(5).trim();
-            if (!pl || pl === '[DONE]') continue;
-            try {
-              const j2 = JSON.parse(pl);
-              if (typeof j2.data === 'string' && (j2.code === 200 || j2.code === undefined || j2.code === 10000)) {
-                const inner2 = JSON.parse(j2.data);
-                if (inner2.answer) full2 += inner2.answer;
-              }
-            } catch {}
-          }
-        }
-      }
-      if (full2 && !LEAK_RE.test(full2)) emit({ ok: true, answer: full2 });
-      else emit({ ok: false, code: 'LEAK', error: 'persona leak — model keeps naming itself' });
-    } catch (e2) {
-      emit({ ok: false, code: 'LEAK', error: 'persona leak — ' + String(e2 && e2.message || e2).slice(0, 100) });
-    }
-  }
-  else emit({ ok: false, ...(lastErr || { error: 'empty answer' }) });
+// ===== account/mail/register =====
+import crypto from 'node:crypto';
+const sha1 = x => crypto.createHash('sha1').update(x).digest('hex');
+function acctAuth() {
+  const A = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const nonce = Array.from(crypto.randomBytes(20), n => A[n % A.length]).join('');
+  const timestamp = Math.floor(Date.now() / 1000);
+  const sign = sha1('key=e84yr70o0a5n08f5nonce=' + nonce + 'timestamp=' + timestamp + 'web_app_key=account_web');
+  return { sign, nonce, timestamp, web_app_key: 'account_web' };
 }
-
-main().catch((e) => { try { emit({ ok: false, error: String(e && e.message || e) }); } catch {} process.exit(0); });
+function aesEncrypt(plain) {
+  const key = Buffer.from('08C%?0-aHhd!9Gvk', 'utf8'), iv = Buffer.from('sgTyS&geTxg6Wkrv', 'utf8');
+  const c = crypto.createCipheriv('aes-128-cbc', key, iv);
+  return Buffer.concat([c.update(plain, 'utf8'), c.final()]).toString('hex').toUpperCase();
+}
+async function acctPost(path, body, extraHeaders = {}) {
+  const { sign, timestamp } = await getSigns(body);
+  const headers = {
+    'client-type': 'web', 'client-name': 'chatpdf', 'product-code': '888',
+    'device-identifier': VISITOR_ID, 'device-uuid': VISITOR_ID, 'device-type': 'web', 'device-platform': '',
+    'Lang': 'en-US', 'Language': 'en', 'Site': 'www.easemate.ai',
+    'Origin': 'https://www.easemate.ai', 'Referer': 'https://www.easemate.ai/',
+    'User-Agent': UA, 'content-type': 'application/json;charset=UTF-8', sign, timestamp,
+    ...extraHeaders,
+  };
+  const r = await fetch('https://www.easemate.ai' + path, { method: 'POST', headers, body: JSON.stringify({ ...body, ...acctAuth() }) });
+  return r.json();
+}
+async function jreq(url, method = 'GET', data = null, headers = {}, tries = 4) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const h = { Accept: 'application/json', 'User-Agent': UA, ...headers };
+      const body = data ? JSON.stringify(data) : null;
+      if (body) h['Content-Type'] = 'application/json';
+      const r = await fetch(url, { method, headers: h, body });
+      return await r.json();
+    } catch (e) { await new Promise(res => setTimeout(res, 2500)); }
+  }
+  return null;
+}
+async function createMailbox() {
+  const d = await jreq('https://api.mail.tm/domains?page=1');
+  const dom = Array.isArray(d) ? d[0].domain : d['hydra:member'][0].domain;
+  const local = 'kome' + crypto.randomBytes(5).toString('hex');
+  const addr = local + '@' + dom, pw = 'Xk' + local + '!A9';
+  await jreq('https://api.mail.tm/accounts', 'POST', { address: addr, password: pw });
+  const tok = await jreq('https://api.mail.tm/token', 'POST', { address: addr, password: pw });
+  return { addr, pw, mtok: tok?.token };
+}
+async function pollCode(mtok, tries = 12) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise(r => setTimeout(r, 7000));
+    const j = await jreq('https://api.mail.tm/messages?page=1', 'GET', null, { Authorization: 'Bearer ' + mtok });
+    const lst = Array.isArray(j) ? j : (j['hydra:member'] || []);
+    if (lst.length) {
+      const m = await jreq('https://api.mail.tm/messages/' + lst[0].id, 'GET', null, { Authorization: 'Bearer ' + mtok });
+      let text = m.text || (Array.isArray(m.html) ? m.html[0] : (m.html || ''));
+      text = text.replace(/<[^>]+>/g, ' ');
+      const mt = text.match(/code is[:\s<>/b]*(\d{4})/i) || text.match(/\b(\d{4})\b/);
+      if (mt) return mt[1];
+    }
+  }
+  return null;
+}
+export async function registerAccount(password = 'Xk7zQw!92mRv') {
+  const { addr, pw, mtok } = await createMailbox();
+  const send = await acctPost('/lh-account-api/auth/send-email-code', { email: addr, type: 'user_register' });
+  if (send.code !== 0) throw new Error('send-code: ' + JSON.stringify(send));
+  const code = await pollCode(mtok);
+  if (!code) throw new Error('no code from mail');
+  const chk = await acctPost('/lh-account-api/auth/check-email-code', { email: addr, email_code: code, type: 'user_register' });
+  if (chk.code !== 0) throw new Error('check-code: ' + JSON.stringify(chk));
+  const payload = JSON.stringify({ email: addr, email_code: code, password, register_product_name: 'EaseMate', register_url: 'https://www.easemate.ai', register_from: 'web', register_country: 'US' });
+  const reg = await acctPost('/lh-account-api/auth/register', {}, { 'O-E': aesEncrypt(payload) });
+  if (reg.code !== 0) throw new Error('register: ' + JSON.stringify(reg));
+  const token = reg?.data?.token;
+  const iid = await getIdentity();
+  const bodyP = {};
+  const sg2 = await getSigns(bodyP);
+  const permr = await fetch('https://api.easemate.ai/api2/task/query_permission', { method: 'POST', headers: {
+    'client-type': 'web', 'client-name': 'chatpdf', 'product-code': '888',
+    'device-identifier': VISITOR_ID, 'device-uuid': VISITOR_ID, 'device-type': 'web', 'device-platform': '',
+    'identity-id': iid, Authorization: 'Bearer ' + token,
+    Lang: 'en-US', Language: 'en', Site: 'www.easemate.ai', Origin: 'https://www.easemate.ai', Referer: 'https://www.easemate.ai/',
+    'User-Agent': UA, 'content-type': 'application/json;charset=UTF-8', sign: sg2.sign, timestamp: sg2.timestamp,
+  }, body: JSON.stringify(bodyP) });
+  const perm = await permr.json();
+  return { email: addr, password, token, identity_id: iid, token_total: perm?.data?.token_total, vip: perm?.data?.vip };
+}
+if (process.argv[1] && process.argv[1].endsWith('em_register_full.mjs') && process.argv[2] !== '--lib') {
+  registerAccount(process.argv[2])
+    .then(out => { console.log(JSON.stringify({ ok: true, ...out })); })
+    .catch(e => { console.log(JSON.stringify({ ok: false, error: String(e && e.message || e).slice(0, 300) })); process.exit(1); });
+}
