@@ -3774,7 +3774,7 @@ def _ca_signup_new():
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 120 or len(CA_ST.get("accounts") or []) >= 70:
+    if sg.get("n", 0) >= 80 or len(CA_ST.get("accounts") or []) >= 70:  # #91Z: 80 سنووری ڕۆژانە
         return None
     n = CA_ST["next_num"]
     # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
@@ -7387,8 +7387,9 @@ def self_heal_once():
     if MS.get("ak_ok"):
         probes["ak"] = lambda: ak_chat(list(MS["ak_ok"].keys())[0], [{"role": "user", "content": "hi"}], timeout=45)
     # حەوزەکان — گرنگترین
-    # #91Z: probe — یەکەم مۆدێڵی بەردەست لە ca_ok (نەک hard-coded کە لیمێت بووبێت)
-    _ca_m = next(iter(MS["ca_ok"].keys()), "gpt-5.4-nano") if MS.get("ca_ok") else "gpt-5.4-nano"
+    # #91Z: probe — مۆدێڵێکی کەم-داواکاری (nano لەوانەیە هەموو ئەکاونتەکانی limit بێت)
+    _ca_m = "gemini-3.5-flash" if MS.get("ca_ok") and "gemini-3.5-flash" in MS["ca_ok"] else (
+        next((k for k in MS.get("ca_ok", {}) if "gemini" in k), "gpt-5.4-nano"))
     probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], _ca_m, timeout=50)
     _cb_m = next(iter(MS["cb_ok"].keys()), "4o-mini") if MS.get("cb_ok") else "4o-mini"
     probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], _cb_m, timeout=50)
