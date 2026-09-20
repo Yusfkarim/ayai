@@ -5566,6 +5566,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         for alt in MODEL_SOURCES.get(srv_key(srv), []):
             if alt["id"] != srv["id"] and alt not in order:
                 order.append(alt)
+        # #87: em فەیبل-5 → ca-claude-fable (فەیبل 5.1 — هەمان خێزان) پێش هەر سەرچاوەیەکی تر
+        if srv.get("kind") == "em" and "fable" in str(srv.get("id", "")).lower():
+            fab = next((x for x in API_BRAIN["servers"] if x.get("id") == "ca-claude-fable"), None)
+            if fab and fab not in order:
+                order.append(fab)
         for kind in ("em", "aff", "cbc", "rwd", "l7", "g4f", "pol"):
             if srv.get("kind") != kind:
                 cand = pick_in_kind(API_BRAIN["servers"], kind, srv["id"])
