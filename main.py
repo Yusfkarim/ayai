@@ -1023,7 +1023,7 @@ def fla_chat(messages, timeout=110):
     import uuid as _uuid
     s = requests.Session()
     s.headers.update({
-        "User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+        "User-Agent": _pick_ua(ACT_UAS),
         "Origin": "https://flatai.org",
         "Referer": "https://flatai.org/free-ai-chatbot-no-registration/",
     })
@@ -1193,7 +1193,7 @@ def z02_chat(messages, model_id="gemini-2.5-flash-lite", timeout=110):
     except Exception as e:
         raise EMError(f"z02: {str(e)[:60]}")
     h = {
-        "User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+        "User-Agent": _pick_ua(ACT_UAS),
         "Origin": "https://app.zerotwo.ai", "Referer": "https://app.zerotwo.ai/",
         "X-ZeroTwo-Platform": "web", "Content-Type": "application/json",
     }
@@ -1279,7 +1279,7 @@ def qb_chat(messages, timeout=110):
             "origin": {"name": "ai-chat.chat", "url": "https://quillbot.com"}}
     try:
         r = requests.post(QB_URL + str(_uuid.uuid4()), json=body, timeout=(15, timeout),
-                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                          headers={"User-Agent": _pick_ua(ACT_UAS),
                                    "Origin": "https://quillbot.com",
                                    "Referer": "https://quillbot.com/ai-chat",
                                    "Accept": "text/event-stream",
@@ -1896,7 +1896,7 @@ def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
     body = {"model": model_id, "messages": messages, "max_tokens": 1400}
     try:
         r = requests.post(L7_BASE + "/chat/completions", json=body,
-                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                          headers={"User-Agent": _pick_ua(ACT_UAS),
                                    "Content-Type": "application/json",
                                    "Referer": "https://llm7.io"},
                           timeout=(15, timeout))
@@ -1927,7 +1927,7 @@ _G4F_BAKE_LOCK = threading.Lock()
 
 
 def _g4f_headers():
-    return {"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+    return {"User-Agent": _pick_ua(ACT_UAS),
             "Content-Type": "application/json",
             "Referer": "https://g4f.dev/"}
 
@@ -2113,7 +2113,7 @@ def ng_chat(messages, timeout=110):
                           json={"message": user_txt, "language": "auto", "model": "gemini-3.1-flash-lite",
                                 "tone": "default", "length": "moderate",
                                 "conversation_id": str(__import__("uuid").uuid4())},
-                          headers={"User-Agent": ACT_UAS[random.randrange(len(ACT_UAS))],
+                          headers={"User-Agent": _pick_ua(ACT_UAS),
                                    "Origin": "https://notegpt.io",
                                    "Referer": "https://notegpt.io/ai-answer-generator"},
                           timeout=(15, timeout), stream=True)
@@ -3512,7 +3512,7 @@ def _cb_signup_new():
         email = f"komex{n + off}@duidir.com"
         res = _fb_signup(CB_KEY, email, email, CB_UA)
         if res:
-            CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email}]
+            CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
             CB_ST["idx"] = len(CB_ST["accounts"]) - 1
             CB_ST["next_num"] = n + off + 1
             sg["n"] = sg.get("n", 0) + 1
@@ -3830,7 +3830,7 @@ def _ca_signup_new():
             email = f"{pref}{n + off}@duidir.com"
             res = _fb_signup(CA_KEY, email, email, CA_UA)
             if res:
-                CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
+                CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
                 CA_ST["idx"] = len(CA_ST["accounts"]) - 1
                 CA_ST["next_num"] = n + off + 1
                 sg["n"] = sg.get("n", 0) + 1
@@ -4670,7 +4670,7 @@ def _ac_signup_new():
         email = f"komex{n}@duidir.com"
         res = _ac_firebase("signUp", email, email)
         if res:
-            acc = {"email": email, "password": email, "boot": True}
+            acc = {"email": email, "password": email, "boot": True, "ua": _rand_ua()}
             try:
                 _ac_bootstrap(res[0], res[1], email)
             except Exception as e:
@@ -7812,7 +7812,9 @@ def _cracked_req(self, method, url, **kw):
             _CRACK["hot"][dom] = int(_CRACK["hot"].get(dom, 0)) + 1
             kw2 = dict(kw)
             h = dict(kw2.get("headers") or {})
-            h["User-Agent"] = _rand_ua()  # #91S: هەمەڕەنگی تەواو — ٧ ناسنامە
+            # #91ID: ئەگەر سێشنەکە ناسنامەی خۆی هەیە → پاراستنی (cookie+UA یەک دەمێنن)
+            _sua = (getattr(self, "headers", None) or {}).get("User-Agent") if hasattr(self, "headers") else None
+            h["User-Agent"] = _sua or _rand_ua()  # #91S+#91ID
             kw2["headers"] = h
             if _CRACK["hot"].get(dom, 0) >= 2 and not kw2.get("proxies"):
                 try:
@@ -8123,6 +8125,26 @@ _UA_POOL = [
 def _rand_ua():
     """#91S: ناسنامەی هەڕەمەکی — هەر داواکارییەکی دەرەکی جیاواز"""
     return random.choice(_UA_POOL)
+
+
+_UA_STICK = {}
+
+
+def _pick_ua(pool, win=600):
+    """#91ID: IDENTITY-LOCK — هەمان UA بۆ ١٠ خولەک (وەک وێبگەڕی ڕاستەقینە).
+       پێشتر: هەر داواکارییەک UA ی نوێ = same-session identity flip = دەستنیشانکردن!"""
+    try:
+        k = id(pool)
+        now = time.time()
+        v = _UA_STICK.get(k)
+        if not v or now - v[0] > win:
+            v = (now, random.choice(pool))
+            _UA_STICK[k] = v
+            if len(_UA_STICK) > 50:
+                _UA_STICK.pop(next(iter(_UA_STICK)), None)
+        return v[1]
+    except Exception:
+        return random.choice(pool) if pool else "Mozilla/5.0"
 
 
 def _spider_scan():
@@ -8453,7 +8475,11 @@ def main():
             except Exception:
                 pass
 
-    offset = 0
+    # #91A11: offset پاشەکەوت دەکرێت — دوای restart نامەی کۆن دووبارە نایەتەوە
+    try:
+        offset = int(_json_load_safe(os.path.join(DATA_DIR, "tg_offset.json"), 0) or 0)
+    except Exception:
+        offset = 0
     cycle = 0
     while True:
         try:
@@ -8469,6 +8495,10 @@ def main():
                 continue
             for u in r.get("result", []):
                 offset = u["update_id"] + 1
+                try:
+                    _json_save(os.path.join(DATA_DIR, "tg_offset.json"), offset)
+                except Exception:
+                    pass
                 m = u.get("message")
                 if m and m.get("text"):
                     threading.Thread(target=_safe_handle, args=(m,), daemon=True).start()
