@@ -6992,6 +6992,13 @@ def handle_message(msg):
         if s["server"] not in [x["id"] for x in servers]:
             s["server"] = servers[0]["id"]
         # مۆدێلە دووبارەکان یەک دەخرێن — هەمان مۆدێڵ لە چەند سەرچاوە = یەک دەنگ
+        # #91M: openai/gpt-5.5 هەمیشە یەکەم — داواکاری ئەدمین
+        try:
+            _pi = next(i for i, x in enumerate(servers) if x.get("id") == "openai/gpt-5.5")
+            if _pi > 0:
+                servers = [servers.pop(_pi)] + servers
+        except StopIteration:
+            pass
         uniq = dedupe_servers(servers)
         with _lock:
             pending[user_id] = {str(i): {"id": x["id"], "key": srv_key(x)} for i, x in enumerate(uniq, 1)}
