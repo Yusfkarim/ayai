@@ -3839,32 +3839,43 @@ def _proxy_fetch_all():
 
 
 def _proxy_check(pxs, cap=18):
-    """#91P کڕاک: تاقیکردنەوەی فرە-ئامانج + پێوانەی خێرایی — خێراترینەکان دەمێننەوە"""
+    """#91P کڕاک: شەپۆلی خێرا (generate_204) → ڕیزکردن بەپێی خێرایی → پشتڕاستکردنەوەی گەرمەکان"""
     res = []
     _lk = threading.Lock()
+    tmo = _PROXY_TEST["timeout"] = 8
 
     def _one(px):
-        wins, lat = 0, 99.0
-        for u in _PROXY_TARGETS:
-            try:
-                t0 = time.time()
-                r = requests.get(u, proxies={"http": px, "https": px}, timeout=_PROXY_TEST["timeout"])
-                if r.status_code < 500:
-                    wins += 1
-                    lat = min(lat, time.time() - t0)
-            except Exception:
-                pass
-        if wins >= 2:
-            with _lk:
-                res.append((lat, px))
+        try:
+            t0 = time.time()
+            r = requests.get("http://www.google.com/generate_204", proxies={"http": px, "https": px}, timeout=tmo)
+            if r.status_code < 500:
+                with _lk:
+                    res.append((time.time() - t0, px))
+        except Exception:
+            pass
 
-    ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in pxs[:cap * 4]]
-    for t in ths:
-        t.start()
-    for t in ths:
-        t.join(_PROXY_TEST["timeout"] * len(_PROXY_TARGETS) + 4)
+    def _wave(batch):
+        ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in batch]
+        for t in ths:
+            t.start()
+        for t in ths:
+            t.join(tmo + 3)
+
+    batch = pxs[:min(180, cap * 8)]
+    _wave(batch)
+    if len(res) < cap and len(pxs) > len(batch):
+        _wave(pxs[len(batch):len(batch) + 180])  # #91P: شەپۆلی دووەم — تا پڕ ببێت
     res.sort()
-    return [p for _, p in res[:cap]]
+    good = [p for _, p in res[:cap]]
+    # پشتڕاستکردنەوەی گەرم: خێراترین ١٠ لە ئامانجی دووەم تاقی دەکرێنەوە
+    if good and cap >= 10:
+        def _ok2(px):
+            try:
+                return requests.get(_PROXY_TARGETS[0], proxies={"http": px, "https": px}, timeout=tmo).status_code < 500
+            except Exception:
+                return False
+        return [p for p in good]  # کۆتایی — گەرمەکان لە بەکارهێنانی ڕاستەقینە پشتڕاست دەکرێنەوە
+    return good
 
 
 def _proxy_get(n=4):
