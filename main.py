@@ -4200,14 +4200,21 @@ def _pool_reap():
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     now = time.time()
-    # #91Z-mig: فۆرماتی کۆنی True → بەرواری ئەمڕۆ — سبەی بەیانی خۆکارانە ئازاد دەبن
+    # #91Z-mig2: ستاری True کۆن = لیمێتی ڕۆژی پێشوو → سڕینەوە (ئازاد) — نەک بە ئەمڕۆ تۆمار
     try:
-        for _e, _v in (CA_ST.get("limits") or {}).items():
-            if isinstance(_v, dict) and _v.get("*") is True:
-                _v["*"] = _lim_today()
-        for _e, _v in (AC_ST.get("limits") or {}).items():
-            if isinstance(_v, dict) and _v.get("*") is True:
-                _v["*"] = _lim_today()
+        _freed = 0
+        for st_lim, sv in ((CA_ST.get("limits"), _ca_save_acc), (AC_ST.get("limits"), _ac_save_acc)):
+            for _e, _v in (st_lim or {}).items():
+                if isinstance(_v, dict) and _v.get("*") is True:
+                    _v.pop("*", None)
+                    _freed += 1
+            if _freed:
+                try:
+                    sv()
+                except Exception:
+                    pass
+        if _freed:
+            print(f"[MIGRATE] ✨ {_freed} ستاری کۆن سڕانەوە — ئەکاونتەکان ئازاد بوون", flush=True)
     except Exception:
         pass
     # CA — ئەوانەی '*' یان هەیە → کۆتایی لیست (لە سەرەتاوە کار ناکەن) — ناسێنراوەکان یەکسان کار دەکەن
