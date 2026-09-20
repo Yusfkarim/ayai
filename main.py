@@ -6548,7 +6548,10 @@ def handle_message(msg):
         try:
             def _n(f):
                 try:
-                    return len(json.load(open(os.path.join(DATA_DIR, f))))
+                    d = json.load(open(os.path.join(DATA_DIR, f)))
+                    if isinstance(d, dict):
+                        return len(d.get("accounts", []))
+                    return len(d)
                 except Exception:
                     return 0
             ca, cb, nv = _n("ca_accounts.json"), _n("cb_accounts.json"), _n("nv_accounts.json")
