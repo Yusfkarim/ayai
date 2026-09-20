@@ -4141,41 +4141,59 @@ def _fb_signup(key, email, pw, ua):
 
 
 def _pool_reap():
-    """سڕینەوەی ئەکاونتە تەواوبووەکان — یەکسان لادەبرێن (بەپێی داواکاری)"""
+    """#91P2: ئەکاونتی limit — سڕینەوە نییە! پاڵنان بۆ کۆتایی (limit ی ڕۆژانە شەوانە دەگەڕێتەوە
+       — سڕینەوە = بەفیڕۆدانی ئەکاونتی تەندرووست + signup ی بێ‌پێویست)"""
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     now = time.time()
-    # CA — لیمیت '*'
+    # CA — ئەوانەی '*' یان هەیە → کۆتایی لیست (لە سەرەتاوە کار ناکەن) — ناسێنراوەکان یەکسان کار دەکەن
     lim = CA_ST.get("limits") or {}
     accs = CA_ST.get("accounts") or []
-    keep = [a for a in accs if not (lim.get(a.get("email")) or {}).get("*")]
-    if len(keep) != len(accs):
-        CA_ST["accounts"] = keep
-        CA_ST["tok"] = None
-        CA_ST["idx"] = CA_ST["idx"] % max(len(keep), 1)
+    live = [a for a in accs if not (lim.get(a.get("email")) or {}).get("*")]
+    done = [a for a in accs if (lim.get(a.get("email")) or {}).get("*")]
+    if done and live:
+        CA_ST["accounts"] = live + done
+        CA_ST["idx"] = CA_ST["idx"] % max(len(live), 1)
         _ca_save_acc()
-        print(f"[POOL-CA] {len(accs) - len(keep)} ئەکاونتی تەواوبوو سڕایەوە → {len(keep)} ماوە", flush=True)
-    # CB — ئەمڕۆ تەواوبوو (epoch ی ئەمڕۆ)
+        print(f"[POOL-CA] {len(done)} limit-کراو پاڵدران کۆتایی → سەرەتا {len(live)} ی تەندرووست", flush=True)
+    elif done and not live:
+        # هەموویان limit — ئەوانی کۆنترین limit بدۆزە و بسڕەوە (بۆ ئەوانەی ٢ ڕۆژ پێش ئێستا بوون)
+        old_lim = [e for e, v in lim.items() if v.get("*")]
+        if len(old_lim) > 100:
+            keep_emails = set(old_lim[-100:])
+            keep = [a for a in accs if a.get("email") in keep_emails]
+            CA_ST["accounts"] = keep
+            CA_ST["tok"] = None
+            _ca_save_acc()
+            print(f"[POOL-CA] پاککردنەوەی گەورە: {len(accs)} → {len(keep)}", flush=True)
+    # CB — ئەمڕۆ تەواوبوو → پاڵنان بۆ کۆتایی (سبەی دەگەڕێنەوە)
     ex = CB_ST.get("exhausted") or {}
     accs = CB_ST.get("accounts") or []
-    keep = [a for a in accs if not (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
-    if len(keep) != len(accs):
-        CB_ST["accounts"] = keep
-        CB_ST["tok"] = None
-        CB_ST["idx"] = CB_ST["idx"] % max(len(keep), 1)
+    live = [a for a in accs if not (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
+    done = [a for a in accs if (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
+    if done and live:
+        CB_ST["accounts"] = live + done
+        CB_ST["idx"] = CB_ST["idx"] % max(len(live), 1)
         _cb_save_acc()
-        print(f"[POOL-CB] {len(accs) - len(keep)} تەواوبوو سڕایەوە → {len(keep)} ماوە", flush=True)
-    # NV — ٣ جار کۆڵ لە یەک ئەکاونت → سڕینەوە
+        print(f"[POOL-CB] {len(done)} تەواوبوو پاڵدران کۆتایی → {len(live)} ی تەندرووست سەرەتا", flush=True)
+    # NV — ٣ جار کۆڵ → پاڵنان بۆ کۆتایی (نەک سڕینەوە — ئەوان لەوانەیە بگەڕێنەوە)
     exc = NV_ST.get("exc") or {}
     accs = NV_ST.get("accounts") or []
-    keep = [a for a in accs if exc.get(a.get("email"), 0) < 3]
-    if len(keep) != len(accs):
-        NV_ST["accounts"] = keep
-        NV_ST["tok"] = None
+    live = [a for a in accs if exc.get(a.get("email"), 0) < 3]
+    done = [a for a in accs if exc.get(a.get("email"), 0) >= 3]
+    if done and live:
+        NV_ST["accounts"] = live + done
         NV_ST["uid"] = None
-        NV_ST["idx"] = NV_ST["idx"] % max(len(keep), 1)
+        NV_ST["idx"] = NV_ST["idx"] % max(len(live), 1)
         _nv_save_acc()
-        print(f"[POOL-NV] {len(accs) - len(keep)} کۆڵبوو سڕایەوە → {len(keep)} ماوە", flush=True)
+        print(f"[POOL-NV] {len(done)} کۆڵبوو پاڵدران کۆتایی → {len(live)} ی تەندرووست سەرەتا", flush=True)
+    elif done and not live:
+        keep = [a for a in done if exc.get(a.get("email"), 0) < 9]
+        NV_ST["accounts"] = keep
+        NV_ST["uid"] = None
+        NV_ST["idx"] = 0
+        _nv_save_acc()
+        print(f"[POOL-NV] پاککردنەوە: {len(accs)} → {len(keep)}", flush=True)
 
 
 def _pool_daemon():
@@ -6479,8 +6497,9 @@ def _limit_recharge(kind, err):
     _LIMIT_RECHARGE_T[kind] = now
     try:
         if kind in ("ca", "cb", "nv"):
+            # #91P2: پاڵنان بە جیاتی سڕینەوە — ئەکاونت لە دەست ناچێت، تەنها دەگۆڕدرێت
             _pool_reap()
-            print(f"[LIMIT-RECHARGE] {kind}: حەوز پاککرایەوە — ئەکاونتی نوێ جێگۆڕین", flush=True)
+            print(f"[LIMIT-RECHARGE] {kind}: ئەکاونتی limit پاڵدرا کۆتایی — ئەکاونتی تەندرووست کار دەکات", flush=True)
         elif kind == "g4f":
             threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
             print(f"[LIMIT-RECHARGE] g4f: دروستکردنی کرێدی نوێ...", flush=True)
