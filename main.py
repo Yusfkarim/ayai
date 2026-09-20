@@ -5809,12 +5809,15 @@ def rebuild_aliases(servers):
 
 
 def dedupe_servers(servers):
-    """یەکێک بۆ هەر مۆدێڵ — یەکەم سەرچاوە سەرەکییە؛ دووەکییەکان لە model_sources دەمێننەوە"""
+    """یەکێک بۆ هەر مۆدێڵ — یەکەم سەرچاوە سەرەکییە؛ دووەکییەکان لە model_sources دەمێننەوە
+       ⚠️ #80: nv/cb (سەرچاوە نەیتیڤەکان) هەمیشە بینراون — dedupe یان ناکوژێنێتەوە"""
     rebuild_aliases(servers)
     seen = set()
     uniq = []
     for x in servers:
         k = srv_key(x)
+        if x.get("kind") in ("nv", "cb"):
+            k = f"{k}|{x.get('id')}"
         if k in seen:
             continue
         seen.add(k)
