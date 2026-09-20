@@ -25,6 +25,39 @@ import requests
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
 
+def _json_save(path, obj):
+    """#91A1: نووسینی ATOMIC — پێشتر .tmp نووسین دەکرێت، پاشان os.replace.
+       ئەگەر کراش لە ناوەڕاستی نووسین → فایلی کۆن دەمێنێتەوە (خراب نابێت).
+       + کۆپی .bak بۆ دووانە-پاراستن."""
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.exists(path):
+            try:
+                os.replace(path, path + ".bak")
+            except Exception:
+                pass
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def _json_load_safe(path, default=None):
+    """#91A1: خوێندنەوەی بەهێز — ئەگەر فایل خراب بوو → .bak تاقی دەکرێتەوە"""
+    for p in (path, path + ".bak"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            continue
+    return default
+
+
+
 # #88: /server (گۆڕینی مۆدێڵ) = تەنها ئەدمین — هەڵبژاردنی ئەدمین بۆ هەموو بەکارهێنەران جێبەجێ دەکرێت
 ADMIN_TG = 8381536661
 GLOBAL_MODEL = {"server": None, "mkey": None}
@@ -2143,8 +2176,7 @@ def _ms_load():
 
 def _ms_save():
     try:
-        with open(MODEL_SYNC_FILE, "w", encoding="utf-8") as f:
-            json.dump(MS, f, ensure_ascii=False)
+        _json_save(MODEL_SYNC_FILE, MS)
     except Exception:
         pass
 
@@ -3397,7 +3429,7 @@ CB_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-se
 def _cb_load_acc():
     import json as _j
     try:
-        d = _j.load(open(CB_ACC_FILE, encoding="utf-8"))
+        d = _json_load_safe(CB_ACC_FILE) or {}
         CB_ST["accounts"] = d.get("accounts") or []
         CB_ST["idx"] = int(d.get("idx") or 0)
         CB_ST["next_num"] = int(d.get("next_num") or 82400)
@@ -3415,10 +3447,9 @@ def _cb_save_acc():
 def _cb_save_acc__impl():
     import json as _j
     try:
-        _j.dump({"accounts": CB_ST.get("accounts") or [], "idx": CB_ST["idx"],
-                 "next_num": CB_ST["next_num"], "exhausted": CB_ST.get("exhausted") or {},
-                 "signups": CB_ST.get("signups") or {"date": "", "n": 0}},
-                open(CB_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _json_save(CB_ACC_FILE, {"accounts": CB_ST.get("accounts") or [], "idx": CB_ST["idx"],
+                                 "next_num": CB_ST["next_num"], "exhausted": CB_ST.get("exhausted") or {},
+                                 "signups": CB_ST.get("signups") or {"date": "", "n": 0}})
     except Exception:
         pass
 
@@ -3735,7 +3766,7 @@ CA_FALLBACK = {
 def _ca_load_acc():
     import json as _j
     try:
-        d = _j.load(open(CA_ACC_FILE, encoding="utf-8"))
+        d = _json_load_safe(CA_ACC_FILE) or {}
         CA_ST["accounts"] = d.get("accounts") or CA_ST["accounts"]
         CA_ST["idx"] = int(d.get("idx") or 0)
         CA_ST["next_num"] = int(d.get("next_num") or 82401)
@@ -3753,10 +3784,9 @@ def _ca_save_acc():
 def _ca_save_acc__impl():
     import json as _j
     try:
-        _j.dump({"accounts": CA_ST.get("accounts") or [], "idx": CA_ST["idx"],
-                 "next_num": CA_ST["next_num"], "limits": CA_ST.get("limits") or {},
-                 "signups": CA_ST.get("signups") or {"date": "", "n": 0}},
-                open(CA_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _json_save(CA_ACC_FILE, {"accounts": CA_ST.get("accounts") or [], "idx": CA_ST["idx"],
+                                 "next_num": CA_ST["next_num"], "limits": CA_ST.get("limits") or {},
+                                 "signups": CA_ST.get("signups") or {"date": "", "n": 0}})
     except Exception:
         pass
 
@@ -3986,8 +4016,8 @@ def _proxy_mark_bad(px):
 
 def _proxy_pool_save():
     try:
-        json.dump({"pool": PROXY_ST.get("pool") or {}, "bad": sorted(PROXY_ST["bad"])[:600], "t": time.time()},
-                  open(os.path.join(DATA_DIR, "proxy_pool.json"), "w"))
+        _json_save(os.path.join(DATA_DIR, "proxy_pool.json"),
+                   {"pool": PROXY_ST.get("pool") or {}, "bad": sorted(PROXY_ST["bad"])[:600], "t": time.time()})
     except Exception:
         pass
 
@@ -4544,7 +4574,7 @@ AC_FALLBACK = {
 def _ac_load_acc():
     import json as _j
     try:
-        d = _j.load(open(AC_ACC_FILE, encoding="utf-8"))
+        d = _json_load_safe(AC_ACC_FILE) or {}
         AC_ST["accounts"] = d.get("accounts") or AC_ST["accounts"]
         AC_ST["idx"] = int(d.get("idx") or 0)
         AC_ST["next_num"] = int(d.get("next_num") or 82407)
@@ -4557,10 +4587,9 @@ def _ac_load_acc():
 def _ac_save_acc():
     import json as _j
     try:
-        _j.dump({"accounts": AC_ST.get("accounts") or [], "idx": AC_ST["idx"],
-                 "next_num": AC_ST["next_num"], "limits": AC_ST.get("limits") or {},
-                 "signups": AC_ST.get("signups") or {"date": "", "n": 0}},
-                open(AC_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _json_save(AC_ACC_FILE, {"accounts": AC_ST.get("accounts") or [], "idx": AC_ST["idx"],
+                                 "next_num": AC_ST["next_num"], "limits": AC_ST.get("limits") or {},
+                                 "signups": AC_ST.get("signups") or {"date": "", "n": 0}})
     except Exception:
         pass
 
@@ -4624,8 +4653,8 @@ def _ac_signup_new():
             acc = {"email": email, "password": email, "boot": True}
             try:
                 _ac_bootstrap(res[0], res[1], email)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[AC] bootstrap fail {email}: {e}", flush=True)
             AC_ST["accounts"] = (AC_ST.get("accounts") or []) + [acc]
             AC_ST["idx"] = len(AC_ST["accounts"]) - 1
             AC_ST["next_num"] = n + 1
@@ -4878,7 +4907,7 @@ NV_SKIP_KEYS = {"link-and-ask", "music-generation", "document", "editor", "ai-se
 def _nv_load_acc():
     import json as _j
     try:
-        d = _j.load(open(NV_ACC_FILE, encoding="utf-8"))
+        d = _json_load_safe(NV_ACC_FILE) or {}
         NV_ST["accounts"] = d.get("accounts") or NV_ST["accounts"]
         NV_ST["idx"] = int(d.get("idx") or 0)
         NV_ST["next_num"] = int(d.get("next_num") or 82416)
@@ -4897,11 +4926,10 @@ def _nv_save_acc():
 def _nv_save_acc__impl():
     import json as _j
     try:
-        _j.dump({"accounts": NV_ST.get("accounts") or [], "idx": NV_ST["idx"],
-                 "next_num": NV_ST["next_num"], "exhausted": NV_ST.get("exhausted") or {},
-                 "ensured": NV_ST.get("ensured") or {},
-                 "signups": NV_ST.get("signups") or {"date": "", "n": 0}},
-                open(NV_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _json_save(NV_ACC_FILE, {"accounts": NV_ST.get("accounts") or [], "idx": NV_ST["idx"],
+                                 "next_num": NV_ST["next_num"], "exhausted": NV_ST.get("exhausted") or {},
+                                 "ensured": NV_ST.get("ensured") or {},
+                                 "signups": NV_ST.get("signups") or {"date": "", "n": 0}})
     except Exception:
         pass
 
@@ -5203,7 +5231,7 @@ AL_MODELS = {
 def _al_load_acc():
     import json as _j
     try:
-        d = _j.load(open(AL_ACC_FILE, encoding="utf-8"))
+        d = _json_load_safe(AL_ACC_FILE) or {}
         if d.get("accounts"):
             AL_ST["accounts"] = d["accounts"]
         AL_ST["idx"] = int(d.get("idx") or 0)
@@ -5214,8 +5242,7 @@ def _al_load_acc():
 def _al_save_acc():
     import json as _j
     try:
-        _j.dump({"accounts": AL_ST.get("accounts") or [], "idx": AL_ST["idx"]},
-                open(AL_ACC_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _json_save(AL_ACC_FILE, {"accounts": AL_ST.get("accounts") or [], "idx": AL_ST["idx"]})
     except Exception:
         pass
 
@@ -5910,9 +5937,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     def _authed(self):
         if not API_KEY:
             return True
+        # #91A4: compare_digest — بەرگری دژی timing-attack (هاکەر ناتوانێت key بدۆزێتەوە بە کاتی وەڵام)
         h = self.headers.get("Authorization", "")
         k = self.headers.get("X-API-Key", "")
-        return h == f"Bearer {API_KEY}" or k == API_KEY
+        import hmac as _hmac
+        return _hmac.compare_digest(h.encode(), f"Bearer {API_KEY}".encode()) or \
+            _hmac.compare_digest(k.encode(), API_KEY.encode())
 
     def _body(self):
         n = int(self.headers.get("Content-Length", 0))
@@ -6234,12 +6264,17 @@ def start_api():
     class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
 
-    try:
-        srv = TS(("0.0.0.0", API_PORT), APIHandler)
-    except OSError as e:
-        print(f"[API] پۆرتی {API_PORT} بەکارهاتووە: {e}", flush=True)
-        return
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    def _api_serve():
+        # #91A2: supervisor — ئەگەر serve_forever بمرێت → 2s → دووبارە
+        while True:
+            try:
+                srv = TS(("0.0.0.0", API_PORT), APIHandler)
+                srv.serve_forever(poll_interval=0.5)
+            except Exception as e:
+                print(f"[API] ⚠️ تڕێدی API وەستا: {e} — دووبارە لە 2s…", flush=True)
+                time.sleep(2)
+
+    threading.Thread(target=_api_serve, daemon=True).start()
     print(f"[API] ✅ API کارا کەوت — http://0.0.0.0:{API_PORT} (/v1/chat/completions)", flush=True)
 
 
@@ -7231,7 +7266,7 @@ def handle_message(msg):
             GLOBAL_MODEL["server"] = srv["id"]
             GLOBAL_MODEL["mkey"] = srv["key"]
         try:  # #91G: هەڵبژاردەی ئەدمین هەمیشەییە — دیپلۆی نایگەڕێنێتەوە
-            json.dump(dict(GLOBAL_MODEL), open(os.path.join(DATA_DIR, "global_model.json"), "w"))
+            _json_save(os.path.join(DATA_DIR, "global_model.json"), dict(GLOBAL_MODEL))
         except Exception:
             pass
         s["server"] = srv["id"]
@@ -7793,8 +7828,8 @@ def _snapshot_save():
         with _lock:
             ms = {k: dict(v) for k, v in MS.items() if k.endswith("_ok") and v}
             srv = list(BRAIN["servers"] or [])
-        json.dump({"t": time.time(), "ms": ms, "servers": srv},
-                  open(os.path.join(DATA_DIR, "model_snapshot.json"), "w"))
+        _json_save(os.path.join(DATA_DIR, "model_snapshot.json"),
+                   {"t": time.time(), "ms": ms, "servers": srv})
     except Exception:
         pass
 
@@ -7918,9 +7953,9 @@ def _state_persist_daemon():
             now = time.time()
             if now - _STATE_PERSIST["t"] > 120:
                 _STATE_PERSIST["t"] = now
-                json.dump({"breaker": {k: v for k, v in _BREAKER.items() if v > now},
-                           "perf": {"req": _PERF["req"], "ok": _PERF["ok"], "fail": _PERF["fail"]}},
-                          open(os.path.join(DATA_DIR, "state.json"), "w"))
+                _json_save(os.path.join(DATA_DIR, "state.json"),
+                           {"breaker": {k: v for k, v in _BREAKER.items() if v > now},
+                            "perf": {"req": _PERF["req"], "ok": _PERF["ok"], "fail": _PERF["fail"]}})
         except Exception:
             pass
         time.sleep(120)
@@ -8252,7 +8287,7 @@ def _hk_try_routes(kind, url, method="GET", **kw):
     if lib:
         def _mob():
             mob = [u for u in _UA_POOL if "Mobile" in u or "Android" in u or "iPhone" in u]
-            h = dict(kw.pop("headers", {}) or {})
+            h = dict(kw.get("headers") or {})  # #91A5: pop ❌ — kw ی ڕەسەن تێناگۆڕین
             h["User-Agent"] = random.choice(mob)
             return lib.request(method, url, impersonate=random.choice(["safari15_5", "chrome120"]),
                                headers=h, timeout=(8, 20), **kw)
@@ -8369,6 +8404,17 @@ def main():
     threading.Thread(target=auto_refresh, daemon=True).start()
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
+    def _safe_handle(m):
+        # #91A3: هیچ هەڵەیەک نامەی بەکارهێنەر بێدەنگ ناکات
+        try:
+            handle_message(m)
+        except Exception as e:
+            print(f"[MSG] ⚠️ هەڵە لە پرۆسێسکردن: {e}", flush=True)
+            try:
+                reply(m.get("chat", {}).get("id"), "⚠️ هەڵەیەکی ناوەکی ڕوویدا — دووبارە هەوڵ بدەوە.")
+            except Exception:
+                pass
+
     offset = 0
     cycle = 0
     while True:
@@ -8387,7 +8433,7 @@ def main():
                 offset = u["update_id"] + 1
                 m = u.get("message")
                 if m and m.get("text"):
-                    threading.Thread(target=handle_message, args=(m,), daemon=True).start()
+                    threading.Thread(target=_safe_handle, args=(m,), daemon=True).start()
                 elif m:
                     reply(m["chat"]["id"], "💬 أرسل رسالة نصية من فضلك.")
         except KeyboardInterrupt:
