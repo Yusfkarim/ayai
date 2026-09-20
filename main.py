@@ -4398,11 +4398,11 @@ def ca_chat(messages, model_id, timeout=110):
                 if accs:
                     acc = accs[CA_ST["idx"] % len(accs)]
                     lm = CA_ST.setdefault("limits", {}).setdefault(acc["email"], {})
-                    lm[mkey] = _lim_today()  # #91Z: بەروارکراو — سبەی خۆی بەسەر دەچێت
-                    if "lifetime" not in low:
-                        lm["*"] = _lim_today()  # لیمێتی ڕۆژانە — بەیانی دەگەڕێتەوە
-                    else:
-                        lm["*"] = True  # تەنها lifetime هەمیشەییە
+                    lm[mkey] = _lim_today()  # مۆدێڵ-لیمێت — هەمیشە بەروارکراو
+                    # #91Z-P: ستار تەنها بۆ limit ی ڕاستەقینەی گشتی (free message / no free / daily limit)
+                    # هەڵەکانی "account limit"/"rate" ی تایبەت بە مۆدێڵ → تەنها mkey (نەک *)
+                    if ("free message" in low or "no free" in low or "daily" in low):
+                        lm["*"] = _lim_today()
                     _ca_save_acc()
                 if not _ca_rotate(mkey):
                     raise EMError("ca: سنووری هەموو ئەکاونتەکان")
@@ -4742,11 +4742,9 @@ def ac_chat(messages, model_id, timeout=110):
                 if accs:
                     acc = accs[AC_ST["idx"] % len(accs)]
                     lm = AC_ST.setdefault("limits", {}).setdefault(acc["email"], {})
-                    lm[mkey] = _lim_today()  # #91Z
-                    if "lifetime" not in low:
-                        lm["*"] = _lim_today()
-                    else:
-                        lm["*"] = True
+                    lm[mkey] = _lim_today()  # مۆدێڵ-لیمێت
+                    if ("free message" in low or "no free" in low or "daily" in low):
+                        lm["*"] = _lim_today()  # تەنها limit ی ڕاستەقینەی گشتی
                     _ac_save_acc()
                 if not _ac_rotate(mkey):
                     raise EMError("ac: سنووری هەموو ئەکاونتەکان")
