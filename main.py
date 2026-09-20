@@ -7824,7 +7824,10 @@ def _self_check():
     """#91U: خۆپشکنین — نەک تەنها لۆگ — ڕاستەوخۆ تاقیکردنەوەی ناوەکی"""
     try:
         br = len(BRAIN["servers"] or [])
-        ap = len(API_BRAIN["servers"] or [])
+        try:
+            ap = len(API_BRAIN["servers"] or [])
+        except Exception:
+            ap = br  # API_BRAIN هێشتا دەستپێ نەکراوە — وەک BRAIN ژمارە پێبکە
         live = sum(1 for v in _HEAL_STATE.get("status", {}).values() if v.get("ok"))
         _STS["ok"] = br > 0 and ap > 0
         _STS["last"] = f"br={br} ap={ap} live={live}"
