@@ -6156,6 +6156,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "al":
                     content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "alle":
+                    content = alle_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "aiml":
                     content = aiml_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 else:
@@ -6230,6 +6232,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = nv_chat(nmsgs, nsrv["model_id"])
                     elif k == "al":
                         content = al_chat(nmsgs, nsrv["model_id"])
+                    elif k == "alle":
+                        content = alle_chat(nmsgs, nsrv["model_id"])
                     elif k == "aiml":
                         content = aiml_chat(nmsgs, nsrv["model_id"])
                     else:
@@ -6392,6 +6396,10 @@ def detect_brain(allow_fallback=True):
         servers += duck_servers()
     except Exception as e:
         print(f"[BRAIN] duck fail: {e}", flush=True)
+    try:
+        servers += alle_servers()
+    except Exception as e:
+        print(f"[BRAIN] alle fail: {e}", flush=True)
     try:
         servers += ak_servers()
     except Exception as e:
@@ -6940,6 +6948,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "al"
+            if k == "alle":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = alle_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "alle"
             if k == "aiml":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = aiml_chat(msgs, cand["model_id"])
@@ -7087,6 +7101,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "al"
+                if k == "alle":
+                    a = alle_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "alle"
                 if k == "aiml":
                     a = aiml_chat(nmsgs, nsrv["model_id"])
                     if leaks(a):
@@ -8388,6 +8407,239 @@ def _hk_stats():
     return {"tries": _HK_ST["tries"], "wins": _HK_ST["wins"],
             "routes": dict(list(_HK_ST["routes"].items())[:6])}
 
+
+
+# ══════════ Alle-AI (alle-ai.com) — §2.34 — Laravel API + Reverb WS ══════════
+ALLE_API = "https://api.alle-ai.com/api/v1"
+ALLE_WSS = "wss://api.alle-ai.com/app/pb1ry0ntlug7dm2fga0s?protocol=7&client=js&version=8.4.0-1reverb&flash=false"
+ALLE_AUTH_EP = "https://api.alle-ai.com/broadcasting/auth"
+ALLE_ACC_FILE = os.path.join(DATA_DIR, "alle_accounts.json")
+ALLE_ST = {"accounts": [], "idx": 0, "limits": {}}
+ALLE_LOCK = threading.Lock()
+_ALLE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+
+
+def _alle_load_acc():
+    d = _json_load_safe(ALLE_ACC_FILE) or {}
+    ALLE_ST["accounts"] = d.get("accounts") or []
+    ALLE_ST["idx"] = int(d.get("idx") or 0)
+    ALLE_ST["limits"] = d.get("limits") or {}
+
+
+def _alle_save_acc():
+    _json_save(ALLE_ACC_FILE, {"accounts": ALLE_ST.get("accounts") or [],
+                               "idx": ALLE_ST.get("idx") or 0,
+                               "limits": ALLE_ST.get("limits") or {}})
+
+_ALLE_SEED = [{"email": "fipexa5604@dreameg.com", "password": "fipexa5604@dreameg.comA",
+               "conv": "6c073793-a0a0-4648-b29a-ea2fb989b11e", "pos": 6}]
+
+
+def _alle_seed():
+    if not (ALLE_ST.get("accounts") or []):
+        ALLE_ST["accounts"] = [dict(a) for a in _ALLE_SEED]
+        _alle_save_acc()
+        print(f"[ALLE] ئەکاونتی سەرەتایی ✅ {ALLE_ST['accounts'][0]['email']}", flush=True)
+
+
+_alle_load_acc()
+_alle_seed()
+
+
+def alle_servers():
+    """٩ مۆدێلی چاتی Alle (هەموو خۆڕایی — خێزانی Gemini)"""
+    out = []
+    for uid, nm in (("gemini-3-7-flash", "Gemini 3.7 Flash"), ("gemini-3-6-flash", "Gemini 3.6 Flash"),
+                    ("gemini-3-5-flash", "Gemini 3.5 Flash"), ("gemini-3-flash", "Gemini 3 Flash"),
+                    ("gemini-3-1-pro", "Gemini 3.1 Pro"), ("gemini-3-1-flash-lite", "Gemini 3.1 Flash Lite"),
+                    ("gemini-2-5-pro", "Gemini 2.5 Pro"), ("gemini-2-5-flash", "Gemini 2.5 Flash"),
+                    ("gemini-2-5-flash-lite", "Gemini 2.5 Flash Lite")):
+        out.append({"id": f"alle-{uid}", "name": f"{nm} (Alle)",
+                    "model_id": uid, "kind": "alle"})
+    return out
+
+
+def _alle_hdrs(acc):
+    return {"User-Agent": acc.get("ua") or _ALLE_UA, "Accept": "application/json",
+            "Authorization": "Bearer " + (acc.get("token") or ""),
+            "Origin": "https://app.alle-ai.com", "Referer": "https://app.alle-ai.com/chat"}
+
+
+def _alle_login(acc, force=False):
+    """لۆگین — token ی Laravel (uid|hash) + uid بۆ کەناڵی WS"""
+    if acc.get("token") and not force:
+        return True
+    r = requests.post(ALLE_API + "/login",
+                      json={"email": acc["email"], "password": acc["password"]},
+                      headers={"User-Agent": acc.get("ua") or _ALLE_UA, "Accept": "application/json",
+                               "Content-Type": "application/json",
+                               "Origin": "https://app.alle-ai.com", "Referer": "https://app.alle-ai.com/auth"},
+                      timeout=(10, 30))
+    d = r.json() or {}
+    data = d.get("data") or {}
+    if not d.get("status") or not data.get("token"):
+        raise EMError(f"alle login: {str(d.get('message'))[:60]}")
+    acc["token"] = data["token"]
+    acc["uid"] = (data.get("user") or {}).get("id")
+    _alle_save_acc()
+    print(f"[ALLE] لۆگین ✅ {acc['email']} uid={acc.get('uid')}", flush=True)
+    return True
+
+
+def _alle_mark(acc, mkey, err):
+    """#91Z-P ی ئەکاونتەکانی تر — لیمیت وەک CA: mkey هەمیشە، ستاری * تەنها بۆ ڕوونەکان"""
+    lm = ALLE_ST.setdefault("limits", {}).setdefault(acc.get("email") or "?", {})
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    lm[mkey] = today
+    low = str(err).lower()
+    if any(w in low for w in ("free message", "no free", "daily", "message limit", "limit reached", "monthly limit")):
+        lm["*"] = today
+    _alle_save_acc()
+
+
+class _AlleLimit(Exception):
+    pass
+
+
+def _alle_ask(acc, model_id, text, timeout=110, mkey=""):
+    """فڵۆوی تەواو: WS → auth → subscribe → create/prompt → ai-response → چانکەکان"""
+    import websocket as _ws
+    _alle_login(acc)
+    hdrs = _alle_hdrs(acc)
+    w = _ws.create_connection(ALLE_WSS, timeout=12,
+                              header=["Origin: https://app.alle-ai.com",
+                                      "User-Agent: " + (acc.get("ua") or _ALLE_UA)])
+    try:
+        hello = json.loads(w.recv())
+        sid = (json.loads(hello.get("data") or "{}") or {}).get("socket_id")
+        if not sid:
+            raise EMError("alle: ws hello شکست")
+        r = requests.post(ALLE_AUTH_EP, json={"socket_id": sid,
+                                              "channel_name": f"private-App.Models.User.{acc.get('uid')}"},
+                          headers=hdrs, timeout=(10, 20))
+        au = (r.json() or {}).get("auth")
+        if not au:
+            raise EMError("alle: broadcasting/auth شکست")
+        w.send(json.dumps({"event": "pusher:subscribe",
+                           "data": {"auth": au, "channel": f"private-App.Models.User.{acc.get('uid')}"}}))
+        pos = int(acc.get("pos") or 1)
+        r = requests.post(ALLE_API + "/create/prompt",
+                          json={"conversation": acc["conv"], "prompt": text, "position": [pos, pos],
+                                "combine": False, "compare": False, "web_search": False},
+                          headers={**hdrs, "Content-Type": "application/json"}, timeout=(10, 30))
+        if r.status_code == 401:
+            _alle_login(acc, force=True)
+            hdrs = _alle_hdrs(acc)
+            r = requests.post(ALLE_API + "/create/prompt",
+                              json={"conversation": acc["conv"], "prompt": text, "position": [pos, pos],
+                                    "combine": False, "compare": False, "web_search": False},
+                              headers={**hdrs, "Content-Type": "application/json"}, timeout=(10, 30))
+        if r.status_code != 200:
+            raise EMError(f"alle: prompt {r.status_code} {r.text[:60]}")
+        pid = (r.json() or {}).get("id")
+        acc["pos"] = pos + 1
+        _alle_save_acc()
+        r = requests.post(ALLE_API + "/ai-response",
+                          json={"conversation": acc["conv"], "model": model_id, "is_new": False,
+                                "prompt": pid, "prev": [], "combine": False, "compare": False},
+                          headers={**hdrs, "Content-Type": "application/json"}, timeout=(10, 30))
+        if r.status_code == 429:
+            raise _AlleLimit(f"alle ڕێژە: {r.text[:80]}")
+        if r.status_code == 403:
+            # Access Denied — لیمیت ی ئەکاونت یان مۆدێلی ڕێگەنەدراو
+            raise _AlleLimit(f"alle 403: {(r.json() or {}).get('message', '')[:60]}")
+        if r.status_code != 200:
+            raise EMError(f"alle: ai-response {r.status_code} {r.text[:60]}")
+
+        parts, t0 = [], time.time()
+        w.settimeout(max(5, min(30, timeout - (time.time() - t0))))
+        while time.time() - t0 < timeout:
+            try:
+                m = json.loads(w.recv())
+            except _ws.WebSocketTimeoutException:
+                break
+            ev = m.get("event", "")
+            if "ping" in ev or "pong" in ev or "subscription" in ev:
+                continue
+            dd = m.get("data", "{}")
+            try:
+                dd = json.loads(dd) if isinstance(dd, str) else dd
+            except Exception:
+                dd = {}
+            if ev.endswith("chat.chunk"):
+                parts.append(str(dd.get("chunk") if isinstance(dd, dict) else dd))
+            elif ev.endswith("chat.stream.failed"):
+                msg = str((dd or {}).get("error") or (dd or {}).get("message") or "failed")[:90]
+                raise _AlleLimit(f"alle stream: {msg}") if any(
+                    x in msg.lower() for x in ("limit", "quota", "credit", "free", "exceeded")) else EMError(f"alle: {msg}")
+            elif ev.endswith("chat.stream.complete"):
+                break
+        ans = "".join(parts).strip()
+        if not ans:
+            raise EMError("alle: وەڵام بەتاڵ")
+        return ans
+    finally:
+        try:
+            w.close()
+        except Exception:
+            pass
+
+
+def _alle_pick(mkey):
+    """هەڵبژاردنی ئەکاونت — ئەوانەی لیمیتن بۆ ئەم مۆدێلە دەپەڕێت (وەک #91P2: دەگەڕێن، نەسڕدرێنەوە)"""
+    accs = ALLE_ST.get("accounts") or []
+    if not accs:
+        return None
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    lim = ALLE_ST.get("limits") or {}
+    n = len(accs)
+    for i in range(n):
+        a = accs[(ALLE_ST.get("idx", 0) + i) % n]
+        L = lim.get(a.get("email") or "?") or {}
+        if L.get("*") == today or L.get(mkey) == today:
+            continue
+        ALLE_ST["idx"] = (ALLE_ST.get("idx", 0) + i + 1) % n
+        return a
+    return None
+
+
+def alle_chat(messages, model_id, timeout=110, depth=0):
+    """چاتی alle-ai.com — WS streaming؛ لیمیت وەک ئەکاونتەکانی تر نیشانە دەکرێت (#91Z-P)"""
+    mkey = f"alle-{model_id}"
+    with ALLE_LOCK:
+        acc = _alle_pick(model_id)
+    if not acc:
+        raise EMError("alle: هیچ ئەکاونتێکی بەردەست نییە (لیمیت؟)")
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    rest = [m for m in messages if m.get("role") != "system"][-9:]
+    if rest and rest[-1].get("role") == "user":
+        last = rest.pop()
+    else:
+        last = {"role": "user", "content": "سلام"}
+    tx = ""
+    for m in rest[-7:]:
+        who = "بەکارهێنەر" if m.get("role") == "user" else "وەڵام"
+        tx += f"{who}: {str(m.get('content'))[:700]}\n"
+    if sys_txt:
+        tx = f"[ئاراستەی سیستەم: {sys_txt}]\n{tx}"
+    tx += f"بەکارهێنەر: {last.get('content')}"
+    try:
+        return _alle_ask(acc, model_id, tx, timeout, mkey)
+    except _AlleLimit as e:
+        _alle_mark(acc, model_id, str(e))
+        raise EMError(str(e))
+    except EMError as e:
+        s = str(e)
+        if "401" in s and depth == 0:
+            _alle_login(acc, force=True)
+            return alle_chat(messages, model_id, timeout, depth=1)
+        if any(x in s.lower() for x in ("limit", "quota", "credit", "exceeded", "free")) and depth == 0:
+            _alle_mark(acc, model_id, s)
+            with ALLE_LOCK:
+                acc2 = _alle_pick(model_id)
+            if acc2 and acc2 is not acc:
+                return alle_chat(messages, model_id, timeout, depth=1)
+        raise EMError(f"alle: {s[:80]}")
 
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
