@@ -7061,7 +7061,7 @@ def self_heal_once():
 def _proxy_refresh_sources():
     """#91: تازەکردنەوەی لیستی پرۆکسی زیندوو — بەزۆر _proxy_get لیستەکە دادەنێت"""
     try:
-        pl = _proxy_get(18)
+        pl = _proxy_get(30)
         if pl:
             PROXY_ST["list"] = [p.replace("://", "://") for p in pl]
             PROXY_ST["src_t"] = time.time()
