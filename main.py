@@ -5758,9 +5758,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     order.append(cand)
 
         content, last_err = "", None
+        order = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)] or order
         for cand in order:
-            if cand is not srv and time.time() < _BREAKER.get(cand.get("kind"), 0):
-                continue
             try:
                 kind = cand.get("kind")
                 if kind == "em":
@@ -6412,9 +6411,8 @@ def ask(session, question):
         if cand and cand not in order:
             order.append(cand)
     last = None
+    order = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)] or order
     for cand in order:
-        if cand is not srv and time.time() < _BREAKER.get(cand.get("kind"), 0):
-            continue
         try:
             k = cand.get("kind")
             if k == "em":
