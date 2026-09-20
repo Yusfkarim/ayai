@@ -5828,6 +5828,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return self._send(404, {"error": "not found"})
         if not self._authed():
             return self._send(401, {"error": "API_KEY هەڵەیە — Authorization: Bearer <key>"})
+        _PERF["req"] += 1  # #91R2: داواکاری API ۀم بژمێرە
+        t_api0 = time.time()
 
         try:
             body = self._body()
@@ -6039,7 +6041,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e2:
                 print(f"[API] دیلی نەوە شکستی هێنا: {str(e2)[:90]}", flush=True)
         if not content:
+            _PERF["fail"] += 1
             return self._send(502, {"error": str(last_err) if last_err else "هیچ سەرچاوەیەک وەڵام نەدایەوە"})
+        _PERF["ok"] += 1
+        _PERF["lat"].append(time.time() - t_api0)
+        if len(_PERF["lat"]) > 200:
+            del _PERF["lat"][:100]
 
         cid = "chatcmpl-" + "".join(random.choices("abcdef0123456789", k=12))
         now = int(time.time())
@@ -6979,8 +6986,9 @@ def handle_message(msg):
         avg = (sum(lat) / len(lat)) if lat else 0
         br = {k: int(v - time.time()) for k, v in _BREAKER.items() if v > time.time()}
         up = int(time.time() - BOOT_T)
+        _uptxt = f"{up // 3600} کاتژمێر و {(up % 3600) // 60} خولەک" if up >= 3600 else f"{up // 60} خولەک"
         reply(chat_id, f"📈 <b>ئامارەکانی سیستەمی خارق</b>\n"
-                      f"⏱ کاراک: {up // 3600} کاتژمێر\n"
+                      f"⏱ کاراک: {_uptxt}\n"
                       f"⚡ داواکاری: {_PERF['req']} — ✅ {_PERF['ok']} / ❌ {_PERF['fail']}\n"
                       f"⏳ تێکڕای وەڵام: {avg:.1f} چرکە\n"
                       f"🧊 بریکەر (سەرچاوەی پشوو): {', '.join(f'{k}({v}s)' for k, v in br.items()) or '—'}\n"
@@ -7423,12 +7431,17 @@ def _xarq_watchdog():
 
 
 def _daily_report():
-    """ڕاپۆرتی ڕۆژانە بۆ ئەدمین — هەر ٢٤ کاتژمێر"""
+    """ڕاپۆرتی ڕۆژانە بۆ ئەدمین — #91R2: تەنها یەک جار/ڕۆژ (state لە /data) + کاراک بە خولەک"""
+    time.sleep(420)  # ٧ خولەک پاش boot — تا سیستەم گەرم بێت
     while True:
         try:
             day = time.strftime("%Y-%m-%d", time.gmtime())
-            if _DAILY["day"] != day:
-                _DAILY["day"] = day
+            _sent = ""
+            try:
+                _sent = (open(os.path.join(DATA_DIR, "daily_sent.txt")).read() or "").strip()
+            except Exception:
+                pass
+            if _sent != day:
                 up = int(time.time() - BOOT_T)
                 lat = _PERF["lat"]
                 avg = (sum(lat) / len(lat)) if lat else 0
@@ -7442,19 +7455,22 @@ def _daily_report():
                     except Exception:
                         po[nm] = 0
                 try:
-                    nm = len(dedupe_servers(BRAIN["servers"]))
+                    nm = len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0
                 except Exception:
                     nm = 0
+                _uptxt = f"{up // 3600} کاتژمێر و {(up % 3600) // 60} خولەک" if up >= 3600 else f"{up // 60} خولەک"
                 msg = (f"🌅 <b>ڕاپۆرتی ڕۆژانەی سیستەمی خارق</b> — {day}\n"
-                       f"⏱ کاراک: {up // 3600} کاتژمێر\n"
+                       f"⏱ کاراک: {_uptxt}\n"
                        f"🧠 مۆدێڵ: {nm}\n"
-                       f"✅ سەرچاوەی زیندوو: {okn}/{len(st)}\n"
+                       f"✅ سەرچاوەی زیندوو: {okn}/{len(st) or '—'}\n"
                        f"💰 حەوز: CA {po['CA']} · CB {po['CB']} · NV {po['NV']}\n"
                        f"⚡ داواکاری: {_PERF['req']} (تێکڕای وەڵام {avg:.1f} چرکە)")
-                tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
+                r = tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
+                if r.get("ok"):
+                    open(os.path.join(DATA_DIR, "daily_sent.txt"), "w").write(day)
         except Exception as e:
             print(f"[DAILY] {str(e)[:60]}", flush=True)
-        time.sleep(3600)
+        time.sleep(600)
 
 
 
