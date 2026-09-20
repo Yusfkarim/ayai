@@ -3708,26 +3708,60 @@ def _ca_signup_new():
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 20 or len(CA_ST.get("accounts") or []) >= 40:
+    if sg.get("n", 0) >= 120 or len(CA_ST.get("accounts") or []) >= 60:
         return None
     n = CA_ST["next_num"]
-    for _ in range(6):
-        email = f"komex{n}@duidir.com"
-        res = _ca_firebase("signUp", email, email)
-        if res:
-            CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
-            CA_ST["idx"] = len(CA_ST["accounts"]) - 1
-            CA_ST["next_num"] = n + 1
-            sg["n"] = sg.get("n", 0) + 1
-            CA_ST["signups"] = sg
-            CA_ST["tok"] = None
-            _ca_save_acc()
-            print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
-            return res
-        n += 1
+    # دوو پێشەکی: komex (کۆن) + heal (نوێ — نەخشەی komex پڕە)
+    for pref in ("komex", "heal"):
+        for _ in range(30):
+            email = f"{pref}{n}@duidir.com"
+            res = _ca_firebase("signUp", email, email)
+            if res:
+                CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email}]
+                CA_ST["idx"] = len(CA_ST["accounts"]) - 1
+                CA_ST["next_num"] = n + 1
+                sg["n"] = sg.get("n", 0) + 1
+                CA_ST["signups"] = sg
+                CA_ST["tok"] = None
+                _ca_save_acc()
+                print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
+                return res
+            n += 1
+        n = max(n, 82450)  # بۆ heal — نەخشەی نوێ
     CA_ST["next_num"] = n
     _ca_save_acc()
     return None
+
+
+_CA_POOL = {"target": 50, "backoff": 0.0}
+
+
+def _ca_pool_daemon():
+    """#82: حەوزی ئەکاونت بۆ ٥٠ بگەیەنە — هەر ٤ خولەک یەک هەوڵ؛ شکست → ١٥ خولەک پشوو"""
+    time.sleep(90)
+    while True:
+        try:
+            accs = CA_ST.get("accounts") or []
+            if len(accs) >= _CA_POOL["target"]:
+                time.sleep(1800)
+                continue
+            now = time.time()
+            if now < _CA_POOL["backoff"]:
+                time.sleep(60)
+                continue
+            before = len(accs)
+            _ca_signup_new()
+            after = len(CA_ST.get("accounts") or [])
+            if after > before:
+                print(f"[CA-POOL] {after}/{_CA_POOL['target']} ئەکاونت", flush=True)
+                _CA_POOL["backoff"] = 0.0
+                time.sleep(240)  # ٤ خولەک نێوان هەر ئەکاونتێک
+            else:
+                _CA_POOL["backoff"] = now + 900  # شکست → ١٥ خولەک
+                print("[CA-POOL] هەوڵ شکا — ١٥ خولەک پشوو", flush=True)
+        except Exception as e:
+            print(f"[CA-POOL] {str(e)[:60]}", flush=True)
+            time.sleep(600)
 
 
 def _ca_token():
@@ -6545,7 +6579,9 @@ def main():
 
     # کەیک-بەیکەری G4F — پاشبنەما
     threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
+    threading.Thread(target=_ca_pool_daemon, daemon=True).start()
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
+    print("👤 حەوز-بنیاتەری CA چالاکە — ئامانج: ٥٠ ئەکاونت", flush=True)
 
     # دەستنیشانکردنی مێشک
     print("🧠 دەستنیشانکردنی سەرچاوەی AI…", flush=True)
