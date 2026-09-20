@@ -585,3 +585,12 @@
 - fly.toml گەڕایەوە shared-cpu-1x/256mb (performance-2x تەنها بۆ chromium بوو).
 - ARENA_RECIPE_CAPTCHA.md وەک ڕیسێپی ماوەتەوە بۆ گەڕاندنەوەی خێرا (ئەگەر داواکرا).
 - هۆکار: تێچووی VM + خاوی وەڵامەکان (~١٥s بچووترین).
+
+## #85/#86 (2026-09-20) — ١٠٠٪ پشتڕاستکردنەوەی حەوزەکان
+- **قوفڵی نووسین** (_SAVE_LOCK): فایلەکانی حەوز لە تەردی چات + دیمۆن — ناتێکشێن.
+- **Fly Volume** `syuh_data` → /data (ext4، snapshot خۆکار): ca/cb/nv/al_accounts + aiml_key +
+  model_sync + proxies — **لە deploy/ڕیستارت نەسڕدرێنەوە** (پێشتر هەر deploy ێک حەوزی سڕیەوە!).
+- DATA_DIR pattern: /data ئەگەر بوو، نەبێت → فۆڵدەری ئەپ (لۆکاڵ).
+- سیدی: /data seeded (17 ئەکاونت) — ڕیستارت → load ساغ.
+- **تاقیکردنەوەی کۆتایی لایڤ**: ca-gemini ✅ (23s) / cb-4o-mini ✅ (6s) / nv-auto ✅ (17s) /
+  مێنیو ١٣٦ / reaper کاری کرد (٢ ئەکاونتی کۆنی تەواوبووی CB سڕی).
