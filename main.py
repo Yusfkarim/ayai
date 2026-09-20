@@ -7387,8 +7387,11 @@ def self_heal_once():
     if MS.get("ak_ok"):
         probes["ak"] = lambda: ak_chat(list(MS["ak_ok"].keys())[0], [{"role": "user", "content": "hi"}], timeout=45)
     # حەوزەکان — گرنگترین
-    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], "gpt-5.4-nano", timeout=50)
-    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=50)
+    # #91Z: probe — یەکەم مۆدێڵی بەردەست لە ca_ok (نەک hard-coded کە لیمێت بووبێت)
+    _ca_m = next(iter(MS["ca_ok"].keys()), "gpt-5.4-nano") if MS.get("ca_ok") else "gpt-5.4-nano"
+    probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], _ca_m, timeout=50)
+    _cb_m = next(iter(MS["cb_ok"].keys()), "4o-mini") if MS.get("cb_ok") else "4o-mini"
+    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], _cb_m, timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
     # #91Z: DARK-RECOVERY — سەرچاوەی بەتاڵ (مانگانە وەک hf) هەر خولی سێیەم هەوڵی زیندووکردنەوە
