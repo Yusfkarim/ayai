@@ -3737,29 +3737,62 @@ def _ca_signup_new():
 PROXY_ST = {"list": [], "src_t": 0.0, "bad": set()}
 
 
+_PROXY_TEST = {"url": "https://identitytoolkit.googleapis.com/", "timeout": 6}
+
+
+def _proxy_check(pxs, cap=18):
+    """تاقیکردنەوەی ڕاستەقینە — تەنها ئەوانەی بە google دەگەن ڕادەگیرێن (نوێ + ئەکتیڤ)"""
+    ok = []
+
+    def _one(px):
+        try:
+            r = requests.get(_PROXY_TEST["url"], proxies={"http": px, "https": px},
+                             timeout=_PROXY_TEST["timeout"])
+            if r.status_code < 500:
+                return px
+        except Exception:
+            return None
+        return None
+
+    ths = [threading.Thread(target=lambda p=px: (ok.append(r)) if (r := _one(p)) else None) for px in pxs[:cap * 3]]
+    for t in ths:
+        t.start()
+    for t in ths:
+        t.join(_PROXY_TEST["timeout"] + 3)
+    return ok[:cap]
+
+
 def _proxy_get(n=4):
-    """پرۆکسی: یەکەم proxies.json (دەستی) → پاش فەرمانحەیزانی خۆڕایی (باشترین هەوڵ)"""
+    """پرۆکسی: proxies.json (دەستی) → سەرچاوە خۆڕاییەکان → **پشکنینی زیندوو** — تەنها ئەکتیڤ"""
     import time as _t
     now = _t.time()
     if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
+        manual = []
         try:
             d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")))
             if isinstance(d, list):
-                PROXY_ST["list"] = [str(x) for x in d if str(x).strip()]
+                manual = [str(x) for x in d if str(x).strip()]
         except Exception:
             pass
-        if not PROXY_ST["list"]:
-            lst = []
+        raw = list(manual)
+        if not raw:
             for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-                      "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=8000"):
+                      "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=8000",
+                      "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
+                      "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"):
                 try:
                     r = requests.get(u, timeout=(8, 14))
-                    lst += [x.strip() for x in r.text.split() if 6 < len(x.strip()) < 60][:60]
+                    raw += [x.strip() for x in r.text.split() if 6 < len(x.strip()) < 60]
                 except Exception:
                     pass
-            PROXY_ST["list"] = list(dict.fromkeys(lst))[:80]
+            raw = list(dict.fromkeys(raw))
+        good = _proxy_check(raw)
+        if manual and not good:
+            good = [p if "://" in p else "http://" + p for p in manual[:6]]  # دەستیلەکان با هەوڵیان لەسەر بکرێت
+        PROXY_ST["list"] = good
+        PROXY_ST["bad"].clear()
         PROXY_ST["src_t"] = now
-        print(f"[PROXY] {len(PROXY_ST['list'])} پرۆکسی ئامادە", flush=True)
+        print(f"[PROXY] {len(raw)} کۆکرا → {len(good)} ئەکتیڤ (پشکنین)", flush=True)
     out = [p if "://" in p else "http://" + p for p in PROXY_ST["list"] if p not in PROXY_ST["bad"]]
     return out[:n]
 
