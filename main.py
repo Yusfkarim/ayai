@@ -3346,6 +3346,11 @@ def _cb_load_acc():
 
 
 def _cb_save_acc():
+    with _SAVE_LOCK:
+        return _cb_save_acc__impl()
+
+
+def _cb_save_acc__impl():
     import json as _j
     try:
         _j.dump({"accounts": CB_ST.get("accounts") or [], "idx": CB_ST["idx"],
@@ -3679,6 +3684,11 @@ def _ca_load_acc():
 
 
 def _ca_save_acc():
+    with _SAVE_LOCK:
+        return _ca_save_acc__impl()
+
+
+def _ca_save_acc__impl():
     import json as _j
     try:
         _j.dump({"accounts": CA_ST.get("accounts") or [], "idx": CA_ST["idx"],
@@ -3734,6 +3744,7 @@ def _ca_signup_new():
 
 
 # ════════ #82/#83: حەوزی ئەکاونت — هەرسێکە (CA+CB+NV) — ٥٠ بۆ هەر یەکێک + پرۆکسی ════════
+_SAVE_LOCK = threading.Lock()  # نووسینی هاوبەشی فایلەکان — تەردی چات + دیمۆن
 PROXY_ST = {"list": [], "src_t": 0.0, "bad": set()}
 
 
@@ -4488,6 +4499,11 @@ def _nv_load_acc():
 
 
 def _nv_save_acc():
+    with _SAVE_LOCK:
+        return _nv_save_acc__impl()
+
+
+def _nv_save_acc__impl():
     import json as _j
     try:
         _j.dump({"accounts": NV_ST.get("accounts") or [], "idx": NV_ST["idx"],
