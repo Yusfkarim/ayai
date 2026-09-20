@@ -5917,8 +5917,13 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     return len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
                 except Exception:
                     return 0
+            try:
+                _self_check()
+            except Exception:
+                pass
             body = {
-                "ok": True,
+                "ok": _STS.get("ok", True),
+                "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
                 "pools": {"ca": _n2("ca_accounts.json"), "cb": _n2("cb_accounts.json"), "nv": _n2("nv_accounts.json")},
@@ -5947,6 +5952,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             return self._send(401, {"error": "API_KEY هەڵەیە — Authorization: Bearer <key>"})
         _PERF["req"] += 1  # #91R2: داواکاری API ۀم بژمێرە
         t_api0 = time.time()
+        # #91U: rate limit per key — 60/خولەک
+        _k = (self.headers.get("Authorization") or "").replace("Bearer ", "").strip()
+        if not _api_rate_ok(_k):
+            return self._send(429, {"error": "rate limit — 60 req/min per key"})
 
         try:
             body = self._body()
@@ -7737,6 +7746,82 @@ def _snapshot_load():
         return []
 
 
+
+# ═══════════ #91U: چینی ULTRA — کراکەری بەقوەتی AI ═══════════
+_API_RL = {}  # key → [t, t, ...] — rate limit per API key
+_API_KEYS = {"sk-yf-31c00f02aa9221b336d7b4a274bb375c": {"name": "primary", "rpm": 60}}
+_STS = {"t": 0.0, "ok": True, "last": ""}
+
+
+def _api_rate_ok(key):
+    """#91U: سەپاندنی ڕێژە — بۆ هەر key ەک (60 داواکاری/خولەک)"""
+    now = time.time()
+    cfg = _API_KEYS.get(key) or {"rpm": 60}
+    win = [t for t in _API_RL.get(key, []) if now - t < 60]
+    if len(win) >= cfg["rpm"]:
+        return False
+    win.append(now)
+    _API_RL[key] = win
+    return True
+
+
+def _self_check():
+    """#91U: خۆپشکنین — نەک تەنها لۆگ — ڕاستەوخۆ تاقیکردنەوەی ناوەکی"""
+    try:
+        br = len(BRAIN["servers"] or [])
+        ap = len(API_BRAIN["servers"] or [])
+        live = sum(1 for v in _HEAL_STATE.get("status", {}).values() if v.get("ok"))
+        _STS["ok"] = br > 0 and ap > 0
+        _STS["last"] = f"br={br} ap={ap} live={live}"
+        _STS["t"] = time.time()
+    except Exception as e:
+        _STS["ok"] = False
+        _STS["last"] = str(e)[:50]
+
+
+def _self_check_daemon():
+    """هەر ٥ خولەک خۆپشکنینی ناوەکی"""
+    time.sleep(300)
+    while True:
+        try:
+            _self_check()
+            if not _STS["ok"]:
+                print(f"[SELF-CHECK] ⚠️ {_STS['last']} — ڕیستارتی خۆکار", flush=True)
+                os._exit(1)
+        except Exception:
+            pass
+        time.sleep(300)
+
+
+def _chaos_daemon():
+    """#91U: CHAOS — تاقیکردنەوەی بەرخودان — هەر ٦ کاتژمێر پرۆبێی نەناسراو"""
+    time.sleep(1800)
+    while True:
+        try:
+            if BRAIN["servers"]:
+                srv = random.choice(BRAIN["servers"][-5:])  # لە کۆتایی لیست — کەمتر بەکارهاتوو
+                k = srv.get("kind")
+                msgs = [{"role": "user", "content": "test"}]
+                t0 = time.time()
+                try:
+                    fn = globals().get(f"{k}_chat")
+                    if fn:
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02"):
+                            a = fn(msgs, srv.get("model_id") or srv.get("id"), timeout=30)
+                        elif k in ("fla", "qb", "ng"):
+                            a = fn(msgs, timeout=30)
+                        else:
+                            a = None
+                        if a:
+                            print(f"[CHAOS] ✅ {k} وەڵامی دا ({time.time()-t0:.1f}s)", flush=True)
+                except Exception as e:
+                    print(f"[CHAOS] ⚠️ {k}: {str(e)[:50]}", flush=True)
+        except Exception:
+            pass
+        time.sleep(21600)  # ٦ کاتژمێر
+
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -7757,6 +7842,8 @@ def main():
     threading.Thread(target=_xarq_watchdog, daemon=True).start()
     threading.Thread(target=_daily_report, daemon=True).start()
     threading.Thread(target=_limit_dawn_daemon, daemon=True).start()
+    threading.Thread(target=_self_check_daemon, daemon=True).start()
+    threading.Thread(target=_chaos_daemon, daemon=True).start()
     print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
