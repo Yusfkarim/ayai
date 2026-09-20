@@ -3822,28 +3822,40 @@ def _proxy_fetch_all():
                 raw.append(f"{x.get('ip')}:{x.get('port')}")
     except Exception:
         pass
-    # #91K: سۆکسی — SOCKS5 + SOCKS4 (کەمتر بلۆک دەکرێن — پارێزراو)
-    for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
-              "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt",
-              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
-              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"):
+    # #91K: سۆکسی — SOCKS5 + SOCKS4 (کەمتر بلۆک دەکرێن — پارێزراو) — بە تاگی scheme
+    socks_raw = []
+    for u, sch in (("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt", "socks4://"),
+                   ("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt", "socks4://")):
         try:
             r = requests.get(u, timeout=(8, 14))
             if r.status_code == 200:
                 for x in r.text.split():
                     x = x.strip()
                     if 6 < len(x) < 60 and ":" in x:
-                        raw.append(x)
+                        socks_raw.append(sch + x)
         except Exception:
             pass
     try:
         r = requests.get("https://proxylist.geonode.com/api/proxy-list?protocols=socks4%2Csocks5&limit=500&sort_by=lastChecked&sort_type=desc", timeout=(8, 16))
         if r.status_code == 200:
             for x in (r.json() or {}).get("data") or []:
-                raw.append(f"{x.get('ip')}:{x.get('port')}")
+                socks_raw.append("socks5://" + f"{x.get('ip')}:{x.get('port')}")
     except Exception:
         pass
+    # تێکەڵکردنی هەمەڕەنگ: هەر شەپۆلێک هەم HTTP ەم سۆکسی بگرێت — لە سەرەتاوە
+    step = max(1, len(socks_raw) // max(1, len(raw) // 6 or 1))
+    mixed = []
+    si = 0
+    for x in raw:
+        mixed.append(x)
+        if si < len(socks_raw) and len(mixed) % 6 == 0:
+            mixed.append(socks_raw[si])
+            si += 1
+    mixed.extend(socks_raw[si:])
+    raw = mixed
     # وێبشەیر — ئەگەر تۆکەن لە /data/webshare.json هەبێت → ١٠ پرۆکسی DC ی هەمیشەیی
     try:
         ws = json.load(open(os.path.join(DATA_DIR, "webshare.json")))
@@ -3990,6 +4002,7 @@ def _proxy_get(n=4):
     pool = PROXY_ST.get("pool") or {}
     if pool:
         ranked = sorted(pool.items(), key=lambda kv: (kv[1] or {}).get("lat", 9))
+        out = []
         http_got, socks_got = 0, 0
         for k, _ in ranked:
             if k in PROXY_ST["bad"]:
