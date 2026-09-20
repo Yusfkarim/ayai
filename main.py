@@ -6031,7 +6031,16 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     order.append(cand)
 
         content, last_err = "", None
-        order = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)] or order
+        _flt = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)]
+        if _flt:
+            order = _flt
+        else:
+            _seen, _min = set(), []
+            for c in order:
+                if c.get("kind") not in _seen:
+                    _seen.add(c.get("kind"))
+                    _min.append(c)
+            order = _min[:3]
         for cand in order:
             try:
                 kind = cand.get("kind")
@@ -6698,7 +6707,17 @@ def ask(session, question):
         if cand and cand not in order:
             order.append(cand)
     last = None
-    order = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)] or order
+    _flt = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)]
+    if _flt:
+        order = _flt
+    # #91F3: ئەگەر هەموو breaker بوون — تەنها یەکەم ی هەر سەرچاوەیەکی جیاواز (نەک هەموو دووبارە)
+    else:
+        _seen, _min = set(), []
+        for c in order:
+            if c.get("kind") not in _seen:
+                _seen.add(c.get("kind"))
+                _min.append(c)
+        order = _min[:3]
     for cand in order:
         try:
             k = cand.get("kind")
@@ -7723,7 +7742,25 @@ def _cracked_req(self, method, url, **kw):
                 except Exception:
                     pass
             time.sleep(random.uniform(0.3, 1.0))
-            r2 = _orig_sess_req(self, method, url, **kw2)
+            r2 = None
+            # #91ST+: TLS-STEALTH — یەکەم دووبارە بە curl_cffi (پەنجەمۆری وێبگەڕ)
+            try:
+                lib = _STEALTH_TLS.get("lib")
+                if lib and _STEALTH_TLS.get("enabled") and not kw2.get("stream"):
+                    _m2 = method.lower()
+                    _u2 = str(url)
+                    _h2 = {**dict(self.headers or {}), **h}
+                    _imp = random.choice(_CF_IMPERSONATE)
+                    if _m2 == "get":
+                        r2 = lib.get(_u2, impersonate=_imp, headers=_h2,
+                                     timeout=(10, max(15, int((kw2.get("timeout") or (10, 30))[-1]) if not isinstance(kw2.get("timeout"), int) else 30)))
+                    elif _m2 == "post" and kw2.get("json") is not None:
+                        r2 = lib.post(_u2, impersonate=_imp, headers=_h2, json=kw2["json"],
+                                      timeout=(10, 45))
+            except Exception:
+                r2 = None
+            if r2 is None:
+                r2 = _orig_sess_req(self, method, url, **kw2)
             if r2.status_code not in (403, 418, 429, 502, 503):
                 _CRACK["hot"][dom] = 0
             return r2
@@ -8050,7 +8087,14 @@ def _shadow_watch_daemon():
             # MODEL_SOURCES — مۆدێڵی تک-سەرچاوە = مەترسی
             risky = [k for k, v in MODEL_SOURCES.items() if len(v) == 1]
             if risky:
-                print(f"[SHADOW] ⚠️ {len(risky)} مۆدێڵی تک-سەرچاوە (مەترسی)", flush=True)
+                # #91T+: بۆ هەر مۆدێڵی تک — خێزانەکەی بدۆزە و fallback ی خێزانی پشتڕاست بکە
+                fams = {}
+                for k in risky:
+                    fam = _model_family(k)
+                    if fam:
+                        fams.setdefault(fam, []).append(k)
+                big = {f: len(v) for f, v in fams.items() if len(v) >= 3}
+                print(f"[SHADOW] ⚠️ {len(risky)} تک-سەرچاوە | خێزانە گەورەکان: {big or '—'}", flush=True)
             # گەرمترین مۆدێڵەکان لە کاش
             hot = sorted(_ANS_CACHE.items(), key=lambda x: x[1][0], reverse=True)[:5]
             if hot:
