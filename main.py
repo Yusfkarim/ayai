@@ -3814,9 +3814,31 @@ def _proxy_fetch_all():
         t.start()
     for t in ths:
         t.join(20)
-    # Geonode API — JSON، گەورەترین سەرچاوە
+    # Geonode API — JSON، گەورەترین سەرچاوە (HTTP + HTTPS)
     try:
         r = requests.get("https://proxylist.geonode.com/api/proxy-list?protocols=http%2Chttps&limit=500&sort_by=lastChecked&sort_type=desc", timeout=(8, 16))
+        if r.status_code == 200:
+            for x in (r.json() or {}).get("data") or []:
+                raw.append(f"{x.get('ip')}:{x.get('port')}")
+    except Exception:
+        pass
+    # #91K: سۆکسی — SOCKS5 + SOCKS4 (کەمتر بلۆک دەکرێن — پارێزراو)
+    for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt",
+              "https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt",
+              "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt",
+              "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt"):
+        try:
+            r = requests.get(u, timeout=(8, 14))
+            if r.status_code == 200:
+                for x in r.text.split():
+                    x = x.strip()
+                    if 6 < len(x) < 60 and ":" in x:
+                        raw.append(x)
+        except Exception:
+            pass
+    try:
+        r = requests.get("https://proxylist.geonode.com/api/proxy-list?protocols=socks4%2Csocks5&limit=500&sort_by=lastChecked&sort_type=desc", timeout=(8, 16))
         if r.status_code == 200:
             for x in (r.json() or {}).get("data") or []:
                 raw.append(f"{x.get('ip')}:{x.get('port')}")
@@ -3846,7 +3868,11 @@ def _proxy_screen(batch, tmo=8):
     def _one(px):
         try:
             t0 = time.time()
-            r = requests.get("http://www.google.com/generate_204", proxies={"http": px, "https": px}, timeout=tmo)
+            if px.startswith("socks4://") or px.startswith("socks5://"):
+                pr = {"http": px.replace("socks5://", "socks5h://"), "https": px.replace("socks5://", "socks5h://")}
+            else:
+                pr = {"http": px, "https": px}
+            r = requests.get("http://www.google.com/generate_204", proxies=pr, timeout=tmo)
             if r.status_code < 500:
                 with _lk:
                     res.append((time.time() - t0, px))
@@ -3905,7 +3931,7 @@ def _proxy_pool_load():
             pass
 
 
-def _harvest_wave(wave=160):
+def _harvest_wave(wave=190):
     """#91H: یەک شەپۆل — خولانەوەی لیستی ڕاو بەبێ دووبارە، تا هەموو پرۆکسییەکان پشکنراون"""
     now = time.time()
     raw = PROXY_ST.get("raw") or []
@@ -3932,14 +3958,15 @@ def _harvest_wave(wave=160):
         PROXY_ST["cur"] = 0  # هەموو لیست پشکنراوە — لە سەرەتاوە بە قۆناغی نوێ
         return
     res = _proxy_screen(batch)
+    n_socks = sum(1 for _, px in res if px.startswith("socks"))
     for lat, px in res:
         pool[px] = {"t": now, "lat": round(lat, 2)}
     PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
-    if len(PROXY_ST["pool"]) > 80:
-        keep = sorted(PROXY_ST["pool"].items(), key=lambda kv: kv[1].get("lat", 9))[:80]
+    if len(PROXY_ST["pool"]) > 100:
+        keep = sorted(PROXY_ST["pool"].items(), key=lambda kv: kv[1].get("lat", 9))[:100]
         PROXY_ST["pool"] = dict(keep)
     _proxy_pool_save()
-    print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
+    print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو (socks: {n_socks}) | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
 
 
 def _proxy_harvester_daemon():
@@ -3947,7 +3974,7 @@ def _proxy_harvester_daemon():
     time.sleep(45)
     while True:
         try:
-            _harvest_wave(160)
+            _harvest_wave(190)
         except Exception as e:
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
         time.sleep(240)
@@ -3963,9 +3990,23 @@ def _proxy_get(n=4):
     pool = PROXY_ST.get("pool") or {}
     if pool:
         ranked = sorted(pool.items(), key=lambda kv: (kv[1] or {}).get("lat", 9))
-        out = [(k if "://" in k else "http://" + k) for k, _ in ranked if k not in PROXY_ST["bad"]]
+        http_got, socks_got = 0, 0
+        for k, _ in ranked:
+            if k in PROXY_ST["bad"]:
+                continue
+            if k.startswith("socks4://") or k.startswith("socks5://"):
+                if socks_got >= max(2, n // 3):
+                    continue
+                socks_got += 1
+            else:
+                if http_got >= max(1, n - max(2, n // 3)):
+                    continue
+                http_got += 1
+            out.append(k if "://" in k else "http://" + k)
+            if len(out) >= n:
+                break
         if out:
-            return out[:n]
+            return out
     if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
         manual = []
         for _pf in (os.path.join(DATA_DIR, "proxies.json"),
@@ -3990,8 +4031,19 @@ def _proxy_get(n=4):
         PROXY_ST["bad"].clear()
         PROXY_ST["src_t"] = now
         print(f"[PROXY] {len(raw)} کۆکرا → {len(good)} ئەکتیڤ (پشکنین)", flush=True)
-    out = [p if "://" in p else "http://" + p for p in PROXY_ST["list"] if p not in PROXY_ST["bad"]]
-    return out[:n]
+    out = []
+    for p in PROXY_ST["list"]:
+        if p in PROXY_ST["bad"]:
+            continue
+        if "://" in p:
+            out.append(p)
+        else:
+            out.append("http://" + p)
+    out2 = []
+    for p in out:
+        if p not in out2:
+            out2.append(p)
+    return out2[:n]
 
 
 _FB_BLOCK = ("TOO_MANY_ATTEMPTS_TRY_LATER", "OPERATION_NOT_ALLOWED", "QUOTA_EXCEEDED", "RESOURCE_EXHAUSTED")
