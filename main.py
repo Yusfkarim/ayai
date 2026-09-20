@@ -671,17 +671,22 @@ def cbc_chat(messages, model=None, timeout=120):
         "id": _cbc_md5(acc), "timestamp": timestamp, "nonce": nonce,
         "messages": messages, "url": CBC_BASE + "/",
     }
-    # #91CB: پرۆکسی — ئەگەر لە داواکاری پێشوو لیمێتی میوان بوو، ڕاستەوخۆ بە پرۆکسی
-    px_list = _CBC_PROXY.get("on") and _proxy_get(3) or []
+    # #91CB: ڕۆتیشن — یەکەم هەوڵ ڕاستەوخۆ، ئەگەر لیمێتی میوان → پرۆکسی
     last_g = None
-    for _pxtry in range(3):
-        _kw = {"proxies": ({"http": px_list[_pxtry], "https": px_list[_pxtry]} if _pxtry < len(px_list) else None)}
-        r = requests.post(CBC_BASE + "/api", headers={**hdrs, "Content-Type": "application/json",
-                                                      "Accept": "text/event-stream"},
-                          json=payload, timeout=timeout, stream=True, **{k: v for k, v in _kw.items() if v})
+    px_list = []
+    for _pxtry in range(4):
+        _px = px_list[_pxtry] if _pxtry < len(px_list) else None
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
+        try:
+            r = requests.post(CBC_BASE + "/api", headers={**hdrs, "Content-Type": "application/json",
+                                                          "Accept": "text/event-stream"},
+                              json=payload, timeout=timeout, stream=True, **_kw)
+        except Exception:
+            if _pxtry == 0:
+                px_list = _CBC_PROXY.get("on") and _proxy_get(3) or []
+            continue
         if r.status_code == 429:
             raise EMError("cbc: سنووری ڕێژە (429)")
-        # ستریمی کورت — code ەکە دەرکەوت → لیمێتی میوان بوو → پرۆکسی نوێ
         _hit = False
         for line in r.iter_lines(decode_unicode=True):
             if not line:
@@ -695,16 +700,13 @@ def cbc_chat(messages, model=None, timeout=120):
                 continue
             if j0.get("code") == "dailyChatLimitOfGuest":
                 _hit = True
-                break
-            # نا-لیمێت → بڕۆ بۆ خولی سەرەکی (stream ەکە داخراوە — بە دووبارەی نوێ دەگەڕێینەوە)
-            _hit = False
             break
         if not _hit:
-            # ئەم داواکارییە باش بوو — بەڵام stream بەکارهێنراوە — لێرەدا دەستپێبکەوە بە هەمان پرۆکسی
             return _cbc_stream_read(r, hdrs, payload, timeout, messages)
-        last_g = _hit
-        print(f"[CBC] لیمێتی میوان لە IP — پرۆکسی {_pxtry + 2}/3…", flush=True)
-    raise EMError("cbc: سنووری ڕۆژانەی میوان (هەموو پرۆکسییەکان)")
+        if not px_list:
+            px_list = _CBC_PROXY.get("on") and _proxy_get(3) or []
+        print(f"[CBC] لیمێتی میوان — پرۆکسی {_pxtry + 2}/4…", flush=True)
+    raise EMError("cbc: سنووری ڕۆژانەی میوان")
 
 
 # ════════════════════════════════════════════════════════════
