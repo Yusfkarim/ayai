@@ -3874,17 +3874,27 @@ def _proxy_fetch_all():
     if len(raw) > 40000:
         random.shuffle(raw)
         raw = raw[:40000]  # #91R: سنووری ڕاو — بۆ خێرایی خولانەوە
-    # وێبشەیر — ئەگەر تۆکەن لە /data/webshare.json هەبێت → ١٠ پرۆکسی DC ی هەمیشەیی
+    # #91W: وێبشەیر — ئەگەر تۆکەن هەبێت → هەموو جۆرەکانی (پرێمیۆم + داتاسنتر + منزلی) — خۆکارانە
     try:
         ws = json.load(open(os.path.join(DATA_DIR, "webshare.json")))
         tk = (ws or {}).get("token")
         if tk:
-            r = requests.get("https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=25",
-                             headers={"Authorization": "Token " + tk}, timeout=(8, 16))
-            if r.status_code == 200:
-                for x in (r.json() or {}).get("results") or []:
-                    raw.append(f"{x.get('proxy_address')}:{x.get('port')}")
-                print(f"[PROXY-WS] وێبشەیر: {len((r.json() or {}).get('results') or [])} پرۆکسی DC", flush=True)
+            _got = 0
+            for _mode in ("residential", "datacenter"):
+                try:
+                    r = requests.get(f"https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=25&type={_mode}",
+                                     headers={"Authorization": "Token " + tk}, timeout=(8, 16))
+                    if r.status_code == 200:
+                        _res = (r.json() or {}).get("results") or []
+                        for x in _res:
+                            raw.append(f"{x.get('proxy_address')}:{x.get('port')}")
+                        _got += len(_res)
+                        if _res:
+                            print(f"[PROXY-WS] وێبشەیر {_mode}: {len(_res)}", flush=True)
+                except Exception:
+                    pass
+            if _got:
+                print(f"[PROXY-WS] کۆی گشتی وێبشەیر: {_got}", flush=True)
     except Exception:
         pass
     return list(dict.fromkeys([x for x in raw if x]))
