@@ -7388,8 +7388,7 @@ def self_heal_once():
         probes["ak"] = lambda: ak_chat(list(MS["ak_ok"].keys())[0], [{"role": "user", "content": "hi"}], timeout=45)
     # حەوزەکان — گرنگترین
     # #91Z: probe — مۆدێڵێکی کەم-داواکاری (nano لەوانەیە هەموو ئەکاونتەکانی limit بێت)
-    _ca_m = "gemini-3.5-flash" if MS.get("ca_ok") and "gemini-3.5-flash" in MS["ca_ok"] else (
-        next((k for k in MS.get("ca_ok", {}) if "gemini" in k), "gpt-5.4-nano"))
+    _ca_m = next((k for k in MS.get("ca_ok", {}) if "gemini" in k or "claude" in k), "gpt-5.4-nano")
     probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], _ca_m, timeout=50)
     _cb_m = next(iter(MS["cb_ok"].keys()), "4o-mini") if MS.get("cb_ok") else "4o-mini"
     probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], _cb_m, timeout=50)
