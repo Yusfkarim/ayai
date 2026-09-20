@@ -6970,6 +6970,17 @@ def self_heal_once():
     print(f"[SELF-HEAL] {line}", flush=True)
 
 
+def _proxy_refresh_sources():
+    """#91: تازەکردنەوەی لیستی پرۆکسی زیندوو — بەزۆر _proxy_get لیستەکە دادەنێت"""
+    try:
+        pl = _proxy_get(18)
+        if pl:
+            PROXY_ST["list"] = [p.replace("://", "://") for p in pl]
+            PROXY_ST["src_t"] = time.time()
+    except Exception as e:
+        print(f"[PROXY-KEEPER] refresh: {str(e)[:50]}", flush=True)
+
+
 def proxy_keeper_daemon():
     """#91: چاودێری پرۆکسی — هەر ٣٠ خولەک + 🔭 دۆزینەوەی مۆدێڵی نوێ هەر ٦ کاتژمێر"""
     time.sleep(120)
