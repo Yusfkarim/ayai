@@ -5667,6 +5667,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     break
             except Exception as e:
                 last_err = e
+                _limit_recharge(cand.get("kind"), e)
                 print(f"[API] {cand.get('kind')} هەڵە: {str(e)[:90]}", flush=True)
         if not content:
             # ═══ دیلی نەوە (API): مۆدێڵی داواکراو مردووە → نوێترین نەوەی هەمان خێزان ═══
@@ -6168,6 +6169,55 @@ def get_session(user_id):
         return s
 
 
+_LIMIT_RECHARGE_T = {}
+
+
+def _is_limit_err(err):
+    """#91: ئایا هەڵەکە لیمیتە؟ (402/429/credit/quota/limit/rate...)"""
+    s = str(err).lower()
+    return any(x in s for x in ("402", "429", "credit", "quota", "limit", "depleted", "exceed", "rate", "no free", "usage cap", "monthly"))
+
+
+def _limit_recharge(kind, err):
+    """#91: لیمیت تەواو بوو → یەکسان پڕکردنەوەی لیمیت:
+       حەوز=ئەکاونتی نوێ | g4f=کرێدی نوێ | ac=سایناپ نوێ | ئەوانی تر=تۆکێن+پرۆکسی نوێ"""
+    if not kind or not _is_limit_err(err):
+        return
+    now = time.time()
+    if now - _LIMIT_RECHARGE_T.get(kind, 0) < 240:
+        return
+    _LIMIT_RECHARGE_T[kind] = now
+    try:
+        if kind in ("ca", "cb", "nv"):
+            _pool_reap()
+            print(f"[LIMIT-RECHARGE] {kind}: حەوز پاککرایەوە — ئەکاونتی نوێ جێگۆڕین", flush=True)
+        elif kind == "g4f":
+            threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
+            print(f"[LIMIT-RECHARGE] g4f: دروستکردنی کرێدی نوێ...", flush=True)
+        elif kind == "ac":
+            threading.Thread(target=_ac_signup_new, daemon=True).start()
+            print(f"[LIMIT-RECHARGE] ac: ئەکاونتی نوێ دروست دەکرێت...", flush=True)
+        else:
+            def _rs():
+                try:
+                    f = globals().get(f"sync_{kind}_models")
+                    if f:
+                        try:
+                            f(force=True)
+                        except TypeError:
+                            f([])
+                except Exception:
+                    pass
+                try:
+                    _proxy_get(1)
+                except Exception:
+                    pass
+            threading.Thread(target=_rs, daemon=True).start()
+            print(f"[LIMIT-RECHARGE] {kind}: تۆکێنی نوێ + پرۆکسی نوێ...", flush=True)
+    except Exception as e:
+        print(f"[LIMIT-RECHARGE] {kind}: {str(e)[:50]}", flush=True)
+
+
 def ask(session, question):
     """پرسیار — مۆدێڵی هەڵبژارد + زنجیرەی fallback: easemate → aifreeforever → pollinations"""
     history = session["history"]
@@ -6369,6 +6419,7 @@ def ask(session, question):
             return pol_chat(cand["id"], msgs), "pol"
         except Exception as e:
             last = e
+            _limit_recharge(cand.get("kind"), e)
             print(f"[BRAIN] {cand.get('kind', '?')} ({cand.get('id', '?')}) هەڵە: {str(e)[:80]}", flush=True)
     # ═══ دیلی نەوە: هەموو زنجیرەکە بۆ ئەم مۆدێڵە مردووە → نوێترین نەوە بپشکنە ═══
     if BRAIN["servers"] and question:
