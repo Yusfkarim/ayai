@@ -3251,6 +3251,16 @@ def _gz_parse_catalog(raw):
     return out
 
 
+def _gz_parse_catalog(t):
+    """#91A6: safe-wrapper — parser هەرگیز sync ەک ناکوژێنێت"""
+    try:
+        return _gz_parse_catalog__raw(t)
+    except Exception:
+        return None
+
+
+_gz_parse_catalog__raw = _gz_parse_catalog
+
 def sync_giz_models(force=False):
     """ئۆتۆ-ئەپدێتی GizAI: کاتالۆگی CDN (٦ کاتژمێر) — بێ probe (کوانتا نەسوتێت)؛
     فیلتەر: gateway/* (پارەدار) و free-limit-0 و شاراوە دەر دەکرێن"""
@@ -4522,6 +4532,16 @@ def _ca_extract_models(html):
             return cfg["models"]
     return None
 
+
+def _ca_extract_models(html):
+    """#91A6: safe-wrapper — parser هەرگیز sync ەک ناکوژێنێت"""
+    try:
+        return _ca_extract_models__raw(html)
+    except Exception:
+        return None
+
+
+_ca_extract_models__raw = _ca_extract_models
 
 def sync_ca_models(force=False):
     """ئۆتۆ-ئەپدێتی ChatbotAI: نەخشەی مۆدێڵەکان لە HTML ی /chat — ٦ کاتژمێر"""
@@ -7078,7 +7098,18 @@ def ask(session, question):
 
 
 def split_msg(t, n=3900):
-    return [t[i:i + n] for i in range(0, len(t), n)]
+    """#91A10: بڕین لە دێڕی نوێ — tag ی HTML نابڕدرێت (TG parse دەمێنێت ساغ)"""
+    out = []
+    while t:
+        if len(t) <= n:
+            out.append(t)
+            break
+        cut = t.rfind("\n", n // 2, n)
+        if cut < 0:
+            cut = n
+        out.append(t[:cut])
+        t = t[cut:].lstrip("\n")
+    return out
 
 
 def keep_typing(chat_id, stop):
@@ -7102,9 +7133,10 @@ def reply(chat_id, text):
             break
     if ok2:
         return
-    # دووەم: بەبێ HTML — ئێسکەیپ
+    # دووەم: بەبێ HTML — ئێسکەیپ ی تەواو (& لە & پێش < — ڕیزبەندی گرنگە)
     for part in split_msg(text):
-        tg("sendMessage", chat_id=chat_id, text=part.replace("<", "&lt;"))
+        tg("sendMessage", chat_id=chat_id,
+           text=part.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def handle_message(msg):
@@ -7791,20 +7823,23 @@ def _cracked_req(self, method, url, **kw):
                     pass
             time.sleep(random.uniform(0.3, 1.0))
             r2 = None
-            # #91ST+: TLS-STEALTH — یەکەم دووبارە بە curl_cffi (پەنجەمۆری وێبگەڕ)
+            # #91ST+/A8: TLS-STEALTH — یەکەم دووبارە بە curl_cffi (پەنجەمۆری وێبگەڕ) — STREAM ەش
             try:
                 lib = _STEALTH_TLS.get("lib")
-                if lib and _STEALTH_TLS.get("enabled") and not kw2.get("stream"):
+                if lib and _STEALTH_TLS.get("enabled"):
                     _m2 = method.lower()
                     _u2 = str(url)
                     _h2 = {**dict(self.headers or {}), **h}
                     _imp = random.choice(_CF_IMPERSONATE)
                     if _m2 == "get":
+                        _kw2s = {"stream": True} if kw2.get("stream") else {}
                         r2 = lib.get(_u2, impersonate=_imp, headers=_h2,
-                                     timeout=(10, max(15, int((kw2.get("timeout") or (10, 30))[-1]) if not isinstance(kw2.get("timeout"), int) else 30)))
+                                     timeout=(10, max(15, int((kw2.get("timeout") or (10, 30))[-1]) if not isinstance(kw2.get("timeout"), int) else 30)),
+                                     **_kw2s)
                     elif _m2 == "post" and kw2.get("json") is not None:
+                        _kw2s = {"stream": True} if kw2.get("stream") else {}
                         r2 = lib.post(_u2, impersonate=_imp, headers=_h2, json=kw2["json"],
-                                      timeout=(10, 45))
+                                      timeout=(10, 45), **_kw2s)
             except Exception:
                 r2 = None
             if r2 is None:
@@ -8313,6 +8348,9 @@ def _hk_try_routes(kind, url, method="GET", **kw):
             r = fn()
             if r.status_code < 500:
                 _HK_ST["wins"] += 1
+                # #91A7: سنووری بیرگە — زۆرترین 200 دۆمەین
+                if len(_HK_ST["routes"]) > 200:
+                    _HK_ST["routes"].pop(next(iter(_HK_ST["routes"])), None)
                 _HK_ST["routes"][url.split("/")[2] if "://" in url else url] = nm
                 return r
             last = EMError(f"{nm}: HTTP{r.status_code}")
