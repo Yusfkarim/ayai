@@ -537,13 +537,19 @@ def em_servers():
              "tier": m.get("tier", "basic"), "kind": "em"} for m in live]
 
 
-def em_chat(messages, model_id, timeout=170, depth=0):
-    """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی + ناسنامەی نوێ"""
+def em_chat(messages, model_id, timeout=90, depth=0):
+    """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی + ناسنامەی نوێ
+       #91F4: timeout 90s + zombie-kill (ناگوازرێ)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     try:
         p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
                            capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
+        # #91F4: کوشتنی هەموو node ەکەی کۆن (زۆرترین 3)
+        try:
+            subprocess.run(["pkill", "-f", EM_CLIENT.split("/")[-1]], capture_output=True, timeout=5)
+        except Exception:
+            pass
         raise EMError("easemate timeout")
     lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
     if not lines:
@@ -7138,7 +7144,9 @@ def handle_message(msg):
         br = {k: int(v - time.time()) for k, v in _BREAKER.items() if v > time.time()}
         up = int(time.time() - BOOT_T)
         _uptxt = f"{up // 3600} کاتژمێر و {(up % 3600) // 60} خولەک" if up >= 3600 else f"{up // 60} خولەک"
+        _hk = _hk_stats()
         reply(chat_id, f"📈 <b>ئامارەکانی سیستەمی خارق</b>\n"
+                      f"🕵 هاکەر: {_hk['wins']}/{_hk['tries']} سەرکەوتوو | ڕێگاکان: {', '.join(f'{k}={v}' for k, v in _hk['routes'].items()) or '—'}\n"
                       f"⏱ کاراک: {_uptxt}\n"
                       f"⚡ داواکاری: {_PERF['req']} — ✅ {_PERF['ok']} / ❌ {_PERF['fail']}\n"
                       f"⏳ تێکڕای وەڵام: {avg:.1f} چرکە\n"
@@ -7558,6 +7566,11 @@ def ask(session, question):
             return "⚠️ رسائل كثيرة جدًا — انتظر دقيقة ثم أعد الإرسال."
         ql.append(now)
         _USER_Q[uid] = ql
+        # #91F4: پاککردنەوەی بەکارهێنەری کۆن (memory)
+        if len(_USER_Q) > 500:
+            for u2 in list(_USER_Q.keys())[:250]:
+                if not [t for t in _USER_Q.get(u2, []) if now - t < 300]:
+                    _USER_Q.pop(u2, None)
     _hist = session.get("history") or []
     ck = (str(session.get("mkey") or session.get("server") or ""),
           _uq(str(_hist[-6:]) + "||" + str(question)))  # #91Z: کۆنتێکستیش لە کلیل
@@ -8159,6 +8172,9 @@ def _pool_sess(dom):
     """#91ST: سێشنی گەرم بۆ دۆمەین — کوکییەکان دەمێننەوە = بەکارهێنەری گەڕاوە"""
     s = _SESSION_POOL.get(dom)
     if not s:
+        # #91F4: سنووری پۆڵ — 40 دۆمەین (memory guard)
+        if len(_SESSION_POOL) > 40:
+            _SESSION_POOL.pop(next(iter(_SESSION_POOL)), None)
         s = requests.Session()
         s.headers.update({"User-Agent": _rand_ua(),
                           "Accept-Language": random.choice(["en-US,en;q=0.9", "en-GB,en;q=0.8", "en;q=0.7"]),
@@ -8206,6 +8222,74 @@ def _admin_test_model(chat_id, model_ref):
             reply(chat_id, f"❌ <b>شکستی هێنا</b> ({dt:.1f}s)\n⚠️ {err}")
     except Exception as e:
         reply(chat_id, f"❌ <b>هەڵە:</b> {str(e)[:80]}")
+
+
+
+# ═══════════ #91HK: AI-HACKER — کراکەری زیرەکی خۆکار ═══════════
+_HK_ST = {"routes": {}, "t": 0.0, "wins": 0, "tries": 0}
+
+
+def _hk_try_routes(kind, url, method="GET", **kw):
+    """#91HK: ڕێگای جیاواز بۆ هەمان ئامانج — وەک هاکەری ڕاستەقینە:
+       1) ڕاستەوخۆ  2) curl_cffi impersonate  3) پرۆکسی  4) mobile UA  5) curl_cffi + پرۆکسی"""
+    routes = []
+    lib = _STEALTH_TLS.get("lib")
+    # ڕێگای ١: ڕاستەوخۆ
+    routes.append(("direct", lambda: requests.request(method, url, timeout=(8, 20), **kw)))
+    # ڕێگای ٢: TLS
+    if lib:
+        routes.append(("tls", lambda: lib.request(method, url, impersonate=random.choice(_CF_IMPERSONATE),
+                                                  timeout=(8, 20), **kw)))
+    # ڕێگای ٣: پرۆکسی
+    def _via_proxy():
+        pl = _proxy_get(2)
+        if not pl:
+            raise EMError("no proxy")
+        px = random.choice(pl)
+        return requests.request(method, url, proxies={"http": px, "https": px}, timeout=(10, 25), **kw)
+    routes.append(("proxy", _via_proxy))
+    # ڕێگای ٤: mobile UA + TLS
+    if lib:
+        def _mob():
+            mob = [u for u in _UA_POOL if "Mobile" in u or "Android" in u or "iPhone" in u]
+            h = dict(kw.pop("headers", {}) or {})
+            h["User-Agent"] = random.choice(mob)
+            return lib.request(method, url, impersonate=random.choice(["safari15_5", "chrome120"]),
+                               headers=h, timeout=(8, 20), **kw)
+        routes.append(("mobile-tls", _mob))
+    # ڕێگای ٥: TLS + پرۆکسی
+    if lib:
+        def _tls_px():
+            pl = _proxy_get(2)
+            if not pl:
+                raise EMError("no proxy")
+            px = random.choice(pl)
+            return lib.request(method, url, impersonate=random.choice(_CF_IMPERSONATE),
+                               proxies={"http": px, "https": px}, timeout=(10, 30), **kw)
+        routes.append(("tls-proxy", _tls_px))
+    # تاقیکردنەوەی ڕیزبەندی — لە کۆتایی: چی کار دەکات بیر دەکرێتەوە (route-memoization)
+    prev = _HK_ST["routes"].get(dom_of := url.split("/")[2] if "://" in url else url)
+    if prev:
+        routes.sort(key=lambda x: 0 if x[0] == prev else 1)
+    last = None
+    for nm, fn in routes:
+        try:
+            _HK_ST["tries"] += 1
+            r = fn()
+            if r.status_code < 500:
+                _HK_ST["wins"] += 1
+                _HK_ST["routes"][url.split("/")[2] if "://" in url else url] = nm
+                return r
+            last = EMError(f"{nm}: HTTP{r.status_code}")
+        except Exception as e:
+            last = e
+    raise last or EMError("hk: هەموو ڕێگاکان")
+
+
+def _hk_stats():
+    """ئاماری هاکەر"""
+    return {"tries": _HK_ST["tries"], "wins": _HK_ST["wins"],
+            "routes": dict(list(_HK_ST["routes"].items())[:6])}
 
 
 def main():
