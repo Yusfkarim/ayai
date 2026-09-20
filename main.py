@@ -22,6 +22,9 @@ import shutil
 
 import requests
 
+# ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
+DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
+
 # ════════════════════════════════════════════════════════════
 # ١) مێشکی یەکەم — aifreeforever.com
 # ════════════════════════════════════════════════════════════
@@ -2061,7 +2064,7 @@ def ng_chat(messages, timeout=110):
 #      duck: لیست لە bundle ی فەرمییەوە | ak: پڕۆب ی بچووک بۆ مۆدێڵی نوێ
 # ════════════════════════════════════════════════════════════
 
-MODEL_SYNC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_sync.json")
+MODEL_SYNC_FILE = os.path.join(DATA_DIR, "model_sync.json")
 MS = {"duck": {}, "ak_ok": {}, "ak_block": {}, "l7_ok": {}, "l7_bad": {}, "ct_ok": {}, "ct_bad": {}, "yl_ok": {}, "yl_bad": {}, "hk_ok": {}, "hk_bad": {}, "hf_ok": {}, "hf_bad": {}, "aka_ok": {}, "aka_bad": {}, "hb_ok": {}, "hb_bad": {}, "gk_ok": {}, "gk_bad": {}, "gz_ok": {}, "gz_bad": {}, "pi_ok": {}, "pi_bad": {}, "cb_ok": {}, "cb_bad": {}, "nv_ok": {}, "nv_bad": {}, "al_ok": {}, "al_bad": {}, "aiml_ok": {}}
 MS_T = {"duck": 0.0, "ak": 0.0, "l7": 0.0, "ct": 0.0, "yl": 0.0, "hk": 0.0, "hf": 0.0, "aka": 0.0, "hb": 0.0, "gk": 0.0, "gz": 0.0, "pi": 0.0, "cb": 0.0, "ac": 0.0, "nv": 0.0, "al": 0.0}
 MS_LOCK = threading.Lock()
@@ -3320,7 +3323,7 @@ CB_KEY = "AIzaSyBQLxwsoGGyo0DOI-P8IdRWDAE401me8E8"
 CB_BASE = "https://api.chatbotapp.ai"
 CB_CMS = "https://webcms.chatbotapp.ai/api/ai-models?populate[]=tags&populate[]=examples&populate[]=suggestions&pagination[pageSize]=100"
 CB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-CB_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cb_accounts.json")
+CB_ACC_FILE = os.path.join(DATA_DIR, "cb_accounts.json")
 CB_FREE_BOTS = {104: "4o-mini", 107: "gpt-4.1-mini", 113: "gpt-5.1", 117: "gpt-5.4-mini",
                 200: "gemini-2.5-flash", 202: "gemini-3-flash", 204: "gemini-3.1-flash-lite",
                 301: "deepSeek", 302: "deepseek-v4-flash", 502: "claude-4.5-haiku"}
@@ -3635,7 +3638,7 @@ def sync_cb_models(force=False):
 CA_KEY = "AIzaSyDHatafp1HL1DKD0Id1UVHPGQY8m_eseAk"
 CA_BASE = "https://chatbotai.co"
 CA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-CA_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ca_accounts.json")
+CA_ACC_FILE = os.path.join(DATA_DIR, "ca_accounts.json")
 CA_ST = {"tok": None, "tok_t": 0.0, "idx": 0, "next_num": 82401,
          "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
                       {"email": "komex82400@duidir.com", "password": "komex82400@duidir.com"}],
@@ -3779,12 +3782,16 @@ def _proxy_get(n=4):
     now = _t.time()
     if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
         manual = []
-        try:
-            d = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")))
-            if isinstance(d, list):
-                manual = [str(x) for x in d if str(x).strip()]
-        except Exception:
-            pass
+        for _pf in (os.path.join(DATA_DIR, "proxies.json"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")):
+            try:
+                d = json.load(open(_pf))
+                if isinstance(d, list):
+                    manual = [str(x) for x in d if str(x).strip()]
+                    if manual:
+                        break
+            except Exception:
+                pass
         raw = list(manual)
         if not raw:
             for u in ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
@@ -4459,7 +4466,7 @@ NV_KEY = "AIzaSyAOuqWxL44t4n0_uF00qj7jh8kmb8Ly9s0"
 NV_BASE = "https://api.novaapp.ai"
 NV_CMS = "https://webcms.novaapp.ai/api/ai-models?populate[]=tags&populate[]=examples&populate[]=suggestions&pagination[pageSize]=100"
 NV_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-NV_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nv_accounts.json")
+NV_ACC_FILE = os.path.join(DATA_DIR, "nv_accounts.json")
 NV_ST = {"tok": None, "uid": None, "tok_t": 0.0, "idx": 0, "next_num": 82416,
          "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
                       {"email": "komex82414@duidir.com", "password": "komex82414@duidir.com"},
@@ -4785,7 +4792,7 @@ AL_SB = "https://felzqwdxfitazkrktyke.supabase.co"
 AL_BASE = "https://allchatbots.ai"
 AL_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 AL_COOKIE = "sb-felzqwdxfitazkrktyke-auth-token"
-AL_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "al_accounts.json")
+AL_ACC_FILE = os.path.join(DATA_DIR, "al_accounts.json")
 AL_ST = {"sess": None, "sess_t": 0.0, "idx": 0,
          "accounts": [{"email": "pimeyax560@dreameg.com", "password": "pimeyax560@dreameg.com"}]}
 _AL_SYNC = {"t": 0.0}
@@ -4945,7 +4952,7 @@ def sync_al_models(force=False):
 # لۆگین: PUT auth.aimlapi.com/v1/auth/account {email,password} + aim-device-id → token (~11کاتژمێر)
 # کلیل: POST app.aimlapi.com/v1/keys → چات: POST api.aimlapi.com/v1/chat/completions (OpenAI-جۆر)
 # ئەکاونت بێ-فەندز → 403 → هەڵەی جوان → فەیلئۆڤەری هەمان مۆدێڵ لە سەرچاوەکانی تر
-AIML_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aiml_key.json")
+AIML_ACC_FILE = os.path.join(DATA_DIR, "aiml_key.json")
 AIML_ST = {"tok": None, "tok_t": 0.0, "key": None,
            "email": "pimeyax560@dreameg.com", "password": "12345678Rkjk@&"}
 _AIML_SYNC = {"t": 0.0}
