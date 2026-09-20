@@ -4168,6 +4168,16 @@ def _pool_reap():
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     now = time.time()
+    # #91Z-mig: فۆرماتی کۆنی True → بەرواری ئەمڕۆ — سبەی بەیانی خۆکارانە ئازاد دەبن
+    try:
+        for _e, _v in (CA_ST.get("limits") or {}).items():
+            if isinstance(_v, dict) and _v.get("*") is True:
+                _v["*"] = _lim_today()
+        for _e, _v in (AC_ST.get("limits") or {}).items():
+            if isinstance(_v, dict) and _v.get("*") is True:
+                _v["*"] = _lim_today()
+    except Exception:
+        pass
     # CA — ئەوانەی '*' یان هەیە → کۆتایی لیست (لە سەرەتاوە کار ناکەن) — ناسێنراوەکان یەکسان کار دەکەن
     lim = CA_ST.get("limits") or {}
     accs = CA_ST.get("accounts") or []
