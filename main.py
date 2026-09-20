@@ -6765,6 +6765,72 @@ def _self_update_daemon():
             continue
 
 
+
+# ══════════ #89: خۆبەڕێوەبەری گشتی — چاودێری + چاککردنەوەی خۆکارانەی هەموو سەرچاوەکان ══════════
+_HEAL_STATE = {"t": 0.0, "status": {}}  # kind → {"ok":bool,"t":float,"err":str}
+
+
+def _heal_probe(kind, fn):
+    """یەک پشکنینی کورت بۆ سەرچاوەیەک — وەڵامی کورت = زیندوو"""
+    try:
+        a = fn([{"role": "user", "content": "Reply with exactly: OK"}])
+        return bool(a and len(str(a)) >= 2), ""
+    except Exception as e:
+        return False, str(e)[:60]
+
+
+def self_heal_once():
+    """یەک خولی پشکنین + چاککردنەوەی خۆکارانەی هەموو سەرچاوەکان"""
+    probes = {}
+    if MS.get("ct_ok"):
+        probes["ct"] = lambda: ct_chat([{"role": "user", "content": "hi"}], list(MS["ct_ok"].keys())[0], timeout=25)
+    if MS.get("hk_ok"):
+        probes["hk"] = lambda: hk_chat([{"role": "user", "content": "hi"}], list(MS["hk_ok"].keys())[0], timeout=25)
+    probes["hf"] = lambda: hf_chat([{"role": "user", "content": "hi"}], "deepseek-ai/DeepSeek-V4.1-Flash", timeout=25)
+    probes["cbc"] = lambda: cbc_chat([{"role": "user", "content": "hi"}], timeout=25)
+    probes["ak"] = lambda: ak_chat(336, [{"role": "user", "content": "hi"}], timeout=25) if MS.get("ak_ok") else None
+    fixed = []
+    for kind, fn in probes.items():
+        if fn is None:
+            continue
+        ok, err = _heal_probe(kind, fn)
+        _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err}
+        if not ok:
+            # چاککردنەوە: sync ی توند بۆ ئەو سەرچاوەیە
+            try:
+                if kind == "hk":
+                    sync_hk_models(force=True)
+                elif kind == "ct":
+                    sync_ct_models(force=True)
+                elif kind == "hf":
+                    sync_hf_models(force=True)
+                elif kind == "cbc":
+                    pass  # cbc بێ-سینکە — ڕاستەوخۆ تاقی دەکرێتەوە
+                elif kind == "ak":
+                    sync_ak_models([])
+                fixed.append(f"{kind}→sync")
+            except Exception:
+                pass
+    if fixed:
+        print(f"[SELF-HEAL] 🔧 چاککردنەوە: {', '.join(fixed)}", flush=True)
+    # ئاماری کۆتایی
+    st = _HEAL_STATE["status"]
+    line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" for k, v in sorted(st.items()))
+    print(f"[SELF-HEAL] {line}", flush=True)
+
+
+def self_heal_daemon():
+    """هەر ١٠ خولەک — پشکنینی هەموو سەرچاوەکان + چاککردنەوەی شکاوەکان"""
+    time.sleep(60)
+    while True:
+        try:
+            self_heal_once()
+        except Exception as e:
+            print(f"[SELF-HEAL] هەڵە: {str(e)[:60]}", flush=True)
+        time.sleep(600)
+
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -6779,6 +6845,8 @@ def main():
     # کەیک-بەیکەری G4F — پاشبنەما
     threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
     threading.Thread(target=_pool_daemon, daemon=True).start()
+    threading.Thread(target=self_heal_daemon, daemon=True).start()
+    print("🩺 خۆبەڕێوەبەری سەرچاوەکان چالاکە — پشکنین هەر ١٠ خولەک", flush=True)
     print("🍰 کەیک-بەیکەری G4F چالاکە", flush=True)
     print("👤 حەوز-بنیاتەری گشتی چالاکە — CA+CB+NV × ٥٠ ئەکاونت", flush=True)
 
