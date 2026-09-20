@@ -6540,6 +6540,55 @@ def handle_message(msg):
     if text.startswith("/start"):
         reply(chat_id, WELCOME)
         return
+    # ═══ #89: فەرمانەکانی خۆبەڕێوەبەری — تەنها ئەدمین ═══
+    if text.startswith("/status"):
+        if user_id != ADMIN_TG:
+            return
+        # بار گشتی: حەوزەکان + SELF-HEAL + مۆدێڵەکان
+        try:
+            def _n(f):
+                try:
+                    return len(json.load(open(os.path.join(DATA_DIR, f))))
+                except Exception:
+                    return 0
+            ca, cb, nv = _n("ca_accounts.json"), _n("cb_accounts.json"), _n("nv_accounts.json")
+            nmodels = len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0
+            st = _HEAL_STATE.get("status", {})
+            lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
+                     f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
+                     f"👥 حەوز: CA {ca}/50 · CB {cb}/50 · NV {nv}/50\n",
+                     "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
+            if st:
+                for k in sorted(st):
+                    v = st[k]
+                    age = int(time.time() - v.get("t", 0))
+                    lines.append(f"  • {k}: {'✅' if v.get('ok') else '❌ ' + str(v.get('err', ''))[:40]} ({age}s پێش)")
+            else:
+                lines.append("  • هێشتا پشکنین نەکراوە — <code>/heal</code> بنووسە")
+            reply(chat_id, "\n".join(lines))
+        except Exception as e:
+            reply(chat_id, f"⚠️ {str(e)[:80]}")
+        return
+
+    if text.startswith("/heal"):
+        if user_id != ADMIN_TG:
+            return
+        reply(chat_id, "🩺 <b>پشکنینی تەواو دەست پێدەکات… (چەند چرکەیەک)</b>")
+        def _heal_work():
+            try:
+                self_heal_once()
+                st = _HEAL_STATE.get("status", {})
+                lines = ["🩺 <b>ئەنجامی پشکنین + چاککردنەوە:</b>\n"]
+                for k in sorted(st):
+                    v = st[k]
+                    lines.append(f"  • {k}: {'✅ زیندووە' if v.get('ok') else '❌ ' + str(v.get('err', ''))[:50]}")
+                lines.append("\n✅ شکاوەکان بۆ sync ی توند نێردران — لە خولی داهاتوو دووبارە دەپشکنرێن")
+                reply(chat_id, "\n".join(lines))
+            except Exception as e:
+                reply(chat_id, f"⚠️ {str(e)[:80]}")
+        threading.Thread(target=_heal_work, daemon=True).start()
+        return
+
     if text.startswith("/about"):
         reply(chat_id, ABOUT)
         return
@@ -6676,7 +6725,9 @@ def setup_commands():
         if ok:
             print("✅ فەرمانەکانی مێنیو لە هەموو سکۆپەکان دانران (بێ /server)", flush=True)
             # #88: /server تەنها لە مێنیوی ئەدمین
-            admin_cmds = cmds + [{"command": "server", "description": "قائمة الموديلات — الأحدث دائما"}]
+            admin_cmds = cmds + [{"command": "server", "description": "قائمة الموديلات — الأحدث دائما"},
+                            {"command": "status", "description": "📊 ڕاپۆرتی سیستەم"},
+                            {"command": "heal", "description": "🩺 پشکنین و چاککردنەوە"}]
             r = tg("setMyCommands", commands=admin_cmds, scope={"type": "chat", "chat_id": ADMIN_TG})
             print(f"[CMDS] ئەدمین-سکۆپ: {'✅' if r.get('ok') else 'شکست'}", flush=True)
             return
