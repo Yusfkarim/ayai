@@ -6942,8 +6942,11 @@ def self_heal_once():
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
     for kind, fn in probes.items():
+        fprev = int((_HEAL_STATE["status"].get(kind) or {}).get("fails", 0))
+        if fprev >= 6 and (_HEAL_STATE.get("cyc", 0) % 3) != 0:
+            continue  # #91++: پشووی بەرزکراو — هەر خولی سێیەم دووبارە هەوڵ
         ok, err = _heal_probe(kind, fn)
-        _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err}
+        _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err, "fails": (0 if ok else fprev + 1)}
         if not ok:
             try:
                 if kind == "hk":
@@ -6968,6 +6971,7 @@ def self_heal_once():
     st = _HEAL_STATE["status"]
     line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" for k, v in sorted(st.items()))
     print(f"[SELF-HEAL] {line}", flush=True)
+    _snapshot_save()
 
 
 def _proxy_refresh_sources():
@@ -7019,6 +7023,7 @@ def self_heal_daemon():
     time.sleep(60)
     while True:
         try:
+            _HEAL_STATE["cyc"] = _HEAL_STATE.get("cyc", 0) + 1
             self_heal_once()
         except Exception as e:
             print(f"[SELF-HEAL] هەڵە: {str(e)[:60]}", flush=True)
@@ -7059,12 +7064,17 @@ def ask(session, question):
     if c and time.time() - c[0] < 300:
         return c[1]
     t0 = time.time()
-    try:
-        a = _ask_orig(session, question)
-    except Exception:
-        _PERF["req"] += 1
-        _PERF["fail"] += 1
-        raise
+    a = None
+    for _att in range(2):
+        try:
+            a = _ask_orig(session, question)
+            break
+        except Exception:
+            if _att == 1:
+                _PERF["req"] += 1
+                _PERF["fail"] += 1
+                raise
+            time.sleep(2.5)  # #91++: دووبارەی کۆتایی — تۆڕی کاتی
     dt = time.time() - t0
     _PERF["req"] += 1
     _PERF["ok"] += 1
@@ -7132,6 +7142,84 @@ def _daily_report():
 
 
 
+
+# ═══════════ #91++ چینی کڕاک: دووبارەهەوڵی شەفاف لە ئاستی HTTP ═══════════
+# سەرچاوە ڕێگای خۆی بگۆڕێت (403/418/429/502/503) → UA نوێ + پرۆکسی + دووبارە — بێ دەست لێدان
+_CRACK = {"hot": {}, "uas": [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1",
+]}
+_orig_sess_req = requests.sessions.Session.request
+
+
+def _cracked_req(self, method, url, **kw):
+    try:
+        m = re.match(r"https?://([^/]+)", str(url))
+        dom = m.group(1) if m else ""
+    except Exception:
+        dom = ""
+    r = _orig_sess_req(self, method, url, **kw)
+    try:
+        if dom == "api.telegram.org" or kw.get("stream"):
+            return r
+        if r.status_code in (403, 418, 429, 502, 503):
+            _CRACK["hot"][dom] = int(_CRACK["hot"].get(dom, 0)) + 1
+            kw2 = dict(kw)
+            h = dict(kw2.get("headers") or {})
+            h["User-Agent"] = random.choice(_CRACK["uas"])
+            kw2["headers"] = h
+            if _CRACK["hot"].get(dom, 0) >= 2 and not kw2.get("proxies"):
+                try:
+                    pl = _proxy_get(1)
+                    if pl:
+                        kw2["proxies"] = {"http": pl[0], "https": pl[0]}
+                except Exception:
+                    pass
+            time.sleep(random.uniform(0.3, 1.0))
+            r2 = _orig_sess_req(self, method, url, **kw2)
+            if r2.status_code not in (403, 418, 429, 502, 503):
+                _CRACK["hot"][dom] = 0
+            return r2
+        if r.status_code < 400:
+            _CRACK["hot"][dom] = 0
+    except Exception:
+        pass
+    return r
+
+
+requests.sessions.Session.request = _cracked_req
+
+
+def _snapshot_save():
+    """#91++: سناپشۆتی مۆدێڵەکان بۆ /data — ڕیستارت هەرگیز مۆدێڵ لەدەست نادات"""
+    try:
+        with _lock:
+            ms = {k: dict(v) for k, v in MS.items() if k.endswith("_ok") and v}
+            srv = list(BRAIN["servers"] or [])
+        json.dump({"t": time.time(), "ms": ms, "servers": srv},
+                  open(os.path.join(DATA_DIR, "model_snapshot.json"), "w"))
+    except Exception:
+        pass
+
+
+def _snapshot_load():
+    try:
+        d = json.load(open(os.path.join(DATA_DIR, "model_snapshot.json")))
+        n = 0
+        for k, v in (d.get("ms") or {}).items():
+            if k in MS and not MS.get(k):
+                MS[k] = dict(v)
+                n += len(v)
+        age = int(time.time() - d.get("t", 0))
+        print(f"[SNAPSHOT] {n} مۆدێڵ لە کاشی کۆتایی هێنانەوە ({age} چرکە پێش)", flush=True)
+        return d.get("servers") or []
+    except Exception:
+        return []
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -7156,8 +7244,9 @@ def main():
 
     # دەستنیشانکردنی مێشک
     print("🧠 دەستنیشانکردنی سەرچاوەی AI…", flush=True)
+    _snap_srv = _snapshot_load()
     new = detect_brain()
-    BRAIN["mode"], BRAIN["servers"] = new["mode"], new["servers"]
+    BRAIN["mode"], BRAIN["servers"] = new["mode"], (new["servers"] or _snap_srv or BRAIN["servers"])
     rebuild_aliases(new["servers"])
     if new["mode"] == "aff":
         print(f"🟢 مێشکی سەرەکی: aifreeforever ({len(new['servers'])} سێرڤەر)", flush=True)
