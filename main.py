@@ -3845,17 +3845,35 @@ def _proxy_fetch_all():
                 socks_raw.append("socks5://" + f"{x.get('ip')}:{x.get('port')}")
     except Exception:
         pass
-    # تێکەڵکردنی هەمەڕەنگ: هەر شەپۆلێک هەم HTTP ەم سۆکسی بگرێت — لە سەرەتاوە
-    step = max(1, len(socks_raw) // max(1, len(raw) // 6 or 1))
-    mixed = []
-    si = 0
+    # #91R: منزلی/elite — گەورەترین ئەگەری منزلی + elite-anonymous
+    extra = []
+    for u in ("https://raw.githubusercontent.com/zevtyardt/proxy-list/main/all.txt",
+              "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&anonymity=elite&timeout=8000",
+              "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/all/data.txt"):
+        try:
+            r = requests.get(u, timeout=(8, 16))
+            if r.status_code == 200:
+                for x in r.text.split():
+                    x = x.strip()
+                    if 6 < len(x) < 80 and (":" in x) and ("//" not in x.split(":")[0][-1:] or "://" in x):
+                        extra.append(x)
+        except Exception:
+            pass
+    # #91R: تێکەڵکردنی گشتی — HTTP · SOCKS · منزلی/elite
+    mixed, si, si2 = [], 0, 0
     for x in raw:
         mixed.append(x)
-        if si < len(socks_raw) and len(mixed) % 6 == 0:
-            mixed.append(socks_raw[si])
-            si += 1
+        if len(mixed) % 6 == 0:
+            if si < len(socks_raw):
+                mixed.append(socks_raw[si]); si += 1
+            elif si2 < len(extra):
+                mixed.append(extra[si2]); si2 += 1
     mixed.extend(socks_raw[si:])
-    raw = mixed
+    mixed.extend(extra[si2:])
+    raw = list(dict.fromkeys(mixed))
+    if len(raw) > 40000:
+        random.shuffle(raw)
+        raw = raw[:40000]  # #91R: سنووری ڕاو — بۆ خێرایی خولانەوە
     # وێبشەیر — ئەگەر تۆکەن لە /data/webshare.json هەبێت → ١٠ پرۆکسی DC ی هەمیشەیی
     try:
         ws = json.load(open(os.path.join(DATA_DIR, "webshare.json")))
@@ -3973,6 +3991,21 @@ def _harvest_wave(wave=190):
     n_socks = sum(1 for _, px in res if px.startswith("socks"))
     for lat, px in res:
         pool[px] = {"t": now, "lat": round(lat, 2)}
+    # #91R: تاگی منزلی — تا 200 ی تاگی‌نەکراو لە ip-api (hosting=false = منزلی/ISP)
+    try:
+        _untagged = [k for k, v in pool.items() if "res" not in v and not k.startswith("socks")][:200]
+        if _untagged:
+            _ips = [k.split(":")[0] for k in _untagged]
+            _rj = requests.post("http://ip-api.com/batch?fields=query,hosting", json=_ips, timeout=(8, 20))
+            if _rj.status_code == 200:
+                _n_res = 0
+                for ip, info in zip(_untagged, _rj.json() or []):
+                    _is_res = not (info or {}).get("hosting", True)
+                    pool[ip]["res"] = _is_res
+                    _n_res += 1 if _is_res else 0
+                print(f"[RES-TAG] {_n_res} منزلی لە {len(_untagged)}", flush=True)
+    except Exception:
+        pass
     PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
     if len(PROXY_ST["pool"]) > 100:
         keep = sorted(PROXY_ST["pool"].items(), key=lambda kv: kv[1].get("lat", 9))[:100]
@@ -4001,7 +4034,7 @@ def _proxy_get(n=4):
         _proxy_pool_load()
     pool = PROXY_ST.get("pool") or {}
     if pool:
-        ranked = sorted(pool.items(), key=lambda kv: (kv[1] or {}).get("lat", 9))
+        ranked = sorted(pool.items(), key=lambda kv: ((not (kv[1] or {}).get("res", False)), (kv[1] or {}).get("lat", 9)))
         out = []
         http_got, socks_got = 0, 0
         for k, _ in ranked:
@@ -7239,7 +7272,8 @@ def proxy_keeper_daemon():
         try:
             _proxy_refresh_sources()
             n = len(PROXY_ST.get("pool") or PROXY_ST.get("list") or [])
-            print(f"[PROXY-KEEPER] حەوزی کڕاککراو: {n} — خێراترین و تازەترین", flush=True)
+            _rn = sum(1 for v in (PROXY_ST.get("pool") or {}).values() if v.get("res"))
+            print(f"[PROXY-KEEPER] حەوز: {n} | منزلی: {_rn} | خێراترین و تازەترین", flush=True)
         except Exception as e:
             print(f"[PROXY-KEEPER] هەڵە: {str(e)[:60]}", flush=True)
         cyc += 1
