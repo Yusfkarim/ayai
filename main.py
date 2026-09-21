@@ -4297,7 +4297,7 @@ def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    # #94U30 CA-NOLIMIT: 1000/ڕۆژ (مۆڵەتی بەکارهێنەر 2026-09-21) — حەوز تا 1100، گەیت 1000/5
+    # #94U31 CA-FORTRESS: 10000/ڕۆژ + حەوز 10k + 1000 زیندووی بەردەوام (مۆڵەتی بەکارهێنەر 2026-09-21)
     _accs_n = len(CA_ST.get("accounts") or [])
     _today_s = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     _lim = CA_ST.get("limits") or {}
@@ -4307,25 +4307,27 @@ def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
     else:
         _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
                      if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
-    if _accs_n >= 1100 or (not force and _accs_n >= 1000 and _alive >= 5):  # #94U30
+    if _accs_n >= 10000 or (not force and _alive >= 1000):  # #94U31: هەتا 1000 زیندوو نەبێت بەردەوامبە
         return None
-    if not _sg_reserve(CA_ST, 1000, today, _CA_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U30: 80→1000 بە مۆڵەتی بەکارهێنەر
+    if not _sg_reserve(CA_ST, 10000, today, _CA_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U31: →10000/ڕۆژ بە مۆڵەتی بەکارهێنەر
         return None
-    n = CA_ST["next_num"]
+    n = CA_ST["next_num"] + random.randint(0, 5000)  # #94U31: ژمارەی نا-ڕێزبەند دژە-دەستنیشان
     # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
     offs = (0, 3, 13, 40, 100, 250)
-    for pref in ("komex", "heal"):
+    for pref in ("komex", "heal", "arez", "hiva"):  # #94U31: 4 پریفیکس بۆ جیاوازی
         for off in offs:
             email = f"{pref}{n + off}@duidir.com"
-            res = _fb_signup(CA_KEY, email, email, CA_UA)
+            pw = f"{email}#{random.randint(10000, 99999)}"  # #94U31: وشەی نهێنی هەڕەمەکی
+            res = _fb_signup(CA_KEY, email, pw, _rand_ua())  # #94U31: UA هەڕەمەکی بۆ هەر هەوڵێک
             if res:
-                CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
+                CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": pw, "ua": _rand_ua()}]
                 CA_ST["idx"] = len(CA_ST["accounts"]) - 1
                 CA_ST["next_num"] = n + off + 1
                 CA_ST["tok"] = None
                 _ca_save_acc()
                 print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
                 return res
+            time.sleep(random.uniform(0.3, 1.0))  # #94U31: jitter لەنێوان هەوڵەکاندا
     CA_ST["next_num"] = n + 300
     _ca_save_acc()
     print(f"[CA] هیچ شوێن — بازدا بۆ {CA_ST['next_num']}", flush=True)
@@ -4709,7 +4711,7 @@ def _proxy_signup_best(n=6):
 
 
 def _fb_signup(key, email, pw, ua):
-    """signUp: ڕاستەوخۆ → ئەگەر IP بلۆک بوو → بە پرۆکسی (پێشنیار+فەرمانحەیز)"""
+    """#94U31: signUp بە پرۆکسی-یەکەم (8 باشترین: منزلی→کەم-هەڵە→خێرا)؛ ڕاستەوخۆ تەنها دوایین چارەسەر"""
     def _call(px=None):
         kw = {"json": {"email": email, "password": pw, "returnSecureToken": True},
               "headers": {"User-Agent": ua}, "timeout": (8, 16) if px else (10, 25)}
@@ -4729,13 +4731,7 @@ def _fb_signup(key, email, pw, ua):
         return ("BLOCKED", msg) if msg in _FB_BLOCK else None
     _today = time.strftime("%Y-%m-%d", time.gmtime())
     _direct_bad = _FB_DIRECT_BAD.get(key) == _today
-    if not _direct_bad:
-        r = _call()
-        if r and r[0] != "BLOCKED":
-            return r
-        if r and r[0] == "BLOCKED":
-            _FB_DIRECT_BAD[key] = _today  # IP ی ڕاستەوخۆ ئەمڕۆ بلۆکە → لەمەودوا proxy-first
-    for px in _proxy_signup_best(6):
+    for px in _proxy_signup_best(8):  # #94U31: هەمیشە پرۆکسی یەکەم — IP ڕاستەوخۆ مەخەرە مەترسییەوە
         try:
             r2 = _call(px)
         except Exception:
@@ -4758,14 +4754,16 @@ def _fb_signup(key, email, pw, ua):
         except Exception:
             pass
         # BLOCKED لەڕێی پرۆکسییەوە = IP ـەکە لای Firebase فلەگە — بۆ ساینئەپ بەکارمەهێنە بەڵام مەیسڕە (بۆ کاری تر باشە)
-    if _direct_bad:
-        try:
-            r = _call()  # دوایین هەوڵ: ڕاستەوخۆ (لەوانەیە بلۆکەکە کاتی بووبێت)
-            if r and r[0] != "BLOCKED":
-                _FB_DIRECT_BAD.pop(key, None)
-                return r
-        except Exception:
-            pass
+    # #94U31: دوایین هەوڵ: ڕاستەوخۆ (تەنها ئەگەر پرۆکسییەکان نەبوون/شکستخواردن)
+    try:
+        r = _call()
+        if r and r[0] != "BLOCKED":
+            _FB_DIRECT_BAD.pop(key, None)
+            return r
+        if r and r[0] == "BLOCKED":
+            _FB_DIRECT_BAD[key] = _today
+    except Exception:
+        pass
     return None
 
 
@@ -4826,7 +4824,7 @@ def _pool_reap():
         print(f"[POOL-CA] {len(done)} limit-کراو پاڵدران کۆتایی → سەرەتا {len(live)} ی تەندرووست", flush=True)
     elif done and not live:
         # هەموویان limit — ئەوانی کۆنترین limit بدۆزە و بسڕەوە (بۆ ئەوانەی ٢ ڕۆژ پێش ئێستا بوون)
-        # #94U30b: 100→1000 (هاوسەنگ لەگەڵ حەوزی 1100) + سڕینەوەی limits/toks ی ئەوانەی فڕێدران
+        # #94U30b: تریم 1000 (ئامانجی زیندوو) + سڕینەوەی limits/toks ی فڕێدراو؛ #94U31: حەوز 10k
         old_lim = [e for e, v in lim.items() if v.get("*")]
         if len(old_lim) > 1000:
             keep_emails = set(old_lim[-1000:])
@@ -4877,20 +4875,20 @@ def _pool_reap():
 
 
 def _pool_daemon():
-    """هەرسێ حەوز بۆ ٥٠ — هەر ٢ خولەک یەک هەوڵ بۆ هەر خزمەتگوزاری + پاککردنەوە"""
+    """#94U31: CA → 1000 زیندووی بەردەوام (بەچی 20/خول)؛ CB/NV → ٥٠ وەک خۆی + پاککردنەوە"""
     time.sleep(60)
     # لازەی — دوای load ی هەموو ST ەکان (CB/NV دوای ئەم بلۆکە پێناسە دەکرێن لە فایلدا)
     import sys as _s
     _m = _s.modules[__name__]
-    pools = (("CA", _m.CA_ST, _m._ca_signup_new, 50),
-             ("CB", _m.CB_ST, _m._cb_signup_new, 50),
-             ("NV", _m.NV_ST, _m._nv_signup_new, 50))
+    pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000, 20),
+             ("CB", _m.CB_ST, _m._cb_signup_new, 50, 5, 1),
+             ("NV", _m.NV_ST, _m._nv_signup_new, 50, 5, 1))
     while True:
         try:
             _pool_reap()
         except Exception as e:
             print(f"[POOL] reap: {str(e)[:60]}", flush=True)
-        for name, st, fn, tgt in pools:
+        for name, st, fn, tgt, alive_tgt, batch in pools:
             try:
                 accs = st.get("accounts") or []
                 # #94U2: ژمارەی زیندوو — ئەگەر هەموو ئەکاونتەکان لیمیتن → زیاد بکە با بەردەوام بێت
@@ -4899,13 +4897,29 @@ def _pool_daemon():
                 lim = st.get("limits") or {}
                 exh = st.get("exhausted") or {}
                 alive = [a for a in accs if _pool_acc_alive(a, lim, exh, today, now)]
-                if len(accs) >= tgt and len(alive) >= 5:
+                if len(accs) >= tgt and len(alive) >= alive_tgt:
                     continue
-                before = len(accs)
-                fn()
-                after = len(st.get("accounts") or [])
-                if after > before:
-                    print(f"[POOL-{name}] {after}/{tgt} ئەکاونت", flush=True)
+                made = 0
+                miss = 0
+                for _ in range(batch):  # #94U31: پڕکردنەوەی بەچ — CA تا 20/خول
+                    accs_now = st.get("accounts") or []
+                    lim_now = st.get("limits") or {}
+                    exh_now = st.get("exhausted") or {}
+                    alive_now = sum(1 for a in accs_now if _pool_acc_alive(a, lim_now, exh_now, today, now))
+                    if len(accs_now) >= tgt or alive_now >= alive_tgt:
+                        break
+                    before = len(accs_now)
+                    fn()
+                    if len(st.get("accounts") or []) > before:
+                        made += 1
+                        miss = 0
+                    else:
+                        miss += 1
+                        if miss >= 3:  # بودجە/ساینئەپ گیراوە — ئەم خولە بوەستە
+                            break
+                    time.sleep(random.uniform(3, 6))  # jitter دژە-بلۆک
+                if made:
+                    print(f"[POOL-{name}] +{made} → {len(st.get('accounts') or [])}/{tgt} (ئامانجی زیندوو {alive_tgt})", flush=True)
                     time.sleep(45)  # #94U18: خێراتر (45s) — سنوورە ڕۆژانەکان هەر سنووردارن
             except Exception as e:
                 print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
