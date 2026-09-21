@@ -6346,7 +6346,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
 
         # دۆزینەوەی کلیل لە هیدەر، کوێری یان بۆدی
         key = self._extract_key() or (body.get("api_key") if isinstance(body, dict) else "") or (body.get("apiKey") if isinstance(body, dict) else "") or ""
-        client_ip = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For") or (self.client_address[0] if self.client_address else "")
+        # #94U13: guest-track بە هیدەری لێدۆراو (CF/XFF) نابێت — تەنها ئایپی متمانەپێکراو (Fly-edge)
+        client_ip = _sec_ip(self)
         # #94U11: بڵۆکی ئایپی + ژماردنی بڕوتفۆرس
         _sip = _sec_ip(self)
         if _ip_blocked(_sip):
@@ -8419,6 +8420,41 @@ def _sec_alert(msg):
             pass
 
 
+def _sec_prune():
+    """#94U13: پاککردنەوەی خۆکاری دیکشنەرییە ئەمنییەکان — لەگەڵ _self_check (هەر ٥ خولەک)
+       بێ ئەمە _IP_BLOCK/_BADKEY/_API_RL/_STRANGE_KEYS_SEEN بەسێ مانگدا لە 512mb VM دەبنە مشکیل"""
+    now = time.time()
+    try:
+        for ip in [k for k, v in _IP_BLOCK.items() if v <= now]:
+            _IP_BLOCK.pop(ip, None)                    # بڵۆکی بەسەرچوو
+    except Exception:
+        pass
+    try:
+        for ip in [k for k, v in _BADKEY.items() if not v or now - v[-1] > 600]:
+            _BADKEY.pop(ip, None)                      # پەنجەرەی ١٠-خولەکیی تەواو بوو
+    except Exception:
+        pass
+    try:
+        for k in [k for k, v in _API_RL.items() if not v or now - v[-1] > 3600]:
+            _API_RL.pop(k, None)                       # کلیلی سەرەکی > ١ کاتژمێر بێ-چالاک
+    except Exception:
+        pass
+    try:
+        for k in list(_STRANGE_KEYS_SEEN):
+            v = _STRANGE_KEYS_SEEN.get(k) or {}
+            last_act = (v.get("burst") or [0.0])[-1]
+            if now > (v.get("blocked_until") or 0.0) and now - last_act > 3600:
+                _STRANGE_KEYS_SEEN.pop(k, None)        # میوان > ١ کاتژمێر بێ-چالاک و نابلۆکراو
+    except Exception:
+        pass
+    try:
+        if len(_HP_CNT) > 2048:                        # حاردی-کاپ بۆ ژمێرەری honeypot
+            for ip in [k for k in list(_HP_CNT) if k not in _IP_BLOCK]:
+                _HP_CNT.pop(ip, None)
+    except Exception:
+        pass
+
+
 def _note_badkey(ip):
     """هەوڵی کلیدی هەڵە — ١٠ هەوڵ لە ١٠ خولەکدا → بڵۆکی ١٥ خولەک + ئاگاداری TG"""
     if not ip:
@@ -8479,6 +8515,10 @@ def _self_check():
     try:
         try:
             _check_code_integrity(is_boot=False)
+        except Exception:
+            pass
+        try:
+            _sec_prune()  # #94U13: دیکشنەرییە ئەمنییەکان هەر ٥ خولەک پاک دەکرێنەوە
         except Exception:
             pass
         br = len(BRAIN["servers"] or [])
