@@ -8937,7 +8937,8 @@ CBOX_LOCK = threading.Lock()
 _CBOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 # مۆدێڵی فڕی — "AI Chat" (subtitle: Best available model) — ٢٨ پارەدارەکە سرێڵن لە سێرڤەر (isPaidUser gate)
 CBOX_FREE_ID = "88cc1733-9cf1-4652-a7be-f9a6dbe01737"
-CBOX_MODELS = [("aichat", "AI Chat", "Chatbox AI")]
+# دوو مۆدێڵ: Text + WebSearch (وێبسێڕچ لەسەر فری کار دەکات — زانیاری نوێ)
+CBOX_MODELS = [("aichat", "AI Chat", "Chatbox AI"), ("websearch", "AI WebSearch", "Chatbox WebSearch")]
 CBOX_DAY_CAP = 30  # چات/ڕۆژ بۆ هەر ئەکاونتێک — خۆپاراستن
 
 
@@ -9067,9 +9068,10 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
         parts = []
         final_msg = ""
         try:
+            rt = "WebSearch" if str(model_key) == "websearch" else "Text"
             files = [("message", (None, q[:8000])),
                      ("modelId", (None, mid)),
-                     ("roomType", (None, "Text"))]
+                     ("roomType", (None, rt))]
             r = requests.post(CBOX_API + "/chat/stream", files=files,
                               headers={"User-Agent": _CBOX_UA, "Accept": "text/event-stream",
                                        "Origin": "https://chat-box.ai", "Referer": "https://chat-box.ai/app/en",
@@ -9124,6 +9126,15 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
                 elif et == "complete":
                     fm = ev.get("fullMessage") or {}
                     final_msg = str(fm.get("message") or "")
+                    ws = fm.get("webSearch") or {}
+                    _wsl = ws.get("links") or []
+                    if _wsl:
+                        try:
+                            _src = "\n".join(f"🔗 {l.get('title') or 'source'}: {l.get('url') or l}" for l in _wsl[:4] if l)
+                            if _src:
+                                final_msg = (final_msg or "") + "\n" + _src
+                        except Exception:
+                            pass
                 elif et == "error":
                     err_evt = str(ev.get("error") or ev.get("message") or "stream error")
                     break
