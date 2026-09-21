@@ -2320,7 +2320,7 @@ def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
     import time as _t
     if _t.time() < L7_LIMIT["until"]:
         raise EMError("l7: cooldown")
-    body = {"model": model_id, "messages": messages, "max_tokens": 1400}
+    body = {"model": model_id, "messages": messages, "max_tokens": 4000}  # #94U29 LONG-OUT
     try:
         r = requests.post(L7_BASE + "/chat/completions", json=body,
                           headers={"User-Agent": _pick_ua(ACT_UAS),
@@ -3109,7 +3109,7 @@ def hf_chat(messages, model_id="deepseek-ai/DeepSeek-V4.1-Flash", timeout=110):
     import time as _t
     if _t.time() < HF_LIMIT["until"]:
         raise EMError("hf: credit cooldown")
-    body = {"model": model_id, "messages": _sys_keep(messages, 23), "max_tokens": 1200}  # #94U25
+    body = {"model": model_id, "messages": _sys_keep(messages, 23), "max_tokens": 4000}  # #94U25 #94U29 LONG-OUT
     try:
         r = requests.post(HF_BASE + "/chat/completions", json=body,
                           headers=_hf_headers(), timeout=(15, timeout))
