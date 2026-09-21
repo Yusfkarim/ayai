@@ -57,6 +57,23 @@ def _is_pool_file(path):
 
 _JSON_LOCKS = {}
 _JSON_LOCKS_G = threading.Lock()
+_TLS = threading.local()  # #94U21: لیسی ئەکاونت بۆ هەر تڕێدێک — 20 کەس پێکەوە بە هەمان مۆدێل
+_NV_LK = threading.Lock()
+_CB_LK = threading.Lock()
+_CA_LK = threading.Lock()
+_AC_LK = threading.Lock()
+_TG_SEM = threading.Semaphore(50)  # #94U21: سەقفی 50 هەندڵی هاوکاتی تێلەگرام
+
+
+def _tok_drop(kind):
+    """#94U21: سڕینەوەی تۆکنی کاشکراوی ئەکاونتی ئەم تڕێدە (وەک tok=None ی کۆن)"""
+    try:
+        acc = getattr(_TLS, kind + "_acc", None)
+        st = {"nv": NV_ST, "cb": CB_ST, "ca": CA_ST, "ac": AC_ST}.get(kind)
+        if acc is not None and st is not None:
+            (st.get("toks") or {}).pop(acc.get("email"), None)
+    except Exception:
+        pass
 
 
 def _json_save(path, obj):
@@ -3763,6 +3780,9 @@ def _cb_firebase(ep, email, pw):
 
 
 def _cb_cur_acc():
+    acc = getattr(_TLS, "cb_acc", None)  # #94U21: لیسی ئەم تڕێدە پێشینەی هەیە
+    if acc:
+        return acc
     accs = CB_ST.get("accounts") or []
     if not accs:
         return None
@@ -3808,23 +3828,37 @@ def _cb_signup_new():
 
 def _cb_token():
     import time as _t
-    if CB_ST.get("tok") and _t.time() - CB_ST.get("tok_t", 0) < 2700 and CB_ST.get("uid"):
-        return CB_ST["tok"], CB_ST["uid"]
-    acc = _cb_cur_acc()
+    acc = getattr(_TLS, "cb_acc", None)
+    if acc is None:
+        try:
+            _cb_rotate()  # #94U21: یەکەم داوا → لیسی خۆی لەژێر لۆک
+        except Exception:
+            pass
+        acc = getattr(_TLS, "cb_acc", None) or _cb_cur_acc()
     if not acc:
         res = _cb_signup_new()
         if not res:
             raise EMError("cb: هیچ ئەکاونت")
-        CB_ST["tok"], CB_ST["uid"] = res
-        CB_ST["tok_t"] = _t.time()
-        return CB_ST["tok"], CB_ST["uid"]
+        try:
+            _na = (CB_ST.get("accounts") or [])[-1]
+            _TLS.cb_acc = _na
+            with _CB_LK:
+                CB_ST.setdefault("toks", {})[_na.get("email")] = (res[0], res[1], _t.time())
+        except Exception:
+            pass
+        return res
+    em = acc.get("email")
+    with _CB_LK:
+        c = (CB_ST.get("toks") or {}).get(em)
+    if c and _t.time() - c[2] < 2700:
+        return c[0], c[1]
     res = _cb_firebase("signInWithPassword", acc["email"], acc["password"])
     if not res:
         # ئەکاونتەکە نییە — دواتری
         raise EMError("cb: sign-in شکات")
-    CB_ST["tok"], CB_ST["uid"] = res
-    CB_ST["tok_t"] = _t.time()
-    return CB_ST["tok"], CB_ST["uid"]
+    with _CB_LK:
+        CB_ST.setdefault("toks", {})[em] = (res[0], res[1], _t.time())
+    return res
 
 
 def _cb_rotate():
@@ -3833,18 +3867,27 @@ def _cb_rotate():
     if not accs:
         res = _cb_signup_new()
         return bool(res)
-    start = CB_ST["idx"]
-    for _ in range(len(accs)):
-        CB_ST["idx"] = (CB_ST["idx"] + 1) % len(accs)
-        acc = accs[CB_ST["idx"]]
-        if str(CB_ST.get("exhausted", {}).get(acc["email"], 0))[:10] == __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d"):
-            continue
+    chosen = None
+    with _CB_LK:
+        for _ in range(len(accs)):
+            CB_ST["idx"] = (CB_ST["idx"] + 1) % len(accs)
+            acc = accs[CB_ST["idx"]]
+            if str(CB_ST.get("exhausted", {}).get(acc["email"], 0))[:10] == __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d"):
+                continue
+            chosen = acc
+            break
+    if chosen is not None:
+        _TLS.cb_acc = chosen
         CB_ST["tok"] = None
         _cb_save_acc()
         return True
     # هەموو ئەم ڕۆژە تەواون → ئەکاونتی نوێ
     res = _cb_signup_new()
     if res:
+        try:
+            _TLS.cb_acc = (CB_ST.get("accounts") or [])[-1]
+        except Exception:
+            pass
         return True
     _cb_save_acc()
     return False
@@ -3963,6 +4006,7 @@ def cb_chat(messages, model_id, timeout=110):
         if ans:
             return ans
         last_err = "بەتاڵ"
+        _tok_drop("cb")
         CB_ST["tok"] = None
     raise EMError(f"cb: {last_err[:60] or 'شکست'}")
 
@@ -4708,37 +4752,65 @@ def _pool_daemon():
 
 def _ca_token():
     import time as _t
-    if CA_ST.get("tok") and _t.time() - CA_ST.get("tok_t", 0) < 2700:
-        return CA_ST["tok"]
-    accs = CA_ST.get("accounts") or []
-    if accs:
-        acc = accs[CA_ST["idx"] % len(accs)]
+    acc = getattr(_TLS, "ca_acc", None)
+    if acc is None:
+        try:
+            _ca_rotate(None)  # #94U21: یەکەم داوا → لیسی خۆی (تەنها ستار-لیمێت لابەرە)
+        except Exception:
+            pass
+        acc = getattr(_TLS, "ca_acc", None)
+        if acc is None:
+            accs = CA_ST.get("accounts") or []
+            acc = accs[CA_ST["idx"] % len(accs)] if accs else None
+    if acc is not None:
+        em = acc.get("email")
+        with _CA_LK:
+            c = (CA_ST.get("toks") or {}).get(em)
+        if c and _t.time() - c[1] < 2700:
+            return c[0]
         res = _ca_firebase("signInWithPassword", acc["email"], acc["password"])
         if res:
-            CA_ST["tok"] = res[0]
-            CA_ST["tok_t"] = _t.time()
-            return CA_ST["tok"]
+            with _CA_LK:
+                CA_ST.setdefault("toks", {})[em] = (res[0], _t.time())
+            return res[0]
     resn = _ca_signup_new()
     if not resn:
         raise EMError("ca: هیچ ئەکاونت")
-    CA_ST["tok"] = resn[0]
-    CA_ST["tok_t"] = _t.time()
-    return CA_ST["tok"]
+    try:
+        _na = (CA_ST.get("accounts") or [])[-1]
+        _TLS.ca_acc = _na
+        with _CA_LK:
+            CA_ST.setdefault("toks", {})[_na.get("email")] = (resn[0], _t.time())
+    except Exception:
+        pass
+    return resn[0]
 
 
 def _ca_rotate(model_key):
     """ئەکاونتی دواتر بۆ ئەم مۆدێڵە — ئەوانەی سنووریان تێپەڕاندووە لابەرە؛ ئەگەر نەمابوو → نوێ"""
     accs = CA_ST.get("accounts") or []
     lim = CA_ST.get("limits") or {}
-    for _ in range(len(accs)):
-        CA_ST["idx"] = (CA_ST["idx"] + 1) % len(accs)
-        acc = accs[CA_ST["idx"]]
-        em = lim.get(acc["email"]) or {}
-        if not _lim_hit(em, model_key):  # #91Z: ستاری دوێنێ = ئازاد
-            CA_ST["tok"] = None
-            _ca_save_acc()
-            return True
-    return bool(_ca_signup_new(model_key))
+    chosen = None
+    with _CA_LK:
+        for _ in range(len(accs)):
+            CA_ST["idx"] = (CA_ST["idx"] + 1) % len(accs)
+            acc = accs[CA_ST["idx"]]
+            em = lim.get(acc["email"]) or {}
+            if not _lim_hit(em, model_key):  # #91Z: ستاری دوێنێ = ئازاد
+                chosen = acc
+                break
+    if chosen is not None:
+        _TLS.ca_acc = chosen
+        CA_ST["tok"] = None
+        _ca_save_acc()
+        return True
+    res = _ca_signup_new(model_key)
+    if res:
+        try:
+            _TLS.ca_acc = (CA_ST.get("accounts") or [])[-1]
+        except Exception:
+            pass
+    return bool(res)
 
 
 def _ca_models_catalog():
@@ -4803,9 +4875,11 @@ def ca_chat(messages, model_id, timeout=110):
             last_err = err or str(r.status_code)
             low = last_err.lower()
             if "limit" in low or "free message" in low or "no free" in low:
-                accs = CA_ST.get("accounts") or []
-                if accs:
-                    acc = accs[CA_ST["idx"] % len(accs)]
+                acc = getattr(_TLS, "ca_acc", None)
+                if acc is None:
+                    _accs = CA_ST.get("accounts") or []
+                    acc = _accs[CA_ST["idx"] % len(_accs)] if _accs else None
+                if acc is not None:
                     lm = CA_ST.setdefault("limits", {}).setdefault(acc["email"], {})
                     lm[mkey] = _lim_today()  # مۆدێڵ-لیمێت — هەمیشە بەروارکراو
                     # #91Z-P: ستار تەنها بۆ limit ی ڕاستەقینەی گشتی (free message / no free / daily limit)
@@ -4840,6 +4914,7 @@ def ca_chat(messages, model_id, timeout=110):
                     if ans:
                         return ans
         last_err = "بەتاڵ/درەنگ"
+        _tok_drop("ca")
         CA_ST["tok"] = None
     raise EMError(f"ca: {last_err[:60] or 'شکست'}")
 
@@ -5052,15 +5127,26 @@ def _ac_signup_new():
 
 def _ac_token():
     import time as _t
-    if AC_ST.get("tok") and _t.time() - AC_ST.get("tok_t", 0) < 2700:
-        return AC_ST["tok"]
-    accs = AC_ST.get("accounts") or []
-    if accs:
-        acc = accs[AC_ST["idx"] % len(accs)]
+    acc = getattr(_TLS, "ac_acc", None)
+    if acc is None:
+        try:
+            _ac_rotate(None)  # #94U21: یەکەم داوا → لیسی خۆی
+        except Exception:
+            pass
+        acc = getattr(_TLS, "ac_acc", None)
+        if acc is None:
+            accs = AC_ST.get("accounts") or []
+            acc = accs[AC_ST["idx"] % len(accs)] if accs else None
+    if acc is not None:
+        em = acc.get("email")
+        with _AC_LK:
+            c = (AC_ST.get("toks") or {}).get(em)
+        if c and _t.time() - c[1] < 2700:
+            return c[0]
         res = _ac_firebase("signInWithPassword", acc["email"], acc["password"])
         if res:
-            AC_ST["tok"] = res[0]
-            AC_ST["tok_t"] = _t.time()
+            with _AC_LK:
+                AC_ST.setdefault("toks", {})[em] = (res[0], _t.time())
             if not acc.get("boot"):
                 try:
                     _ac_bootstrap(res[0], res[1], acc["email"])
@@ -5068,27 +5154,44 @@ def _ac_token():
                     pass
                 acc["boot"] = True
                 _ac_save_acc()
-            return AC_ST["tok"]
+            return res[0]
     resn = _ac_signup_new()
     if not resn:
         raise EMError("ac: هیچ ئەکاونت")
-    AC_ST["tok"] = resn[0]
-    AC_ST["tok_t"] = _t.time()
-    return AC_ST["tok"]
+    try:
+        _na = (AC_ST.get("accounts") or [])[-1]
+        _TLS.ac_acc = _na
+        with _AC_LK:
+            AC_ST.setdefault("toks", {})[_na.get("email")] = (resn[0], _t.time())
+    except Exception:
+        pass
+    return resn[0]
 
 
 def _ac_rotate(model_key):
     accs = AC_ST.get("accounts") or []
     lim = AC_ST.get("limits") or {}
-    for _ in range(len(accs)):
-        AC_ST["idx"] = (AC_ST["idx"] + 1) % len(accs)
-        acc = accs[AC_ST["idx"]]
-        em = lim.get(acc["email"]) or {}
-        if not _lim_hit(em, model_key):  # #91Z
-            AC_ST["tok"] = None
-            _ac_save_acc()
-            return True
-    return bool(_ac_signup_new())
+    chosen = None
+    with _AC_LK:
+        for _ in range(len(accs)):
+            AC_ST["idx"] = (AC_ST["idx"] + 1) % len(accs)
+            acc = accs[AC_ST["idx"]]
+            em = lim.get(acc["email"]) or {}
+            if not _lim_hit(em, model_key):  # #91Z
+                chosen = acc
+                break
+    if chosen is not None:
+        _TLS.ac_acc = chosen
+        AC_ST["tok"] = None
+        _ac_save_acc()
+        return True
+    res = _ac_signup_new()
+    if res:
+        try:
+            _TLS.ac_acc = (AC_ST.get("accounts") or [])[-1]
+        except Exception:
+            pass
+    return bool(res)
 
 
 def _ac_catalog():
@@ -5153,9 +5256,11 @@ def ac_chat(messages, model_id, timeout=110):
             last_err = err or str(r.status_code)
             low = last_err.lower()
             if "limit" in low or "free message" in low or "no free" in low:
-                accs = AC_ST.get("accounts") or []
-                if accs:
-                    acc = accs[AC_ST["idx"] % len(accs)]
+                acc = getattr(_TLS, "ac_acc", None)
+                if acc is None:
+                    _accs = AC_ST.get("accounts") or []
+                    acc = _accs[AC_ST["idx"] % len(_accs)] if _accs else None
+                if acc is not None:
                     lm = AC_ST.setdefault("limits", {}).setdefault(acc["email"], {})
                     lm[mkey] = _lim_today()  # مۆدێڵ-لیمێت
                     if ("free message" in low or "no free" in low or "daily" in low):
@@ -5377,21 +5482,37 @@ def _nv_signup_new():
 
 def _nv_token():
     import time as _t
-    if NV_ST.get("tok") and NV_ST.get("uid") and _t.time() - NV_ST.get("tok_t", 0) < 2700:
-        return NV_ST["tok"], NV_ST["uid"]
-    accs = NV_ST.get("accounts") or []
-    if accs:
-        acc = accs[NV_ST["idx"] % len(accs)]
+    acc = getattr(_TLS, "nv_acc", None)
+    if acc is None:
+        try:
+            _nv_rotate()  # #94U21: یەکەم داوا → لیسی خۆی لەژێر لۆک (بڵاوبوونەوە لە سەرەتاوە)
+        except Exception:
+            pass
+        acc = getattr(_TLS, "nv_acc", None)
+        if acc is None:
+            accs = NV_ST.get("accounts") or []
+            acc = accs[NV_ST["idx"] % len(accs)] if accs else None
+    if acc is not None:
+        em = acc.get("email")
+        with _NV_LK:
+            c = (NV_ST.get("toks") or {}).get(em)
+        if c and _t.time() - c[2] < 2700:
+            return c[0], c[1]
         res = _nv_firebase("signInWithPassword", acc["email"], acc["password"])
         if res:
-            NV_ST["tok"], NV_ST["uid"] = res
-            NV_ST["tok_t"] = _t.time()
+            with _NV_LK:
+                NV_ST.setdefault("toks", {})[em] = (res[0], res[1], _t.time())
             return res
     resn = _nv_signup_new()
     if not resn:
         raise EMError("nv: هیچ ئەکاونت")
-    NV_ST["tok"], NV_ST["uid"] = resn
-    NV_ST["tok_t"] = _t.time()
+    try:
+        _na = (NV_ST.get("accounts") or [])[-1]
+        _TLS.nv_acc = _na
+        with _NV_LK:
+            NV_ST.setdefault("toks", {})[_na.get("email")] = (resn[0], resn[1], _t.time())
+    except Exception:
+        pass
     return resn
 
 
@@ -5402,19 +5523,31 @@ def _nv_rotate():
         return bool(_nv_signup_new())
     ex = NV_ST.get("exhausted") or {}
     now = _ts.time()
-    for _ in range(len(accs)):
-        NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
-        acc = accs[NV_ST["idx"]]
-        if float(ex.get(acc["email"], 0)) > now:
-            continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
+    chosen = None
+    with _NV_LK:
+        for _ in range(len(accs)):
+            NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+            acc = accs[NV_ST["idx"]]
+            if float(ex.get(acc["email"], 0)) > now:
+                continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
+            chosen = acc
+            break
+    if chosen is not None:
+        _TLS.nv_acc = chosen
         NV_ST["tok"] = None
         _nv_save_acc()
         return True
     res = _nv_signup_new()
     if res:
+        try:
+            _TLS.nv_acc = (NV_ST.get("accounts") or [])[-1]
+        except Exception:
+            pass
         return True
     # فەرموودەی کۆتایی — ئەگەر ساینئەپ شکست خوارد، هەر ئەکاونتێک (تەنانەت ساردبوو)
-    NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+    with _NV_LK:
+        NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+        _TLS.nv_acc = accs[NV_ST["idx"]]
     NV_ST["tok"] = None
     _nv_save_acc()
     return True
@@ -5500,9 +5633,11 @@ def nv_chat(messages, model_id, timeout=110):
             if "Insufficient chat credit" in msg:
                 if tier == "x":
                     raise EMError("nv: پرێمیۆمی-قورس — بە پارە بەردەستە")
-                accs = NV_ST.get("accounts") or []
-                if accs:
-                    acc = accs[NV_ST["idx"] % len(accs)]
+                acc = getattr(_TLS, "nv_acc", None)
+                if acc is None:
+                    _accs = NV_ST.get("accounts") or []
+                    acc = _accs[NV_ST["idx"] % len(_accs)] if _accs else None
+                if acc is not None:
                     NV_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 600  # کۆڵ ١٠ خولەک
                     NV_ST.setdefault("exc", {})[acc["email"]] = (NV_ST.get("exc") or {}).get(acc["email"], 0) + 1
                 if not _nv_rotate():
@@ -5532,6 +5667,7 @@ def nv_chat(messages, model_id, timeout=110):
                             continue  # پارچەی بیرکردنەوە — فڕێدان
                         parts.append((p or {}).get("text", "") if isinstance(p, dict) else str(p))
         if not parts:
+            _tok_drop("nv")
             NV_ST["tok"] = None
             last_err = "بەتاڵ"
             continue
@@ -5543,6 +5679,7 @@ def nv_chat(messages, model_id, timeout=110):
         if ans:
             return ans
         last_err = "بەتاڵ"
+        _tok_drop("nv")
         NV_ST["tok"] = None
     raise EMError(f"nv: {last_err[:60] or 'شکست'}")
 
@@ -10183,6 +10320,15 @@ def main():
     _cbox_seed()
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
+    def _safe_handle_guarded(m):
+        try:
+            _safe_handle(m)
+        finally:
+            try:
+                _TG_SEM.release()
+            except Exception:
+                pass
+
     def _safe_handle(m):
         # #91A3: هیچ هەڵەیەک نامەی بەکارهێنەر بێدەنگ ناکات
         try:
@@ -10253,7 +10399,10 @@ def main():
                     pass
                 m = u.get("message")
                 if m and m.get("text"):
-                    threading.Thread(target=_safe_handle, args=(m,), daemon=True).start()
+                    if _TG_SEM.acquire(blocking=False):
+                        threading.Thread(target=_safe_handle_guarded, args=(m,), daemon=True).start()
+                    else:
+                        reply(m["chat"]["id"], "السيرفر مشغول حاليا أعد المحاولة بعد قليل")
                 elif m:
                     reply(m["chat"]["id"], "💬 أرسل رسالة نصية من فضلك.")
         except KeyboardInterrupt:
