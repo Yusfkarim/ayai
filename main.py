@@ -9599,6 +9599,41 @@ def _cbox_seed():
         print(f"[CX] seed: {str(e)[:70]}", flush=True)
 
 
+def _memwatch_daemon():
+    """#94U10: چاودێری بیرگە — ئەگەر RSS > 450MB (لە 512) → GC + ئاگادار، >480 → خۆ-ڕیستارت"""
+    import gc as _gc
+    while True:
+        try:
+            time.sleep(300)
+            rss = 0
+            try:
+                with open("/proc/self/status") as f:
+                    for ln in f:
+                        if ln.startswith("VmRSS:"):
+                            rss = int(ln.split()[1])  # kB
+                            break
+            except Exception:
+                continue
+            mb = rss // 1024
+            if mb > 480:
+                print(f"[MEM] 🚨 {mb}MB — خۆ-ڕیستارت", flush=True)
+                try:
+                    import requests as _rq
+                    _tok = re.search(r"bot(\d+:[A-Za-z0-9_\-]+)", open(__file__, encoding="utf-8", errors="ignore").read())
+                    if _tok:
+                        for _c in (8381536661, 7585287282):
+                            _rq.post(f"https://api.telegram.org/bot{_tok.group(1)}/sendMessage",
+                                     json={"chat_id": _c, "text": f"⚠️ بیرگە {mb}MB — خۆ-ڕیستارت ئەنجامدرا"}, timeout=10)
+                except Exception:
+                    pass
+                os._exit(1)  # fly reboots the container
+            elif mb > 450:
+                _gc.collect()
+                print(f"[MEM] ⚠️ {mb}MB — GC کرایەوە", flush=True)
+        except Exception:
+            time.sleep(60)
+
+
 def _prewarm_daemon():
     """#94U8: pre-warm — هەر ٤٥ خولەک توکنی هەر سێ حەوز نوێ بکەرەوە
     تا یەکەم داواکاری بەکارهێنەر چاوەڕوانی fetch-token نەبێت (خێرایی-یەکەم-توکن)"""
@@ -9633,6 +9668,7 @@ def main():
     _check_code_integrity(is_boot=True)
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
+    threading.Thread(target=_memwatch_daemon, daemon=True).start()
     threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
     start_hf_keepalive()
