@@ -32,6 +32,7 @@ _u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
 ADMIN_TG = 8381536661
+REPORT_CHAT_IDS = [8381536661, 7585287282]
 
 # ═══ #94U3: چینی دووەمی پاراستن — شێفرەکردنی فایلەکانی حەوز لەسەر /data ═══
 _ENC_MAGIC = b"ENC26::"
@@ -159,10 +160,11 @@ def _check_code_integrity(is_boot=True):
                f"هاشی ئێستای دەستکاریکراو: <code>{current_hashes.get('full', '')[:16]}…</code>\n\n"
                f"<i>تێبینی: ئەگەر هاک یان دەستکارییەکی نەناسراوە، تکایە ڕاستەوخۆ سێرڤەر بپشکنە.</i>")
         print(f"[INTEGRITY] 🚨 دەستکاری خەتەرناک لە کاتی کارکردن: {drifts}", flush=True)
-        try:
-            tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
-        except Exception as e:
-            print(f"[INTEGRITY] TG alert fail: {e}", flush=True)
+        for cid in REPORT_CHAT_IDS:
+            try:
+                tg("sendMessage", chat_id=cid, text=msg, parse_mode="HTML")
+            except Exception as e:
+                print(f"[INTEGRITY] TG alert fail ({cid}): {e}", flush=True)
         return False
         
     return True
@@ -239,11 +241,15 @@ def _perform_backup(chat_id=ADMIN_TG, manual=False):
 
 
 def _pool_backup_daemon():
-    """دیمۆنی باکئەپی ٢٤ کاتژمێری بۆ ئەدمین"""
+    """دیمۆنی باکئەپی ٢٤ کاتژمێری بۆ چاتەکانی دیاریکراو"""
     time.sleep(300)
     while True:
         try:
-            _perform_backup(ADMIN_TG, manual=False)
+            for cid in REPORT_CHAT_IDS:
+                try:
+                    _perform_backup(cid, manual=False)
+                except Exception as be:
+                    print(f"[BACKUP-DAEMON] {cid}: {be}", flush=True)
         except Exception as e:
             print(f"[BACKUP-DAEMON] {e}", flush=True)
         time.sleep(86400)
@@ -7486,14 +7492,23 @@ def keep_typing(chat_id, stop):
         stop.wait(4.0)
 
 
+def _sanitize_tg_html(html_text):
+    """ڕێگری لە 400 Bad Request — لابردنی تاگە نادروستەکان و ڕێگری لە <word="""
+    if not html_text:
+        return ""
+    allowed = r'/?(?:b|i|u|s|strike|del|strong|em|code|pre|a\b[^>]*|tg-spoiler|blockquote)'
+    return re.sub(rf'<(?!(?:{allowed})>)', '&lt;', html_text)
+
+
 def reply(chat_id, text):
-    r = tg("sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+    safe_text = _sanitize_tg_html(text)
+    r = tg("sendMessage", chat_id=chat_id, text=safe_text, parse_mode="HTML",
            disable_web_page_preview=True)
     if r.get("ok"):
         return
     # فەڵباکی زیرەک: یەکەم هەوڵ — بەشە-بەشە بە HTML (کێشە = درێژی)
     ok2 = True
-    for part in split_msg(text):
+    for part in split_msg(safe_text):
         r2 = tg("sendMessage", chat_id=chat_id, text=part, parse_mode="HTML",
                 disable_web_page_preview=True)
         if not r2.get("ok"):
@@ -7501,10 +7516,10 @@ def reply(chat_id, text):
             break
     if ok2:
         return
-    # دووەم: بەبێ HTML — ئێسکەیپ ی تەواو (& لە & پێش < — ڕیزبەندی گرنگە)
+    # دووەم: بەبێ HTML — وەک دەقی سادە
     for part in split_msg(text):
-        tg("sendMessage", chat_id=chat_id,
-           text=part.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        plain = re.sub(r'<[^>]+>', '', part)
+        tg("sendMessage", chat_id=chat_id, text=plain)
 
 
 def handle_message(msg):
@@ -7734,6 +7749,10 @@ def handle_message(msg):
         else:
             answer, mode = result["answer"]
             if answer:
+                # #94U7: پاککردنەوەی خاڵبەندی (، . !) لە وەڵامی بۆتی دکتۆر التعافي بەپێی یاساکان
+                clean_ans = re.sub(r'[,،!]', '', str(answer))
+                clean_ans = re.sub(r'(?<!\d)\.(?!\d)', '', clean_ans)
+                answer = clean_ans
                 s["history"].append({"role": "user", "content": text})
                 s["history"].append({"role": "assistant", "content": answer})
                 s["history"] = s["history"][-20:]
@@ -8171,8 +8190,15 @@ def _daily_report():
                        f"✅ سەرچاوەی زیندوو: {okn}/{len(st) or '—'}\n"
                        f"💰 حەوز: CA {po['CA']} · CB {po['CB']} · NV {po['NV']}\n"
                        f"⚡ داواکاری: {_PERF['req']} (تێکڕای وەڵام {avg:.1f} چرکە)")
-                r = tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
-                if r.get("ok"):
+                sent_any = False
+                for cid in REPORT_CHAT_IDS:
+                    try:
+                        r = tg("sendMessage", chat_id=cid, text=msg, parse_mode="HTML")
+                        if r.get("ok"):
+                            sent_any = True
+                    except Exception as de:
+                        print(f"[DAILY] {cid}: {de}", flush=True)
+                if sent_any:
                     open(os.path.join(DATA_DIR, "daily_sent.txt"), "w").write(day)
         except Exception as e:
             print(f"[DAILY] {str(e)[:60]}", flush=True)
@@ -8529,12 +8555,16 @@ def _usage_snapshot_daemon():
                 avg = (sum(lat) / len(lat)) if lat else 0
                 st = _HEAL_STATE.get("status", {})
                 okn = sum(1 for v in st.values() if v.get("ok"))
-                tg("sendMessage", chat_id=ADMIN_TG, parse_mode="HTML",
-                   text=(f"📊 <b>کاتژمێری {hr} UTC</b>\n"
-                         f"⚡ داواکاری: {delta}\n"
-                         f"✅ سەرچاوە: {okn}/{len(st)}\n"
-                         f"⏳ تێکڕا: {avg:.1f}s\n"
-                         f"💾 کاش: {len(_ANS_CACHE)}"))
+                for cid in REPORT_CHAT_IDS:
+                    try:
+                        tg("sendMessage", chat_id=cid, parse_mode="HTML",
+                           text=(f"📊 <b>کاتژمێری {hr} UTC</b>\n"
+                                 f"⚡ داواکاری: {delta}\n"
+                                 f"✅ سەرچاوە: {okn}/{len(st)}\n"
+                                 f"⏳ تێکڕا: {avg:.1f}s\n"
+                                 f"💾 کاش: {len(_ANS_CACHE)}"))
+                    except Exception:
+                        pass
         except Exception:
             pass
         time.sleep(3600)
