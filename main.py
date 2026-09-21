@@ -6867,6 +6867,17 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     order.append(cand)
 
         content, last_err = "", None
+        # #94U26b: پرۆمپتی درێژ (>7k) → باسکەندە single-question ەکان پرسیار لە 8k دەبڕن! بیانخە کۆتایی
+        try:
+            _sys_len = sum(len(str(m.get("content") or "")) for m in full if m.get("role") == "system")
+        except Exception:
+            _sys_len = 0
+        if _sys_len > 7000:
+            _sq = {"aff", "yl", "hk", "qb", "ng"}
+            _long_ok = [c for c in order if c.get("kind") not in _sq]
+            if _long_ok:
+                print(f"[API] 📜 system {_sys_len} پیت → single-question دواخرا ({len(order)}→{len(_long_ok)}+sq)", flush=True)
+                order = _long_ok + [c for c in order if c.get("kind") in _sq]
         _flt = [c for c in order if time.time() >= _BREAKER.get(c.get("kind"), 0)]
         if _flt:
             order = _flt

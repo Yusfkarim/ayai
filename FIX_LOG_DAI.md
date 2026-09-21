@@ -744,3 +744,8 @@
 - **کێشە**: cap ـەکان 6000 بوون + flat ـەکان `[-6000:]` یان دەکرد (system لە سەرەتا دەفەوتا).
 - **پاچ**: `_sys_txt` cap → 14000؛ 7 merge → [:14000]؛ 6 flat → `_flat_cut` (system تەواو + tail)؛ hk head-preserving.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK + تاقی زیندووی 14k.
+
+## #94U26b ROUTE-LONG (2026-09-21) — ڕێڕەوی پرۆمپتی درێژ
+- **دۆزراوە بە تاقی**: aff پرسیار لە ~8192 پیت دەبڕێت (cliff لەنێوان 7954✅ و 8254❌) — یاسای کۆتایی 14k دەفەوتا.
+- **پاچ**: system >7000 → single-question kinds (aff/yl/hk/qb/ng) دەچنە کۆتایی ڕیز؛ full-message ەکان (em/rwd/l7/g4f/pol/cb/nv...) 14k تەواو دەگەیەنن.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK + تاقی زیندوو.
