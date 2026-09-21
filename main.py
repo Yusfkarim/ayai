@@ -65,6 +65,67 @@ _AC_LK = threading.Lock()
 _TG_SEM = threading.Semaphore(50)  # #94U21: سەقفی 50 هەندڵی هاوکاتی تێلەگرام
 
 
+_REPLACE_SEM = threading.Semaphore(2)  # #94U24: زۆرترین 2 ساینئەپی جێگۆڕکێ لە هەمان کات (دژە-throttle ی Firebase)
+
+
+def _pool_acc_alive(a, lim, exh, today, now):
+    """#94U24: زیندوویی یەکگرتوو — وەک rotate ەکان (cooldown-until + general/model-limit)"""
+    e = a.get("email") or "?"
+    if today in (lim.get(e) or {}).values():
+        return False
+    v = exh.get(e)
+    if v:
+        try:
+            if float(v) > now:
+                return False
+        except Exception:
+            if str(v)[:10] == today:
+                return False
+    return True
+
+
+def _replace_dead_soon(kind):
+    """#94U24: لەبری ئەکاونتی مردوو → ئەکاونتی نوێ یەکسەر (1-بە-1؛ بودجە+سەقف سنووردارە)"""
+    try:
+        threading.Thread(target=_replace_dead_worker, args=(kind,), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _replace_dead_worker(kind):
+    try:
+        if kind == "ca":
+            st, fn, fz = CA_ST, _ca_signup_new, True
+        elif kind == "cb":
+            st, fn, fz = CB_ST, _cb_signup_new, True
+        elif kind == "nv":
+            st, fn, fz = NV_ST, _nv_signup_new, True
+        elif kind == "ac":
+            st, fn, fz = AC_ST, _ac_signup_new, False
+        elif kind == "pia":
+            st, fn, fz = PIA_ST, _pia_signup_new, False
+        else:
+            return
+        if not _REPLACE_SEM.acquire(timeout=120):
+            return
+        try:
+            time.sleep(random.uniform(1, 5))
+            accs = st.get("accounts") or []
+            today = _lim_today()
+            now = time.time()
+            lim = st.get("limits") or {}
+            exh = st.get("exhausted") or {}
+            healthy = sum(1 for a in accs if _pool_acc_alive(a, lim, exh, today, now))
+            if healthy >= len(accs):
+                return  # هەموو زیندوون (پێشتر جێگۆڕکێ کراوە) — بودجە مەخەرە
+            print(f"[REPLACE] {kind}: {healthy}/{len(accs)} زیندوو — جێگۆڕکێ...", flush=True)
+            fn(force=True) if fz else fn()
+        finally:
+            _REPLACE_SEM.release()
+    except Exception as e:
+        print(f"[REPLACE] {kind}: {str(e)[:50]}", flush=True)
+
+
 def _sg_reserve(ST, cap, today, lock):
     """#94U23: بودجەی ساینئەپ — پشکنین+تۆمار لەژێر لۆک (ڕەیس-دژە؛ کاپ ڕەق؛ هەوڵی شکستخواردووش بودجە دەخوات)"""
     try:
@@ -3806,7 +3867,7 @@ def _cb_cur_acc():
     return accs[CB_ST["idx"] % len(accs)]
 
 
-def _cb_signup_new():
+def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-gate بازدەدات (بودجە+سەقف هەر ماوە)
     """ئەکاونتی نوێ — سەرنج: ڕۆژانە زۆر نەبێت"""
     import time as _t, datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
@@ -3819,7 +3880,7 @@ def _cb_signup_new():
         _ex = CB_ST.get("exhausted", {}) or {}
         _healthy = sum(1 for _a in (CB_ST.get("accounts") or [])
                        if str(_ex.get(_a.get("email"), 0))[:10] != today)
-        if _healthy > 0 or _cb_n >= 110:
+        if (not force and _healthy > 0) or _cb_n >= 110:
             return None
     if not _sg_reserve(CB_ST, 90, today, _CB_LK):  # #94U23: بودجە لەژێر لۆک (90 وەک خۆی)
         return None
@@ -3887,7 +3948,12 @@ def _cb_rotate():
         for _ in range(len(accs)):
             CB_ST["idx"] = (CB_ST["idx"] + 1) % len(accs)
             acc = accs[CB_ST["idx"]]
-            if str(CB_ST.get("exhausted", {}).get(acc["email"], 0))[:10] == __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d"):
+            _exv = CB_ST.get("exhausted", {}).get(acc["email"], 0)
+            try:
+                _dead = float(_exv) > time.time()  # #94U24: cooldown-until (وەک NV)
+            except Exception:
+                _dead = str(_exv)[:10] == __import__("datetime").datetime.utcnow().strftime("%Y-%m-%d")
+            if _dead:
                 continue
             chosen = acc
             break
@@ -3984,7 +4050,8 @@ def cb_chat(messages, model_id, timeout=110):
                 import datetime as _dt
                 acc = _cb_cur_acc()
                 if acc:
-                    CB_ST.setdefault("exhausted", {})[acc["email"]] = _t.time()
+                    CB_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 86000  # #94U24: وەک NV — cooldown-until (24h)
+                    _replace_dead_soon("cb")  # #94U24: لە جێی ئەمە → نوێ یەکسەر
                 if not _cb_rotate():
                     raise EMError("cb: کرێدیت هەموو ئەکاونتەکان")
                 continue
@@ -4152,7 +4219,7 @@ def _ca_firebase(ep, email, pw):
     return (tok, "") if tok else None
 
 
-def _ca_signup_new(mkey=None):
+def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
     # #94U16: mkey → ژمارەکردنی زیندوو تەنها بۆ ئەو مۆدێڵە (چارەی deadlock ی «هەموو ئەکاونتەکان limit»)
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
@@ -4169,7 +4236,7 @@ def _ca_signup_new(mkey=None):
     else:
         _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
                      if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
-    if _accs_n >= 70 and (_alive >= 5 or _accs_n >= 160):
+    if _accs_n >= 160 or (not force and _accs_n >= 70 and _alive >= 5):
         return None
     if not _sg_reserve(CA_ST, 80, today, _CA_LK):  # #94U23: بودجە لەژێر لۆک (80 وەک خۆی — بەبێ مۆڵەت ناگۆڕدرێت)
         return None
@@ -4699,8 +4766,14 @@ def _pool_reap():
     # CB — ئەمڕۆ تەواوبوو → پاڵنان بۆ کۆتایی (سبەی دەگەڕێنەوە)
     ex = CB_ST.get("exhausted") or {}
     accs = CB_ST.get("accounts") or []
-    live = [a for a in accs if not (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
-    done = [a for a in accs if (now - 86000 < float(ex.get(a.get("email"), 0)) <= now + 120)]
+    def _cb_dead(e):
+        v = ex.get(e, 0)
+        try:
+            return float(v) > now  # #94U24: cooldown-until
+        except Exception:
+            return str(v)[:10] == today
+    live = [a for a in accs if not _cb_dead(a.get("email"))]
+    done = [a for a in accs if _cb_dead(a.get("email"))]
     if done and live:
         CB_ST["accounts"] = live + done
         CB_ST["idx"] = CB_ST["idx"] % max(len(live), 1)
@@ -4745,11 +4818,10 @@ def _pool_daemon():
                 accs = st.get("accounts") or []
                 # #94U2: ژمارەی زیندوو — ئەگەر هەموو ئەکاونتەکان لیمیتن → زیاد بکە با بەردەوام بێت
                 today = _lim_today()
+                now = time.time()
                 lim = st.get("limits") or {}
                 exh = st.get("exhausted") or {}
-                alive = [a for a in accs
-                         if today not in (lim.get(a.get("email") or "?") or {}).values()
-                         and not exh.get(a.get("email") or "?")]
+                alive = [a for a in accs if _pool_acc_alive(a, lim, exh, today, now)]
                 if len(accs) >= tgt and len(alive) >= 5:
                     continue
                 before = len(accs)
@@ -4899,6 +4971,7 @@ def ca_chat(messages, model_id, timeout=110):
                     # هەڵەکانی "account limit"/"rate" ی تایبەت بە مۆدێڵ → تەنها mkey (نەک *)
                     if ("free message" in low or "no free" in low or "daily" in low):
                         lm["*"] = _lim_today()
+                        _replace_dead_soon("ca")  # #94U24: مردنی گشتی → نوێ لە جێی
                     _ca_save_acc()
                 if not _ca_rotate(mkey):
                     raise EMError("ca: سنووری هەموو ئەکاونتەکان")
@@ -5278,6 +5351,7 @@ def ac_chat(messages, model_id, timeout=110):
                     lm[mkey] = _lim_today()  # مۆدێڵ-لیمێت
                     if ("free message" in low or "no free" in low or "daily" in low):
                         lm["*"] = _lim_today()  # تەنها limit ی ڕاستەقینەی گشتی
+                        _replace_dead_soon("ac")  # #94U24: مردنی گشتی → نوێ لە جێی
                     _ac_save_acc()
                 if not _ac_rotate(mkey):
                     raise EMError("ac: سنووری هەموو ئەکاونتەکان")
@@ -5448,7 +5522,7 @@ def _nv_firebase(ep, email, pw):
     return tok, j.get("localId") or ""
 
 
-def _nv_signup_new():
+def _nv_signup_new(force=False):  # #94U24: force = جێگۆڕکێ
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     sg = NV_ST.get("signups") or {"date": "", "n": 0}
@@ -5467,7 +5541,7 @@ def _nv_signup_new():
                 _ok = True
             if _ok:
                 _healthy += 1
-        if _healthy > 0 or _nv_n >= 110:
+        if (not force and _healthy > 0) or _nv_n >= 110:
             return None
     if not _sg_reserve(NV_ST, 70, today, _NV_LK):  # #94U23: بودجە لەژێر لۆک (70 وەک خۆی)
         return None
@@ -5650,6 +5724,7 @@ def nv_chat(messages, model_id, timeout=110):
                     acc = _accs[NV_ST["idx"] % len(_accs)] if _accs else None
                 if acc is not None:
                     NV_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 600  # کۆڵ ١٠ خولەک
+                    _replace_dead_soon("nv")  # #94U24: لە جێی ئەمە → نوێ یەکسەر
                     NV_ST.setdefault("exc", {})[acc["email"]] = (NV_ST.get("exc") or {}).get(acc["email"], 0) + 1
                 if not _nv_rotate():
                     raise EMError("nv: حەوزی ئەکاونتەکان تەواوە")
@@ -7466,7 +7541,7 @@ def _revive_source(kind, err=None):
         try:
             if kind in ("ca", "cb", "nv"):
                 _pool_reap()
-                {"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[kind]()
+                {"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[kind](force=True)
                 steps.append("pool+signup")
             elif kind == "ac":
                 _ac_signup_new()
@@ -7485,6 +7560,9 @@ def _revive_source(kind, err=None):
         try:
             if kind == "pi":
                 PI_STATE["s"] = None
+                steps.append("session")
+            elif kind == "cbc":
+                _CBC_STATE["t"] = 0  # #94U24: csrf/cookies ی نوێ لە داوای داهاتوو
                 steps.append("session")
         except Exception:
             pass
@@ -7522,7 +7600,7 @@ def _limit_recharge(kind, err):
             # #91P2: پاڵنان بە جیاتی سڕینەوە — ئەکاونت لە دەست ناچێت، تەنها دەگۆڕدرێت
             _pool_reap()
             # #94U23: ئەکاونتی نوێی یەکسەر (پێش داواکاری داهاتوو — بودجە لەژێر لۆک)
-            threading.Thread(target={"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[kind], daemon=True).start()
+            threading.Thread(target=lambda k=kind: {"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[k](force=True), daemon=True).start()
             print(f"[LIMIT-RECHARGE] {kind}: ئەکاونتی limit پاڵدرا کۆتایی + ئەکاونتی نوێ دروست دەکرێت...", flush=True)
         elif kind == "g4f":
             threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
@@ -9739,6 +9817,7 @@ def _pia_mark(acc, agent_id, err):
     low = str(err).lower()
     if any(w in low for w in ("subscription", "upgrade", "quota", "limit", "frequent", "credit", "balance", "exceed")):
         lm["*"] = today
+        _replace_dead_soon("pia")  # #94U24: مردنی گشتی → نوێ لە جێی
     _pia_save_acc()
 
 

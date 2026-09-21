@@ -723,3 +723,9 @@
 - **بە-ئەکاونت**: `_sg_reserve` — بودجەی ساینئەپ لەژێر لۆک (ca80/cb90/nv70/ac20/pia6 — کاپەکان وەک خۆیان، ڕەق)؛ `_limit_recharge` ئێستا ئەکاونتی نوێشی دروست دەکات (نەک تەنها reap).
 - **بێ-ئەکاونت** (`_cracked_req` — هەموو داوا HTTP یەکان): پرۆکسی لە یەکەم 429/403/418 (نەک سێیەم)؛ پرۆکسی شکستخواردوو دەسووتێنرێت + دووبارەی دووەم بە IP ی جیاواز؛ hammer-guard (hot≥6 → بێ دووبارە).
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (reserve-race 1/30 + rollover + crack-retry/burn/guard) OK.
+
+## #94U24 REPLACE-INSTANT (2026-09-21) — لەبری مردوو → نوێ یەکسەر (1-بە-1) + یەکخستنی CB-exhausted
+- **ئەکاونتەکان**: `_replace_dead_soon` لە هەر 5 نیشانەدانان (nv/cb/ca*/ac*/pia* — ca/ac/pia تەنها مردنی گشتی) → ساینئەپی یەکسەر بە `force=True` (healthy-gate بازدەدات، بودجە+سەقف ماوە)؛ revive و recharge ـیش force.
+- **بێ-ئەکاونت**: revive session += cbc (csrf/cookies نوێ)؛ pi/g4f پێشتر؛ duck/gz سیشنێ نوێ لە هەر داوایەک (by design)؛ cbox ئەکاونتی نوێی یەکسەر (by design).
+- **بەگی دۆزراوە**: CB-exhausted نایەکگرتوو بوو (mark float، rotate چاوەڕێی date) → rotate هەرگیز skip نەدەکرد! یەکخران بۆ cooldown-until (وەک NV) لە mark+rotate+reap+daemon+health.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (exhausted/gates/worker-skip) OK.
