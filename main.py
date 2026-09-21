@@ -3946,27 +3946,28 @@ def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-g
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
     _cb_n = len(CB_ST.get("accounts") or [])
-    if _cb_n >= 70:
-        # #94U16: تەنها لە حاڵەتی نائومێدی (٠ ئەکاونتی تەندرووست ئەمڕۆ) → تا 110؛ ڕۆژانە 90 وەک خۆی
-        _ex = CB_ST.get("exhausted", {}) or {}
-        _healthy = sum(1 for _a in (CB_ST.get("accounts") or [])
-                       if str(_ex.get(_a.get("email"), 0))[:10] != today)
-        if (not force and _healthy > 0) or _cb_n >= 110:
-            return None
-    if not _sg_reserve(CB_ST, 90, today, _CB_LK):  # #94U23: بودجە لەژێر لۆک (90 وەک خۆی)
+    _ex = CB_ST.get("exhausted", {}) or {}
+    _healthy = sum(1 for _a in (CB_ST.get("accounts") or [])
+                   if str(_ex.get(_a.get("email"), 0))[:10] != today)
+    if _cb_n >= 800 or (not force and _healthy >= 100):  # #94U32: حەوز 800 + 100 تەندرووست
         return None
-    n = CB_ST["next_num"]
-    for off in (0, 3, 13, 40, 100, 250):
-        email = f"komex{n + off}@duidir.com"
-        res = _fb_signup(CB_KEY, email, email, CB_UA)
-        if res:
-            CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
-            CB_ST["idx"] = len(CB_ST["accounts"]) - 1
-            CB_ST["next_num"] = n + off + 1
-            _cb_save_acc()
-            CB_ST["tok"] = None
-            print(f"[CB] ئەکاونتی نوێ ✅ {email}", flush=True)
-            return res
+    if not _sg_reserve(CB_ST, 500, today, _CB_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 90→500 (وریا: CB هەستیارە)
+        return None
+    n = CB_ST["next_num"] + random.randint(0, 3000)  # #94U32 jitter دژە-دەستنیشان
+    for pref in ("komex", "bexud"):  # #94U32: 2 پریفیکس
+        for off in (0, 3, 13, 40, 100, 250):
+            email = f"{pref}{n + off}@duidir.com"
+            pw = f"{email}#{random.randint(10000, 99999)}"
+            res = _fb_signup(CB_KEY, email, pw, _rand_ua())
+            if res:
+                CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": pw, "ua": _rand_ua()}]
+                CB_ST["idx"] = len(CB_ST["accounts"]) - 1
+                CB_ST["next_num"] = n + off + 1
+                _cb_save_acc()
+                CB_ST["tok"] = None
+                print(f"[CB] ئەکاونتی نوێ ✅ {email}", flush=True)
+                return res
+            _t.sleep(random.uniform(0.5, 1.5))  # #94U32 jitter
     CB_ST["next_num"] = n + 300
     _cb_save_acc()
     print(f"[CB] هیچ شوێن — بازدا بۆ {CB_ST['next_num']}", flush=True)
@@ -4875,14 +4876,15 @@ def _pool_reap():
 
 
 def _pool_daemon():
-    """#94U31: CA → 1000 زیندووی بەردەوام (بەچی 20/خول)؛ CB/NV → ٥٠ وەک خۆی + پاککردنەوە"""
+    """#94U32 ALL-FORTRESS: CA 1000/20 + CB 100/4 + NV 100/5 + AC 30/2 (زیندوو/بەچ) + پاککردنەوە"""
     time.sleep(60)
     # لازەی — دوای load ی هەموو ST ەکان (CB/NV دوای ئەم بلۆکە پێناسە دەکرێن لە فایلدا)
     import sys as _s
     _m = _s.modules[__name__]
     pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000, 20),
-             ("CB", _m.CB_ST, _m._cb_signup_new, 50, 5, 1),
-             ("NV", _m.NV_ST, _m._nv_signup_new, 50, 5, 1))
+             ("CB", _m.CB_ST, _m._cb_signup_new, 800, 100, 4),
+             ("NV", _m.NV_ST, _m._nv_signup_new, 1000, 100, 5),
+             ("AC", _m.AC_ST, _m._ac_signup_new, 300, 30, 2))
     while True:
         try:
             _pool_reap()
@@ -5275,16 +5277,17 @@ def _ac_signup_new():
     sg = AC_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if len(AC_ST.get("accounts") or []) >= 40:
+    if len(AC_ST.get("accounts") or []) >= 300:  # #94U32: 40→300
         return None
-    if not _sg_reserve(AC_ST, 20, today, _AC_LK):  # #94U23: بودجە لەژێر لۆک
+    if not _sg_reserve(AC_ST, 200, today, _AC_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 20→200
         return None
-    n = AC_ST["next_num"]
+    n = AC_ST["next_num"] + random.randint(0, 2000)  # #94U32 jitter
     for _ in range(6):
         email = f"komex{n}@duidir.com"
-        res = _ac_firebase("signUp", email, email)
+        pw = f"{email}#{random.randint(10000, 99999)}"
+        res = _fb_signup(AC_KEY, email, pw, _rand_ua())  # #94U32: proxy-first لەبری _ac_firebase ی ڕاستەوخۆ
         if res:
-            acc = {"email": email, "password": email, "boot": True, "ua": _rand_ua()}
+            acc = {"email": email, "password": pw, "boot": True, "ua": _rand_ua()}
             try:
                 _ac_bootstrap(res[0], res[1], email)
             except Exception as e:
@@ -5296,6 +5299,7 @@ def _ac_signup_new():
             _ac_save_acc()
             print(f"[AC] ئەکاونتی نوێ ✅ {email}", flush=True)
             return res
+        time.sleep(random.uniform(1.0, 2.0))  # #94U32 jitter
         n += 1
     AC_ST["next_num"] = n
     _ac_save_acc()
@@ -5620,36 +5624,36 @@ def _nv_signup_new(force=False):  # #94U24: force = جێگۆڕکێ
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
     _nv_n = len(NV_ST.get("accounts") or [])
-    if _nv_n >= 70:
-        # #94U18: وەک CB — تەنها ئەگەر ٠ ئەکاونتی ساردبووەوە مابێت → تا 110؛ ڕۆژانە 70 وەک خۆی
-        _ex = NV_ST.get("exhausted") or {}
-        _now = time.time()
-        _healthy = 0
-        for _a in (NV_ST.get("accounts") or []):
-            try:
-                _ok = float(_ex.get(_a.get("email"), 0) or 0) <= _now
-            except Exception:
-                _ok = True
-            if _ok:
-                _healthy += 1
-        if (not force and _healthy > 0) or _nv_n >= 110:
-            return None
-    if not _sg_reserve(NV_ST, 70, today, _NV_LK):  # #94U23: بودجە لەژێر لۆک (70 وەک خۆی)
+    _ex = NV_ST.get("exhausted") or {}
+    _now = time.time()
+    _healthy = 0
+    for _a in (NV_ST.get("accounts") or []):
+        try:
+            _ok = float(_ex.get(_a.get("email"), 0) or 0) <= _now
+        except Exception:
+            _ok = True
+        if _ok:
+            _healthy += 1
+    if _nv_n >= 1000 or (not force and _healthy >= 100):  # #94U32: حەوز 1000 + 100 تەندرووست
+        return None
+    if not _sg_reserve(NV_ST, 1000, today, _NV_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 70→1000
         return None
     import time as _ts
-    n = NV_ST["next_num"]
-    for off in (0, 3, 13, 40, 100, 250):
-        email = f"komex{n + off}@duidir.com"
-        res = _fb_signup(NV_KEY, email, email, NV_UA)
-        if res:
-            NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
-            NV_ST["idx"] = len(NV_ST["accounts"]) - 1
-            NV_ST["next_num"] = n + off + 1
-            NV_ST["tok"] = None
-            _nv_save_acc()
-            print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
-            return res
-        _ts.sleep(1.2)
+    n = NV_ST["next_num"] + random.randint(0, 3000)  # #94U32 jitter دژە-دەستنیشان
+    for pref in ("komex", "naska"):  # #94U32: 2 پریفیکس
+        for off in (0, 3, 13, 40, 100, 250):
+            email = f"{pref}{n + off}@duidir.com"
+            pw = f"{email}#{random.randint(10000, 99999)}"
+            res = _fb_signup(NV_KEY, email, pw, _rand_ua())
+            if res:
+                NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": pw}]
+                NV_ST["idx"] = len(NV_ST["accounts"]) - 1
+                NV_ST["next_num"] = n + off + 1
+                NV_ST["tok"] = None
+                _nv_save_acc()
+                print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
+                return res
+            _ts.sleep(random.uniform(1.0, 2.5))  # #94U32 jitter
     NV_ST["next_num"] = n + 300
     _nv_save_acc()
     print(f"[NV] هیچ شوێن — بازدا بۆ {NV_ST['next_num']}", flush=True)
@@ -10025,12 +10029,12 @@ def _pia_signup_new():
         sg = PIA_ST.get("signups") or {"date": "", "n": 0}
         if sg.get("date") != today:
             sg = {"date": today, "n": 0}
-        if len(PIA_ST.get("accounts") or []) >= 12:
+        if len(PIA_ST.get("accounts") or []) >= 60:  # #94U32: 12→60
             return None
-        if not _sg_reserve(PIA_ST, 6, today, PIA_LOCK):  # #94U23: بودجە لەژێر لۆک
+        if not _sg_reserve(PIA_ST, 30, today, PIA_LOCK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 6→30
             return None
         s = requests.Session()
-        s.headers.update({"User-Agent": _PIA_UA, "Accept": "application/json",
+        s.headers.update({"User-Agent": _rand_ua(), "Accept": "application/json",
                           "Origin": "https://temp-mail.org", "Referer": "https://temp-mail.org/"})
         r = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30))
         mb = r.json() or {}
@@ -10039,7 +10043,7 @@ def _pia_signup_new():
             print(f"[PIA-SIGNUP] mailbox fail: {r.status_code}", flush=True)
             return None
         s2 = requests.Session()
-        s2.headers.update({"User-Agent": _PIA_UA, "Accept-Language": "en",
+        s2.headers.update({"User-Agent": _rand_ua(), "Accept-Language": "en",
                            "Origin": "https://www.piax.org", "Referer": "https://www.piax.org/"})
         r2 = s2.post(PIA_API + "/user-api/user/sendEmailVerifyCode",
                      json={"channel": "pia", "email": email, "device": {"deviceType": "pc", "osPlatform": "web"}},
@@ -10096,7 +10100,7 @@ def _pia_signup_daemon():
             today = time.strftime("%Y-%m-%d", time.gmtime())
             lim = PIA_ST.get("limits") or {}
             alive = [a for a in accs if (lim.get(a.get("email") or "?") or {}).get("*") != today]
-            if len(alive) < 2:
+            if len(alive) < 6:  # #94U32: 2→6
                 _pia_signup_new()
         except Exception:
             time.sleep(300)
