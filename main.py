@@ -8,6 +8,8 @@
 - خۆکارانە دەستنیشانی دەکات کام مێشک بەردەستە
 پێویست: تەنها کتێبخانەی requests
 """
+import base64
+import hashlib
 import html
 import http.server
 import json
@@ -19,6 +21,7 @@ import subprocess
 import threading
 import time
 import shutil
+import uuid
 
 import requests
 
@@ -6280,12 +6283,16 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                  "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
             self.wfile.write(b"data: [DONE]\n\n")
         elif openai_style:
+            # #94U: usage ە ڕاستەقینە (estimate — tiktoken-ناوی زۆرینە ~4 پیت/توکن)
+            _pt = sum(len(str(m.get("content") or "")) for m in (msgs or [])) // 4
+            _ct = len(content or "") // 4
             self._send(200, {
                 "id": cid, "object": "chat.completion", "created": now, "model": srv["id"],
                 "choices": [{"index": 0,
                              "message": {"role": "assistant", "content": content},
                              "finish_reason": "stop"}],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "usage": {"prompt_tokens": _pt, "completion_tokens": _ct,
+                          "total_tokens": _pt + _ct},
             })
         else:
             self._send(200, {"answer": content, "server": srv["id"]})
@@ -6606,14 +6613,14 @@ import re as _re
 
 # خشتەی نەوە — بەرزتر = نوێتر (خێزان → لیستی دوایینی بەشەکانی ژمارە)
 _GEN_VERSIONS = {
-    "gemini": [("3.8", [3, 8]), ("3.6", [3, 6]), ("3.5", [3, 5]), ("3.1", [3, 1]), ("3", [3]), ("2.5", [2, 5]), ("2", [2]), ("1.5", [1, 5])],
-    "claude": [("5", [5]), ("4.8", [4, 8]), ("4.7", [4, 7]), ("4.6", [4, 6]), ("4.5", [4, 5]), ("4.1", [4, 1]), ("4", [4]), ("3.7", [3, 7]), ("3.5", [3, 5])],
-    "gpt": [("5.6", [5, 6]), ("5.5", [5, 5]), ("5.4", [5, 4]), ("5.2", [5, 2]), ("5.1", [5, 1]), ("5", [5]), ("4.1", [4, 1]), ("4o", [4]), ("4", [4])],
-    "grok": [("4.6", [4, 6]), ("4.5", [4, 5]), ("4.3", [4, 3]), ("4", [4]), ("3", [3])],
+    "gemini": [("3.7", [3, 7]), ("3.1", [3, 1]), ("3", [3]), ("2.5", [2, 5]), ("2", [2]), ("1.5", [1, 5])],
+    "claude": [("5", [5]), ("4.8", [4, 8]), ("4.5", [4, 5]), ("4.1", [4, 1]), ("4", [4]), ("3.7", [3, 7]), ("3.5", [3, 5])],
+    "gpt": [("6", [6]), ("5.6", [5, 6]), ("5.5", [5, 5]), ("5.4", [5, 4]), ("5.2", [5, 2]), ("5.1", [5, 1]), ("5", [5]), ("4.1", [4, 1]), ("4o", [4]), ("4", [4])],
+    "grok": [("4.5", [4, 5]), ("4.3", [4, 3]), ("4.2", [4, 2]), ("4", [4]), ("3", [3])],
     "deepseek": [("v4.1", [4, 1]), ("v4", [4]), ("v3.2", [3, 2]), ("r1", [1]), ("v3", [3])],
     "qwen": [("3.8", [3, 8]), ("3.7", [3, 7]), ("3.6", [3, 6]), ("3.5", [3, 5]), ("3", [3]), ("2.5", [2, 5])],
     "glm": [("5.3", [5, 3]), ("5.2", [5, 2]), ("5.1", [5, 1]), ("5", [5]), ("4.7", [4, 7]), ("4.5", [4, 5])],
-    "kimi": [("k2.6", [2, 6]), ("k2.5", [2, 5]), ("k2", [2])],
+    "kimi": [("k3", [3]), ("k2.6", [2, 6]), ("k2.5", [2, 5]), ("k2", [2])],
     "llama": [("4", [4]), ("3.3", [3, 3]), ("3.2", [3, 2]), ("3.1", [3, 1]), ("3", [3])],
     "nova": [("2", [2]), ("1", [1])],
     "phi": [("4", [4]), ("3", [3])],
@@ -6741,6 +6748,13 @@ def _limit_recharge(kind, err):
         elif kind == "ac":
             threading.Thread(target=_ac_signup_new, daemon=True).start()
             print(f"[LIMIT-RECHARGE] ac: ئەکاونتی نوێ دروست دەکرێت...", flush=True)
+        elif kind == "cbox":
+            # #94CX: ئەکاونتی نوێ = ١ داواکاری — یەکسەر:
+            threading.Thread(target=_cbox_new_account, daemon=True).start()
+            print(f"[LIMIT-RECHARGE] cbox: ئەکاونتی نوێ (١ داواکاری)...", flush=True)
+        elif kind == "pia":
+            threading.Thread(target=_pia_signup_new, daemon=True).start()
+            print(f"[LIMIT-RECHARGE] pia: ئەکاونتی نوێ...", flush=True)
         else:
             def _rs():
                 try:
@@ -8009,7 +8023,7 @@ def _chaos_daemon():
                 try:
                     fn = globals().get(f"{k}_chat")
                     if fn:
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox"):
                             a = fn(msgs, srv.get("model_id") or srv.get("id"), timeout=30)
                         elif k in ("fla", "qb", "ng"):
                             a = fn(msgs, timeout=30)
@@ -8127,7 +8141,7 @@ def _hot_model_daemon():
                     fn = globals().get(f"{k}_chat")
                     if fn:
                         msgs = [{"role": "user", "content": "ping"}]
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox"):
                             fn(msgs, srv.get("model_id") or mid, timeout=25)
                 except Exception:
                     pass
@@ -8939,7 +8953,7 @@ _CBOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 CBOX_FREE_ID = "88cc1733-9cf1-4652-a7be-f9a6dbe01737"
 # دوو مۆدێڵ: Text + WebSearch (وێبسێڕچ لەسەر فری کار دەکات — زانیاری نوێ)
 CBOX_MODELS = [("aichat", "AI Chat", "Chatbox AI"), ("websearch", "AI WebSearch", "Chatbox WebSearch")]
-CBOX_DAY_CAP = 30  # چات/ڕۆژ بۆ هەر ئەکاونتێک — خۆپاراستن
+CBOX_DAY_CAP = 100  # چات/ڕۆژ بۆ هەر ئەکاونتێک — خۆپاراستن (١ داواکاری=١ ئەکاونت بۆ دروستکردن)
 
 
 def _cbox_load():
