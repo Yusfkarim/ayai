@@ -25,6 +25,10 @@ import uuid
 
 import requests
 
+# #94U2: پاڵکردنی SSL-وارنینگ (crack verify=False)
+import urllib3 as _u3
+_u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
+
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
 
@@ -3828,7 +3832,15 @@ def _ca_signup_new():
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 80 or len(CA_ST.get("accounts") or []) >= 70:  # #91Z: 80 سنووری ڕۆژانە
+    # #94U2: 80/ڕۆژ وەک خۆی — بەڵام ئەگەر حەوز پڕە و هیچ زیندوو نییە → ڕێگە بدە (تا 160)
+    _accs_n = len(CA_ST.get("accounts") or [])
+    _today_s = _dt.datetime.utcnow().strftime("%Y-%m-%d")
+    _lim = CA_ST.get("limits") or {}
+    _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
+                 if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
+    if sg.get("n", 0) >= 80:  # #91Z: 80 سنووری ڕۆژانە — بەبێ مۆڵەت ناگۆڕدرێت
+        return None
+    if _accs_n >= 70 and (_alive >= 5 or _accs_n >= 160):
         return None
     n = CA_ST["next_num"]
     # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
@@ -4338,7 +4350,14 @@ def _pool_daemon():
         for name, st, fn, tgt in pools:
             try:
                 accs = st.get("accounts") or []
-                if len(accs) >= tgt:
+                # #94U2: ژمارەی زیندوو — ئەگەر هەموو ئەکاونتەکان لیمیتن → زیاد بکە با بەردەوام بێت
+                today = _lim_today()
+                lim = st.get("limits") or {}
+                exh = st.get("exhausted") or {}
+                alive = [a for a in accs
+                         if today not in (lim.get(a.get("email") or "?") or {}).values()
+                         and not exh.get(a.get("email") or "?")]
+                if len(accs) >= tgt and len(alive) >= 5:
                     continue
                 before = len(accs)
                 fn()
@@ -5984,6 +6003,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     return 0
             try:
+                api_brain_ensure()  # #94U2: /health ەش دڵنیابێت لە API-BRAIN
+            except Exception:
+                pass
+            try:
                 _self_check()
             except Exception:
                 pass
@@ -6284,8 +6307,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"data: [DONE]\n\n")
         elif openai_style:
             # #94U: usage ە ڕاستەقینە (estimate — tiktoken-ناوی زۆرینە ~4 پیت/توکن)
-            _pt = sum(len(str(m.get("content") or "")) for m in (msgs or [])) // 4
-            _ct = len(content or "") // 4
+            _pt = max(1, sum(len(str(m.get("content") or "")) for m in (msgs or [])) // 4)
+            _ct = max(1, len(content or "") // 4)  # #94U2: وەڵامی کورت → لانیکەم ١
             self._send(200, {
                 "id": cid, "object": "chat.completion", "created": now, "model": srv["id"],
                 "choices": [{"index": 0,
@@ -7302,6 +7325,23 @@ def handle_message(msg):
             return
         threading.Thread(target=_admin_test_model, args=(chat_id, ref), daemon=True).start()
         return
+    if text.startswith("/crack"):
+        # #94U2: HACK-TOOLKIT — ئەدمین-تەنها
+        if user_id != ADMIN_TG:
+            return
+        arg = text[6:].strip()
+        if not arg:
+            reply(chat_id, "🛠 <b>HACK-TOOLKIT</b>\n"
+                           "<code>/crack scan &lt;url&gt;</code> — سکان-کردنی سایت+JS بەندڵ\n"
+                           "<code>/crack eps &lt;url&gt;</code> — تەنها endpoint ەکان\n"
+                           "<code>/crack get &lt;url&gt;</code> — گەڕانەوەی کۆد (CF-impersonate)\n"
+                           "<code>/crack replay &lt;url&gt; | &lt;json-body&gt;</code> — دووبارەکردنەوەی POST/SSE\n"
+                           "<code>/crack sse &lt;url&gt; | &lt;json-body&gt;</code> — SSE-ستریم\n"
+                           "<code>/crack auth &lt;url&gt;</code> — دۆزینەوەی ڕەوتی signup/login/refresh\n"
+                           "<code>/crack forge &lt;url&gt; | &lt;json&gt;</code> — داواکاری دەستکرد")
+            return
+        threading.Thread(target=_crack_cmd, args=(chat_id, arg), daemon=True).start()
+        return
     if text.startswith("/about"):
         reply(chat_id, ABOUT)
         return
@@ -7996,15 +8036,29 @@ def _self_check():
         _STS["last"] = str(e)[:50]
 
 
+_SELFCHK = {"fails": 0}
+
+
 def _self_check_daemon():
-    """هەر ٥ خولەک خۆپشکنینی ناوەکی"""
+    """هەر ٥ خولەک خۆپشکنینی ناوەکی — #94U2: ٢ خولی لەسەریەک پێش ڕیستارت (bootstrap-grace)"""
     time.sleep(300)
     while True:
         try:
+            try:
+                api_brain_ensure()  # #94U2: هەموو خولێک — بێ پێویستی تڕافیک
+            except Exception:
+                pass
             _self_check()
             if not _STS["ok"]:
-                print(f"[SELF-CHECK] ⚠️ {_STS['last']} — ڕیستارتی خۆکار", flush=True)
-                os._exit(1)
+                _SELFCHK["fails"] += 1
+                if _SELFCHK["fails"] >= 2:
+                    print(f"[SELF-CHECK] ⚠️ {_STS['last']} x{_SELFCHK['fails']} — ڕیستارتی خۆکار", flush=True)
+                    os._exit(1)
+                print(f"[SELF-CHECK] ⏳ {_STS['last']} — خولی {_SELFCHK['fails']}/2 — چاوەڕێ…", flush=True)
+            else:
+                if _SELFCHK["fails"]:
+                    print(f"[SELF-CHECK] ✅ گەڕایەوە — {_STS['last']}", flush=True)
+                _SELFCHK["fails"] = 0
         except Exception:
             pass
         time.sleep(300)
@@ -9336,6 +9390,280 @@ def main():
         except Exception as e:
             print(f"[POLL] هەڵە: {e}", flush=True)
             time.sleep(3)
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+# #94U2: HACK-TOOLKIT — کراککردنی کۆدی سایت / JS بەندڵەکان
+# فەرمانەکان: /crack <url>  (ئەدمین-تەنها)
+# ═══════════════════════════════════════════════════════════════════
+
+_CRACK_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
+
+
+def _crack_fetch(url, timeout=25, cf=False):
+    """گەڕانەوەی text ی هەر URL — cf=True → curl_cffi impersonate chrome"""
+    try:
+        if cf:
+            try:
+                from curl_cffi import requests as creq
+                r = creq.get(url, impersonate="chrome", timeout=timeout,
+                             headers={"User-Agent": _CRACK_UA})
+                return r.text, r.status_code
+            except Exception:
+                pass
+    except Exception:
+        pass
+    r = requests.get(url, timeout=timeout, headers={
+        "User-Agent": _CRACK_UA,
+        "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
+        "Referer": url.rsplit("/", 2)[0] if url.count("/") > 2 else url,
+    }, verify=False)
+    return r.text, r.status_code
+
+
+def _crack_extract_js(html_text, base_url):
+    """هەموو <script src> + لینکی .js/.mjs ەکان لە HTML"""
+    import re as _re
+    out, seen = [], set()
+
+    def _add(u):
+        if not u or u in seen:
+            return
+        seen.add(u)
+        out.append(u)
+
+    for m in _re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', html_text):
+        _add(m.group(1))
+    for m in _re.finditer(r'["\'](https?://[^"\'\s]+?\.(?:js|mjs)(?:\?[^"\']*)?)["\']', html_text):
+        _add(m.group(1))
+    for m in _re.finditer(r'["\'](/[^"\'\s]+?\.(?:js|mjs)(?:\?[^"\']*)?)["\']', html_text):
+        _add(m.group(1))
+
+    res = []
+    for u in out:
+        if u.startswith("//"):
+            u = "https:" + u
+        elif u.startswith("/"):
+            from urllib.parse import urljoin
+            u = urljoin(base_url, u)
+        elif not u.startswith("http"):
+            from urllib.parse import urljoin
+            u = urljoin(base_url + "/", u)
+        res.append(u)
+    return res
+
+
+def _crack_endpoints(text):
+    """دەرهێنانی API-endpoint ەکان لە JS/HTML — regex ی توند"""
+    import re as _re
+    eps, seen = [], set()
+
+    def _add(e, kind):
+        e = e.strip().rstrip(",")
+        if e and e not in seen and len(e) < 220:
+            seen.add(e)
+            eps.append((e, kind))
+
+    # 1) ژمارەی زۆر: fetch("/api/...") / axios.get('...') / url: "..."
+    for m in _re.finditer(r'(?:fetch|axios\.\w+|\.(?:get|post|put|patch|delete))\(\s*["\']([^"\']{3,200})["\']', text):
+        _add(m.group(1), "call")
+    # 2) نەخشەکان: "/api/v1/..." لە هەر شوێنێک
+    for m in _re.finditer(r'["\'](/[a-z0-9_\-]+(?:/[a-z0-9_\-\.]+){1,6})["\']', text):
+        p = m.group(1)
+        if _re.search(r'api|v\d|chat|auth|login|user|token|session|account|message|completion|query|search|graphql|rest|svc|internal', p, _re.I):
+            _add(p, "path")
+    # 3) تەواو URL ی API
+    for m in _re.finditer(r'["\'](https?://[^"\'\s]{8,200})["\']', text):
+        u = m.group(1)
+        if _re.search(r'api|graphql|/v\d|backend|svc', u, _re.I) and not _re.search(r'\.(png|jpg|svg|woff|css|ico)', u):
+            _add(u, "url")
+    # 4) WS
+    for m in _re.finditer(r'["\'](wss?://[^"\'\s]{8,200})["\']', text):
+        _add(m.group(1), "ws")
+    return eps
+
+
+def _crack_replay(url, method="POST", headers=None, data=None, json_body=None,
+                  sse=False, multipart=False, timeout=40):
+    """دووبارەکردنەوەی داواکاری — SSE-ستریم + multipart + JSON — وەک لە devtools دیاریکراوە"""
+    h = {"User-Agent": _CRACK_UA, "Accept": "*/*",
+         "Origin": url.rsplit("/", 1)[0] if "//" in url else ""}
+    if headers:
+        h.update({k: v for k, v in headers.items() if k.lower() != "content-length"})
+    try:
+        if sse:
+            h["Accept"] = "text/event-stream"
+            r = requests.post(url, headers=h, data=data, json=json_body,
+                              stream=True, timeout=timeout, verify=False)
+            buf = []
+            for line in r.iter_lines(decode_unicode=True):
+                if line:
+                    buf.append(line)
+                if len(buf) > 300:
+                    break
+            r.close()
+            return r.status_code, "\n".join(buf)
+        if multipart:
+            r = requests.post(url, headers=h, data=data, files=json_body,
+                              timeout=timeout, verify=False)
+        else:
+            r = requests.post(url, headers=h, data=data, json=json_body,
+                              timeout=timeout, verify=False)
+        return r.status_code, (r.text or "")[:4000]
+    except Exception as e:
+        return 0, f"ERR {str(e)[:200]}"
+
+
+def _crack_token_flow(base_url, email=None, password=None):
+    """تۆمارکردنی ڕەوتی token/refresh — signup/login/refresh دەستنیشانکراو"""
+    import re as _re
+    out = []
+    try:
+        txt, sc = _crack_fetch(base_url, cf=True)
+        eps = _crack_endpoints(txt)
+    except Exception:
+        eps = []
+    common = ["/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh",
+              "/auth/signup", "/auth/login", "/auth/refresh", "/api/auth/signup",
+              "/api/auth/login", "/api/auth/refresh", "/api/v1/auth/signup",
+              "/register", "/login", "/api/token", "/api/v1/token"]
+    seen = set()
+    for ep, kind in eps:
+        if kind in ("path", "url") and _re.search(r'signup|register|login|token|refresh|session|auth', ep, _re.I):
+            u = ep if ep.startswith("http") else base_url.rstrip("/") + ep
+            if u not in seen:
+                seen.add(u)
+                out.append(u)
+    for c in common:
+        u = base_url.rstrip("/") + c
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:24]
+
+
+def _crack_forge(base_url, path, headers=None, body=None, method="POST"):
+    """دروستکردنی داواکاری دەستکرد بۆ endpoint — نەک تەنها replay"""
+    u = path if path.startswith("http") else base_url.rstrip("/") + "/" + path.lstrip("/")
+    j = None
+    data = None
+    if body:
+        try:
+            j = json.loads(body)
+        except Exception:
+            data = body.encode() if isinstance(body, str) else body
+    return _crack_replay(u, method=method, headers=headers, data=data, json_body=j)
+
+
+def _crack_scan(target, max_js=14, timeout=25):
+    """سکان-کردنی سایت — HTML + بەندڵەکان → کورتەی تەواوی API"""
+    rep = {"target": target, "html_status": 0, "js": [], "endpoints": [], "ws": []}
+    try:
+        html_text, sc = _crack_fetch(target, timeout=timeout, cf=True)
+        rep["html_status"] = sc
+        if not html_text:
+            return rep
+        eps = _crack_endpoints(html_text)
+        js_urls = _crack_extract_js(html_text, target)[:max_js]
+        for ju in js_urls:
+            try:
+                jtxt, jsc = _crack_fetch(ju, timeout=timeout)
+                if jtxt and jsc == 200:
+                    rep["js"].append({"url": ju, "bytes": len(jtxt)})
+                    eps.extend(_crack_endpoints(jtxt))
+            except Exception:
+                pass
+        seen = set()
+        for e, kind in eps:
+            if e not in seen:
+                seen.add(e)
+                if kind == "ws":
+                    rep["ws"].append(e)
+                else:
+                    rep["endpoints"].append({"e": e, "k": kind})
+        rep["endpoints"] = rep["endpoints"][:120]
+    except Exception as e:
+        rep["err"] = str(e)[:200]
+    return rep
+
+
+def _crack_cmd(chat_id, arg):
+    """#94U2: جێبەجێکردنی فەرمانی /crack — سکان، endpoint، replay، SSE، auth-flow، forge"""
+    try:
+        parts = arg.split(None, 2)
+        mode = (parts[0] or "scan").lower()
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        body = parts[2].strip() if len(parts) > 2 else ""
+        url = rest.split("|")[0].strip()
+        inline_body = rest.split("|", 1)[1].strip() if "|" in rest else body
+
+        if not url.startswith("http"):
+            url = "https://" + url
+
+        def _fmt_eps(rep):
+            lines = [f"🎯 <b>{rep.get('target')}</b> — HTML:{rep.get('html_status')} | JS:{len(rep.get('js') or [])} بەندڵ"]
+            for j in (rep.get("js") or [])[:6]:
+                lines.append(f"  📦 <code>{j['url'][:90]}</code> ({j['bytes']}B)")
+            eps = rep.get("endpoints") or []
+            for e in eps[:40]:
+                tag = {"call": "⚡", "path": "🔗", "url": "🌐"}.get(e["k"], "•")
+                lines.append(f"  {tag} <code>{e['e'][:110]}</code>")
+            for w in (rep.get("ws") or [])[:4]:
+                lines.append(f"  🔌 <code>{w[:110]}</code>")
+            if len(eps) > 40:
+                lines.append(f"  … +{len(eps)-40} زیاتر")
+            return "\n".join(lines) or "هیچ نەدۆزرایەوە"
+
+        if mode == "scan":
+            reply(chat_id, f"🔍 سکان: <code>{url[:80]}</code> …")
+            rep = _crack_scan(url)
+            reply(chat_id, _fmt_eps(rep))
+        elif mode == "eps":
+            txt, sc = _crack_fetch(url, cf=True)
+            eps = _crack_endpoints(txt or "")
+            lines = [f"🎯 HTTP:{sc} — {len(eps)} endpoint"]
+            for e, k in eps[:50]:
+                lines.append(f"  • <code>{e[:110]}</code>")
+            reply(chat_id, "\n".join(lines) or "هیچ نەدۆزرایەوە")
+        elif mode == "get":
+            txt, sc = _crack_fetch(url, cf=True)
+            out = f"📥 HTTP:{sc} — {len(txt or '')} bytes\n<code>{(txt or '')[:1800]}</code>"
+            reply(chat_id, out)
+        elif mode in ("replay", "sse"):
+            j = None
+            data = None
+            if inline_body:
+                try:
+                    j = json.loads(inline_body)
+                except Exception:
+                    data = inline_body.encode()
+            sc, txt = _crack_replay(url, data=data, json_body=j, sse=(mode == "sse"))
+            reply(chat_id, f"🔁 {mode.upper()} → HTTP:{sc}\n<code>{(txt or '')[:2500]}</code>")
+        elif mode == "auth":
+            flows = _crack_token_flow(url)
+            lines = [f"🔑 {len(flows)} ڕەوتی ئەگەری auth:"]
+            for f in flows:
+                lines.append(f"  • <code>{f[:100]}</code>")
+            reply(chat_id, "\n".join(lines))
+        elif mode == "forge":
+            j = None
+            data = None
+            if inline_body:
+                try:
+                    j = json.loads(inline_body)
+                except Exception:
+                    data = inline_body.encode()
+            sc, txt = _crack_replay(url, data=data, json_body=j)
+            reply(chat_id, f"⚒ FORGE → HTTP:{sc}\n<code>{(txt or '')[:2500]}</code>")
+        else:
+            reply(chat_id, "❓ مۆد نەناسراو — <code>/crack</code> بەتاڵ بنووسە بۆ یارمەتی")
+    except Exception as e:
+        try:
+            reply(chat_id, f"❌ crack: {str(e)[:180]}")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
