@@ -749,3 +749,8 @@
 - **دۆزراوە بە تاقی**: aff پرسیار لە ~8192 پیت دەبڕێت (cliff لەنێوان 7954✅ و 8254❌) — یاسای کۆتایی 14k دەفەوتا.
 - **پاچ**: system >7000 → single-question kinds (aff/yl/hk/qb/ng) دەچنە کۆتایی ڕیز؛ full-message ەکان (em/rwd/l7/g4f/pol/cb/nv...) 14k تەواو دەگەیەنن.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK + تاقی زیندوو.
+
+## #94U27 DEG-GUARD (2026-09-21) — پاسەوانی کوالێتی: وەڵامی دووبارەبووەوە (loop) فڕێدەدرێت + fallback
+- **کێشە**: مۆدێلێکی لاواز هەمان پاراگراف 10 جار دووبارە کردەوە (repetition loop) و پرۆمپتی پشتگوێ خست.
+- **پاچ**: `_resp_degenerate` (0/2/3: بلۆکی 120-پیت + ڕێژەی ڕستە + type-token) لە do_POST (loop + rebind) — وەڵامی تێکچوو → revive + fallback؛ spare وەک دوایین چارە.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (user-loop=3، normal/code/list/short=0) OK.

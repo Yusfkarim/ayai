@@ -126,6 +126,36 @@ def _replace_dead_worker(kind):
         print(f"[REPLACE] {kind}: {str(e)[:50]}", flush=True)
 
 
+def _resp_degenerate(text):
+    """#94U27: 0=باش، 2=گومانلێکراو، 3=لوپی توند — دۆزینەوەی وەڵامی دووبارەبووەوە (repetition loop)"""
+    try:
+        import re as _re
+        from collections import Counter
+        t = (text or "").strip()
+        if len(t) < 150:
+            return 0
+        chunks = [_re.sub(r"\s+", " ", t[i:i + 120]) for i in range(0, len(t) - 120, 60)]
+        if chunks:
+            top = Counter(chunks).most_common(1)[0][1]
+            if top >= 4 and len(t) > 600:
+                return 3
+            if top >= 3 and len(t) > 1500:
+                return 2
+        sents = [_re.sub(r"\s+", " ", s).strip() for s in _re.split(r"[.\n!?؟]+", t) if len(s.strip()) > 30]
+        if len(sents) >= 6:
+            r = len(set(sents)) / len(sents)
+            if r < 0.35:
+                return 3
+            if r < 0.5 and len(t) > 800:
+                return 2
+        words = _re.findall(r"\w+", t.lower())
+        if len(words) > 300 and len(set(words)) / len(words) < 0.12:
+            return 2
+        return 0
+    except Exception:
+        return 0
+
+
 def _sys_keep(msgs, n=19):
     """#94U25: کورتکردنەوەی مێژوو بەبێ فەوتاندنی system — هەموو system ەکان + دوایین N"""
     try:
@@ -6867,6 +6897,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     order.append(cand)
 
         content, last_err = "", None
+        _spare = None  # #94U27: وەڵامی تێکچوو — تەنها ئەگەر هیچی تر نەبوو
         # #94U26b: پرۆمپتی درێژ (>7k) → باسکەندە single-question ەکان پرسیار لە 8k دەبڕن! بیانخە کۆتایی
         try:
             _sys_len = sum(len(str(m.get("content") or "")) for m in full if m.get("role") == "system")
@@ -6959,6 +6990,14 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     content = pol_chat(cand["id"], full)
                 if content:
+                    _dg = _resp_degenerate(content)
+                    if _dg >= 2:
+                        print(f"[API] {kind} وەڵامی تێکچوو (degenerate-{_dg}) — fallback", flush=True)
+                        threading.Thread(target=_revive_source, args=(kind, "degenerate"), daemon=True).start()
+                        if _spare is None:
+                            _spare = content
+                        content = ""
+                        continue
                     if cand is not srv:
                         print(f"[API] fallback → {kind}", flush=True)
                     break
@@ -7042,10 +7081,18 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = aiml_chat(nmsgs, nsrv["model_id"])
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
-                    if content:
+                    if content and not _resp_degenerate(content):
                         print(f"[API] ✅ نەوەی نوێ وەڵامی دا: {up}", flush=True)
+                    elif content:
+                        print("[API] ⚠️ نەوەی نوێ تێکچوو — فڕێدرا", flush=True)
+                        if _spare is None:
+                            _spare = content
+                        content = ""
             except Exception as e2:
                 print(f"[API] دیلی نەوە شکستی هێنا: {str(e2)[:90]}", flush=True)
+        if not content and _spare:
+            content = _spare  # #94U27: هەموو تێکچوو بوون — لە هەڵە باشترە
+            print("[API] ⚠️ هەموو وەڵامەکان تێکچوو بوون — spare گەڕایەوە", flush=True)
         if not content:
             _PERF["fail"] += 1
             return self._send(502, {"error": str(last_err) if last_err else "هیچ سەرچاوەیەک وەڵام نەدایەوە"})
