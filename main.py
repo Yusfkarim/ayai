@@ -4297,7 +4297,7 @@ def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    # #94U2: 80/ڕۆژ وەک خۆی — بەڵام ئەگەر حەوز پڕە و هیچ زیندوو نییە → ڕێگە بدە (تا 160)
+    # #94U30 CA-NOLIMIT: 1000/ڕۆژ (مۆڵەتی بەکارهێنەر 2026-09-21) — حەوز تا 1100، گەیت 1000/5
     _accs_n = len(CA_ST.get("accounts") or [])
     _today_s = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     _lim = CA_ST.get("limits") or {}
@@ -4307,9 +4307,9 @@ def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
     else:
         _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
                      if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
-    if _accs_n >= 160 or (not force and _accs_n >= 70 and _alive >= 5):
+    if _accs_n >= 1100 or (not force and _accs_n >= 1000 and _alive >= 5):  # #94U30
         return None
-    if not _sg_reserve(CA_ST, 80, today, _CA_LK):  # #94U23: بودجە لەژێر لۆک (80 وەک خۆی — بەبێ مۆڵەت ناگۆڕدرێت)
+    if not _sg_reserve(CA_ST, 1000, today, _CA_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U30: 80→1000 بە مۆڵەتی بەکارهێنەر
         return None
     n = CA_ST["next_num"]
     # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
