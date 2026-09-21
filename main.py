@@ -6278,6 +6278,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "service": "smart-chatbot-api",
                              "mode": API_BRAIN["mode"], "servers": len(API_BRAIN["servers"])})
         elif cp in ("/models", "/v1/models"):
+            # #94U9: کلیدی نادروست → 401 (کلیدی دروست یان بێ-کلیل → 200)
+            _k = self._extract_key()
+            if _k and API_KEY:
+                import hmac as _hmac8
+                if not (_hmac8.compare_digest(_k.encode(), API_KEY.encode()) or _k in _API_KEYS):
+                    return self._send(401, {"error": "invalid API key"})
             api_brain_ensure()
             data = [{"id": s["alias"], "object": "model", "owned_by": "smart-chatbot"}
                     for s in _api_servers()]
@@ -6302,6 +6308,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         # دۆزینەوەی کلیل لە هیدەر، کوێری یان بۆدی
         key = self._extract_key() or (body.get("api_key") if isinstance(body, dict) else "") or (body.get("apiKey") if isinstance(body, dict) else "") or ""
         client_ip = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For") or (self.client_address[0] if self.client_address else "")
+        # #94U9: کلیدی درێژکراو + نادروست → 401 (بێ توندوتیژی لەسەر guest-i بێ-کلیل)
+        if key and API_KEY:
+            import hmac as _hmac9
+            if not (_hmac9.compare_digest(key.encode(), API_KEY.encode()) or key in _API_KEYS):
+                return self._send(401, {"error": "invalid API key"})
         ok_rate, rate_err = _api_rate_ok(key, client_ip=client_ip)
         if not ok_rate:
             return self._send(429, {"error": rate_err})
