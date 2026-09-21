@@ -6158,6 +6158,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "pia":
                     content = pia_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "cbox":
+                    content = cbox_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "alle":
                     content = alle_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "aiml":
@@ -6236,6 +6238,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = al_chat(nmsgs, nsrv["model_id"])
                     elif k == "pia":
                         content = pia_chat(nmsgs, nsrv["model_id"])
+                    elif k == "cbox":
+                        content = cbox_chat(nmsgs, nsrv["model_id"])
                     elif k == "alle":
                         content = alle_chat(nmsgs, nsrv["model_id"])
                     elif k == "aiml":
@@ -6408,6 +6412,10 @@ def detect_brain(allow_fallback=True):
         servers += pia_servers()
     except Exception as e:
         print(f"[BRAIN] pia fail: {e}", flush=True)
+    try:
+        servers += cbox_servers()
+    except Exception as e:
+        print(f"[BRAIN] cbox fail: {e}", flush=True)
     try:
         servers += ak_servers()
     except Exception as e:
@@ -6962,6 +6970,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "pia"
+            if k == "cbox":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = cbox_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "cbox"
             if k == "alle":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = alle_chat(msgs, cand["model_id"])
@@ -7120,6 +7134,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "pia"
+                if k == "cbox":
+                    a = cbox_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "cbox"
                 if k == "alle":
                     a = alle_chat(nmsgs, nsrv["model_id"])
                     if leaks(a):
@@ -7541,6 +7560,7 @@ def self_heal_once():
     probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], _ca_m, timeout=50)
     _cb_m = next(iter(MS["cb_ok"].keys()), "4o-mini") if MS.get("cb_ok") else "4o-mini"
     probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], _cb_m, timeout=50)
+    probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
     # #91Z: DARK-RECOVERY — سەرچاوەی بەتاڵ (مانگانە وەک hf) هەر خولی سێیەم هەوڵی زیندووکردنەوە
@@ -8905,6 +8925,266 @@ def _pia_signup_daemon():
         except Exception:
             time.sleep(300)
 
+
+# ══════════ Chat-box.ai (cx-) — §2.36 — فڵانت‌پرینت+ads-کەناڵ — بێ ئیمێڵ، تەنها API ══════════
+# کراک: POST /auth/fingerprint + X-Device-Fingerprint + x-user-origin-source: ads
+#   → ئەکاونتی دەستبەجێ (originChannel=ads) → چاتی فڕی "AI Chat" (best-available) — SSE
+# توکن ١٥ خولەک — /auth/refresh بە refreshToken؛ ئەکاونت=١ داواکاری — بێسنوور
+CBOX_API = "https://chat-box.ai/app/api/v1"
+CBOX_ACC_FILE = os.path.join(DATA_DIR, "cbox_accounts.json")
+CBOX_ST = {"accounts": [], "idx": 0, "signups": {"date": "", "n": 0}}
+CBOX_LOCK = threading.Lock()
+_CBOX_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+# مۆدێڵی فڕی — "AI Chat" (subtitle: Best available model) — ٢٨ پارەدارەکە سرێڵن لە سێرڤەر (isPaidUser gate)
+CBOX_FREE_ID = "88cc1733-9cf1-4652-a7be-f9a6dbe01737"
+CBOX_MODELS = [("aichat", "AI Chat", "Chatbox AI")]
+CBOX_DAY_CAP = 30  # چات/ڕۆژ بۆ هەر ئەکاونتێک — خۆپاراستن
+
+
+def _cbox_load():
+    d = _json_load_safe(CBOX_ACC_FILE) or {}
+    CBOX_ST["accounts"] = d.get("accounts") or []
+    CBOX_ST["idx"] = int(d.get("idx") or 0)
+    CBOX_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+
+
+def _cbox_save():
+    _json_save(CBOX_ACC_FILE, {"accounts": CBOX_ST.get("accounts") or [],
+                               "idx": CBOX_ST.get("idx") or 0,
+                               "signups": CBOX_ST.get("signups") or {"date": "", "n": 0}})
+
+
+def _cbox_new_account():
+    """١ داواکاری — ئەکاونتی نوێی ads-کەناڵ (بێ ئیمێڵ، بێ OTP، بێ playwright)"""
+    try:
+        fp = str(uuid.uuid4())
+        r = requests.post(CBOX_API + "/auth/fingerprint", json={},
+                          headers={"User-Agent": _CBOX_UA, "Accept": "application/json",
+                                   "Origin": "https://chat-box.ai", "Referer": "https://chat-box.ai/app/en",
+                                   "X-Device-Fingerprint": fp, "x-device-fingerprint": fp,
+                                   "x-user-origin-source": "ads", "Content-Type": "application/json"},
+                          timeout=(12, 40))
+        if r.status_code not in (200, 201):
+            print(f"[CX] fingerprint fail: {r.status_code}", flush=True)
+            return None
+        d = r.json() or {}
+        at, rt = d.get("accessToken"), d.get("refreshToken")
+        if not at:
+            return None
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        acc = {"fp": fp, "at": at, "rt": rt, "day": today, "n": 0, "dead": 0}
+        with CBOX_LOCK:
+            CBOX_ST.setdefault("accounts", []).append(acc)
+            sg = CBOX_ST.get("signups") or {"date": "", "n": 0}
+            if sg.get("date") != today:
+                sg = {"date": today, "n": 0}
+            sg["n"] = sg.get("n", 0) + 1
+            CBOX_ST["signups"] = sg
+            _cbox_save()
+        return acc
+    except Exception as e:
+        print(f"[CX] new-acct: {str(e)[:80]}", flush=True)
+        return None
+
+
+def _cbox_refresh(acc):
+    """توکنی نوێ بە refreshToken — ئەگەر شکست → ئەکاونت مردوو"""
+    try:
+        r = requests.post(CBOX_API + "/auth/refresh", json={"refreshToken": acc.get("rt") or ""},
+                          headers={"User-Agent": _CBOX_UA, "Accept": "application/json",
+                                   "Origin": "https://chat-box.ai", "Referer": "https://chat-box.ai/app/en",
+                                   "X-Device-Fingerprint": acc.get("fp") or "", "Content-Type": "application/json"},
+                          timeout=(12, 40))
+        if r.status_code in (200, 201):
+            d = r.json() or {}
+            if d.get("accessToken"):
+                acc["at"] = d["accessToken"]
+                if d.get("refreshToken"):
+                    acc["rt"] = d["refreshToken"]
+                acc["dead"] = 0
+                with CBOX_LOCK:
+                    _cbox_save()
+                return True
+    except Exception:
+        pass
+    acc["dead"] = 1
+    return False
+
+
+def _cbox_alive():
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    out = []
+    for a in (CBOX_ST.get("accounts") or []):
+        if a.get("dead"):
+            continue
+        if a.get("day") == today and int(a.get("n") or 0) >= CBOX_DAY_CAP:
+            continue
+        out.append(a)
+    return out
+
+
+def _cbox_pick():
+    accs = _cbox_alive()
+    if not accs:
+        acc = _cbox_new_account()
+        return acc
+    n = len(accs)
+    for i in range(n):
+        a = accs[(CBOX_ST.get("idx", 0) + i) % n]
+        CBOX_ST["idx"] = (CBOX_ST.get("idx", 0) + i + 1) % n
+        return a
+    return accs[0]
+
+
+def cbox_servers():
+    out = []
+    for key, model, nm in CBOX_MODELS:
+        out.append({"id": f"cx-{key}", "name": f"{nm} (Chatbox)", "model_id": key, "kind": "cbox"})
+    return out
+
+
+class _CxLimit(Exception):
+    pass
+
+
+def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
+    """چاتی chat-box.ai — SSE (chunk/complete)؛ مولتی‌پارت؛ ئەکاونت-ڕۆتەیشن + refresh + دروستکردنی خۆکار"""
+    acc = _cbox_pick()
+    if not acc:
+        raise EMError("cx: ئەکاونت نەدروست بوو")
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    rest = [m for m in messages if m.get("role") != "system"][-8:]
+    q = ""
+    for m in rest[:-1]:
+        who = "بەکارهێنەر" if m.get("role") == "user" else "وەڵام"
+        q += f"{who}: {str(m.get('content'))[:600]}\n"
+    last = rest[-1] if rest else {"role": "user", "content": "سلام"}
+    if sys_txt:
+        q = f"[ئاراستەی سیستەم: {sys_txt}]\n{q}"
+    q += f"بەکارهێنەر: {last.get('content')}"
+    mid = CBOX_FREE_ID
+    for _ in range(2):
+        parts = []
+        final_msg = ""
+        try:
+            files = [("message", (None, q[:8000])),
+                     ("modelId", (None, mid)),
+                     ("roomType", (None, "Text"))]
+            r = requests.post(CBOX_API + "/chat/stream", files=files,
+                              headers={"User-Agent": _CBOX_UA, "Accept": "text/event-stream",
+                                       "Origin": "https://chat-box.ai", "Referer": "https://chat-box.ai/app/en",
+                                       "X-Device-Fingerprint": acc.get("fp") or "",
+                                       "x-device-fingerprint": acc.get("fp") or "",
+                                       "x-user-origin-source": "ads",
+                                       "Authorization": "Bearer " + (acc.get("at") or "")},
+                              timeout=(12, timeout), stream=True)
+            if r.status_code == 401:
+                if _cbox_refresh(acc):
+                    continue
+                acc["dead"] = 1
+                with CBOX_LOCK:
+                    _cbox_save()
+                na = _cbox_new_account()
+                if na and depth == 0:
+                    return cbox_chat(messages, model_key, timeout, depth=1)
+                raise EMError("cx: توکن مردووە")
+            if r.status_code in (403, 429):
+                body = ""
+                try:
+                    body = r.text[:300]
+                except Exception:
+                    pass
+                # FEATURE_NOT_SUPPORTED → ئەکاونت ناکات → نوێ
+                acc["dead"] = 1
+                with CBOX_LOCK:
+                    _cbox_save()
+                na = _cbox_new_account()
+                if na and depth == 0:
+                    return cbox_chat(messages, model_key, timeout, depth=1)
+                raise EMError(f"cx: gate {r.status_code} {body[:80]}")
+            err_evt = None
+            for raw in r.iter_lines(chunk_size=None):
+                if not raw:
+                    continue
+                ln = raw.decode("utf-8", "ignore").strip() if isinstance(raw, bytes) else str(raw).strip()
+                if not ln.startswith("data:"):
+                    continue
+                payload = ln[5:].strip()
+                try:
+                    d = json.loads(payload)
+                except Exception:
+                    continue
+                if isinstance(d, dict) and d.get("error"):
+                    err_evt = str((d.get("error") or {}).get("errors", [{}])[0].get("type") if (d.get("error") or {}).get("errors") else (d.get("error") or {}).get("message") or "error")
+                    break
+                ev = (d.get("event") or {}) if isinstance(d, dict) else {}
+                et = ev.get("type")
+                if et == "chunk" and ev.get("content"):
+                    parts.append(str(ev["content"]))
+                elif et == "complete":
+                    fm = ev.get("fullMessage") or {}
+                    final_msg = str(fm.get("message") or "")
+                elif et == "error":
+                    err_evt = str(ev.get("error") or ev.get("message") or "stream error")
+                    break
+            if err_evt:
+                low = err_evt.lower()
+                if any(x in low for x in ("free_tier", "limit", "quota", "usage", "subscription", "not_supported")):
+                    acc["dead"] = 1
+                    with CBOX_LOCK:
+                        _cbox_save()
+                    na = _cbox_new_account()
+                    if na and depth == 0:
+                        return cbox_chat(messages, model_key, timeout, depth=1)
+                    raise _CxLimit(err_evt[:90])
+                raise EMError(f"cx: {err_evt[:90]}")
+            ans = (final_msg or "".join(parts)).strip()
+            if not ans:
+                raise EMError("cx: وەڵام بەتاڵ")
+            # سەرکەوتوو — ژماردن
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            if acc.get("day") != today:
+                acc["day"], acc["n"] = today, 0
+            acc["n"] = int(acc.get("n") or 0) + 1
+            with CBOX_LOCK:
+                _cbox_save()
+            return ans
+        except _CxLimit as e:
+            raise EMError(f"cx: {e}")
+        except EMError:
+            raise
+        except Exception as e:
+            s = str(e)
+            if depth == 0:
+                na = _cbox_new_account()
+                if na:
+                    return cbox_chat(messages, model_key, timeout, depth=1)
+            raise EMError(f"cx: {s[:80]}")
+    raise EMError("cx: دووبارە بوونەوە سەرکەوتوو نەبوو")
+
+
+def _cbox_seed():
+    """لە بووت — ئەگەر حەوز بەتاڵە → ٢ ئەکاونت"""
+    try:
+        if not _cbox_alive():
+            for _ in range(2):
+                _cbox_new_account()
+            print(f"[CX] حەوز: {len(_cbox_alive())} ئەکاونتی زیندوو", flush=True)
+    except Exception as e:
+        print(f"[CX] seed: {str(e)[:70]}", flush=True)
+
+
+def _cbox_daemon():
+    """هەر ٢ کاتژمێر — ئەگەر زیندوو < ٢ → نوێ"""
+    while True:
+        try:
+            time.sleep(3600 * 2)
+            if len(_cbox_alive()) < 2:
+                _cbox_new_account()
+        except Exception:
+            time.sleep(300)
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -8981,6 +9261,8 @@ def main():
     # 🔄 چاودێری لیستی مۆدەڵەکان — هەر ٥ خولەک
     threading.Thread(target=auto_refresh, daemon=True).start()
     threading.Thread(target=_pia_signup_daemon, daemon=True).start()
+    threading.Thread(target=_cbox_daemon, daemon=True).start()
+    _cbox_seed()
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
     def _safe_handle(m):
