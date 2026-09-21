@@ -4106,6 +4106,7 @@ def _ca_signup_new(mkey=None):
 _SAVE_LOCK = threading.Lock()  # نووسینی هاوبەشی فایلەکان — تەردی چات + دیمۆن
 PROXY_ST = {"list": [], "src_t": 0.0, "bad": set(), "pool": {}, "raw": [], "cur": 0}
 _PROXY_GET_STATE = {"loaded": False}
+_PROXY_FETCH_LOCK = threading.Lock()  # #94U17: تەنها ١ شەپۆلی fetch+screen لە هەمان کات
 
 
 _PROXY_TEST = {"url": "https://identitytoolkit.googleapis.com/", "timeout": 6}
@@ -4397,30 +4398,37 @@ def _proxy_get(n=4):
                 break
         if out:
             return out
-    if now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"]:
-        manual = []
-        for _pf in (os.path.join(DATA_DIR, "proxies.json"),
-                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")):
-            try:
-                d = json.load(open(_pf))
-                if isinstance(d, list):
-                    manual = [str(x) for x in d if str(x).strip()]
-                    if manual:
-                        break
-            except Exception:
-                pass
-        raw = list(manual)
-        if not raw:
-            raw = _proxy_fetch_all()
-        raw = [p for p in raw if p not in PROXY_ST["bad"]]
-        good = _proxy_check(raw, cap=30)
-        if manual and not good:
-            good = [p if "://" in p else "http://" + p for p in manual[:6]]  # دەستیلەکان با هەوڵیان لەسەر بکرێت
-        _proxy_pool_save()
-        PROXY_ST["list"] = good
-        PROXY_ST["bad"].clear()
-        PROXY_ST["src_t"] = now
-        print(f"[PROXY] {len(raw)} کۆکرا → {len(good)} ئەکتیڤ (پشکنین)", flush=True)
+    _do_fetch = (now - PROXY_ST["src_t"] > 1800 or not PROXY_ST["list"])
+    if _do_fetch and not _PROXY_FETCH_LOCK.acquire(blocking=False):
+        return []  # #94U17: شەپۆلێکی تر خەریکە — fail-fast نەک pile-up
+    try:
+        if _do_fetch:
+            manual = []
+            for _pf in (os.path.join(DATA_DIR, "proxies.json"),
+                        os.path.join(os.path.dirname(os.path.abspath(__file__)), "proxies.json")):
+                try:
+                    d = json.load(open(_pf))
+                    if isinstance(d, list):
+                        manual = [str(x) for x in d if str(x).strip()]
+                        if manual:
+                            break
+                except Exception:
+                    pass
+            raw = list(manual)
+            if not raw:
+                raw = _proxy_fetch_all()
+            raw = [p for p in raw if p not in PROXY_ST["bad"]]
+            good = _proxy_check(raw, cap=30)
+            if manual and not good:
+                good = [p if "://" in p else "http://" + p for p in manual[:6]]  # دەستیلەکان با هەوڵیان لەسەر بکرێت
+            _proxy_pool_save()
+            PROXY_ST["list"] = good
+            PROXY_ST["bad"].clear()
+            PROXY_ST["src_t"] = now
+            print(f"[PROXY] {len(raw)} کۆکرا → {len(good)} ئەکتیڤ (پشکنین)", flush=True)
+    finally:
+        if _do_fetch:
+            _PROXY_FETCH_LOCK.release()
     out = []
     for p in PROXY_ST["list"]:
         if p in PROXY_ST["bad"]:
@@ -6469,6 +6477,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     _min.append(c)
             order = _min[:3]
         for cand in order:
+            if time.time() - t_api0 > 100:  # #94U17: دێدلاینی گشتی 100s — slot ئازاد دەبێت
+                print(f"[API] ⏱ دێدلاین 100s — وەستان لە {cand.get('id')}", flush=True)
+                break
             try:
                 kind = cand.get("kind")
                 if kind == "em":
@@ -7234,7 +7245,11 @@ def ask(session, question):
                 _seen.add(c.get("kind"))
                 _min.append(c)
         order = _min[:3]
+    _ask_t0 = time.time()  # #94U17
     for cand in order:
+        if time.time() - _ask_t0 > 110:  # #94U17: دێدلاینی گشتی — نەهێشتنی گیربوون
+            print("[ASK] ⏱ دێدلاین 110s", flush=True)
+            break
         try:
             k = cand.get("kind")
             if k == "em":
@@ -9991,9 +10006,19 @@ def main():
     except Exception:
         offset = 0
     cycle = 0
+    try:
+        faulthandler.cancel_dump_traceback_later()
+    except Exception:
+        pass
+    faulthandler.dump_traceback_later(90, exit=True)  # #94U17: main-loop >90s بوەستێت → traceback + exit → Fly ڕیستارت
     while True:
         try:
             cycle += 1
+            try:
+                faulthandler.cancel_dump_traceback_later()
+                faulthandler.dump_traceback_later(90, exit=True)
+            except Exception:
+                pass
             if cycle % 10 == 1:
                 print(f"[LOOP] زیندووە — cycle {cycle}, offset={offset}", flush=True)
 

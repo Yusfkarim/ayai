@@ -663,3 +663,11 @@
   1. `_ca_signup_new(mkey)` — ژمارەکردنی زیندوو تەنها بۆ ئەو مۆدێڵە؛ `_ca_rotate` ـەکە mkey دەنێرێت. سنووری 80/ڕۆژ وەک خۆی.
   2. CB: ئەگەر ٠ ئەکاونتی تەندرووست مابێت → headroom ی فریاکەوتن تا 110 ئەکاونت؛ سنووری 90/ڕۆژ وەک خۆی.
 - **پشکنین**: ast OK، pyflakes baseline، exec-test (model-aware alive + CB gate) OK.
+
+## #94U17 DIAG-GUARD (2026-09-21) — چارەی wedge ی تەواو (HTTP+SSH مردوو، لۆگ وەستا)
+- **نیشانە**: دوای داواکاری ca-claude لە v191: هیچ لۆگێک پاش `[API] ca هەڵە` (network بۆ chatbotai.co)، health timeout، تەنانەت main-loop و SELF-PING ـیش بێدەنگ بوون؛ machine restart ـیش timeout دا — تەنها `stop` (kill) + `start` کاری کرد.
+- **پاچ**:
+  1. SIGALRM watchdog: `faulthandler.dump_traceback_later(90, exit=True)` هەر خولی loop ـەکە re-arm دەبێتەوە؛ ئەگەر main-loop زیاتر لە 90s بوەستێت → dump ی هەموو تڕێدەکان + exit → Fly ڕیستارت (هەر wedge ـێکی داهاتوو خۆی دیاری دەکات و خۆی چاک دەکاتەوە).
+  2. دێدلاینی گشتی fallback: API 100s (`t_api0`) + TG ask 110s — slot/thread هەمیشەیی گیر ناخوات.
+  3. `_proxy_get` single-flight: تەنها ١ fetch+screen لە هەمان کات؛ ئەوانی تر `[]` یەکسەر (fail-fast) — نەهێشتنی thread-storm لە کاتی pool=0.
+- **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (re-arm بێ-dump، stall→dump، single-flight 1+4) OK.
