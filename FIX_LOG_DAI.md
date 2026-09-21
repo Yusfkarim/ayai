@@ -693,3 +693,8 @@
 - **بەستنەکان**: do_POST except + بەتاڵ (پێشتر بێدەنگ بوو!) + ask except → revive ی async؛ heal → revive (لەبری sync-تەنها)؛ cb probe → backup بە 4o-mini.
 - **چارە تایبەتەکان**: pi stream-deadline + timeout 110→50؛ g4f call timeout 50؛ qb دووبارە بە پرۆکسی لەسەر CF-403 + timeout 110→60.
 - **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (cooldown/breaker + qb-flow + pi-deadline) OK.
+
+## #94U19b SAVE-RACE (2026-09-21) — چارەی هەڵەی پاشەکەوتی هاوکات
+- **نیشانە**: `[SAVE] هەڵەی پاشەکەوت /data/model_sync.json: [Errno 2] ... .tmp` — دوو تڕێد هەمان `.tmp` ـیان بەکاردەهێنا و rename ڕەیس دەکرد.
+- **پاچ**: per-path `threading.Lock` + tmp ناوی ناوازە (`pid.ident.tmp`) — ` _json_save` → wrapper + `_json_save_locked`.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (20 تڕێد × 10 نووسین = 200) OK — JSON ـەکە هەمیشە valid.

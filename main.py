@@ -55,10 +55,21 @@ def _is_pool_file(path):
                   "cbox_accounts.json", "pia_accounts.json", "aiml_key.json",
                   "ac_accounts.json", "al_accounts.json", "proxy_pool.json") or fn.endswith("_accounts.json") or fn.endswith("_key.json")
 
+_JSON_LOCKS = {}
+_JSON_LOCKS_G = threading.Lock()
+
+
 def _json_save(path, obj):
-    """#91A1 + #94U3: نووسینی ATOMIC + شێفرەکردنی خۆکار بۆ حەوزەکان"""
+    """#91A1 + #94U3 + #94U19b: نووسینی ATOMIC + شێفرەکردن + دژە-ڕەیس (per-path lock + tmp ی ناوازە)"""
+    with _JSON_LOCKS_G:
+        _lk = _JSON_LOCKS.setdefault(path, threading.Lock())
+    with _lk:
+        return _json_save_locked(path, obj)
+
+
+def _json_save_locked(path, obj):
     try:
-        tmp = path + ".tmp"
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
         raw_json = json.dumps(obj, ensure_ascii=False)
         should_encrypt = _is_pool_file(path) and os.environ.get("NO_ENCRYPT") != "1"
         fer = _get_fernet() if should_encrypt else None
