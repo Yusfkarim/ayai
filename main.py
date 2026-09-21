@@ -4826,12 +4826,18 @@ def _pool_reap():
         print(f"[POOL-CA] {len(done)} limit-کراو پاڵدران کۆتایی → سەرەتا {len(live)} ی تەندرووست", flush=True)
     elif done and not live:
         # هەموویان limit — ئەوانی کۆنترین limit بدۆزە و بسڕەوە (بۆ ئەوانەی ٢ ڕۆژ پێش ئێستا بوون)
+        # #94U30b: 100→1000 (هاوسەنگ لەگەڵ حەوزی 1100) + سڕینەوەی limits/toks ی ئەوانەی فڕێدران
         old_lim = [e for e, v in lim.items() if v.get("*")]
-        if len(old_lim) > 100:
-            keep_emails = set(old_lim[-100:])
+        if len(old_lim) > 1000:
+            keep_emails = set(old_lim[-1000:])
             keep = [a for a in accs if a.get("email") in keep_emails]
             CA_ST["accounts"] = keep
             CA_ST["tok"] = None
+            for _e in [e for e in lim if e not in keep_emails]:
+                lim.pop(_e, None)
+            _toks = CA_ST.get("toks") or {}
+            for _e in [e for e in _toks if e not in keep_emails]:
+                _toks.pop(_e, None)
             _ca_save_acc()
             print(f"[POOL-CA] پاککردنەوەی گەورە: {len(accs)} → {len(keep)}", flush=True)
     # CB — ئەمڕۆ تەواوبوو → پاڵنان بۆ کۆتایی (سبەی دەگەڕێنەوە)
