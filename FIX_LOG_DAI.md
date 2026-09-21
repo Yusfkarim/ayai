@@ -644,3 +644,15 @@
 - **نیشانە**: `Out of memory: Killed process (python3) anon-rss:~383MB` دوو جار لە ٤ خولەکدا (14:23:59 و 14:27:15) — API بێوەڵام دەبوو (health timeout) تا Fly ڕیستارتی دەکردەوە.
 - **چارە**: `fly scale memory 1024` + `fly.toml` هاوسەنگکرا — مەشینەکە بە 1GB ڕیستارت بووەوە.
 - **تێبینی**: memory-watchdog ی #94U10 (GC 450MB / restart 480MB) لەژێر 1GB ئێستا مەودای زیاتری هەیە؛ چاودێری دەکرێت ئەگەر OOM دووبارە بووەوە → کەمکردنەوەی harvester threads یان catalog cache.
+
+## #94U15 ANTI-CRASH (2026-09-21) — چارەی ڕیشەیی وەستانی API+بۆت (hang/OOM)
+- **نیشانە**: دوای OOM-kill ـەکانی 512MB و scale بۆ 1GB، مەشینەکە `started` بوو بەڵام: Fly proxy `timed out while connecting` + SSH مردوو + لۆگی ئەپ وەستا — پرۆسێسەکە hang ببوو (هۆی ئەگەری: ٨ داواکاری چاتی هاوکات → thread/memory تەقینەوە). چارەی یەکسەر: `machine restart`.
+- **پاچ (main.py)**:
+  1. سنووری هاوکاتی چات لە ئاستی سێرڤەر: `TS.process_request` بە `MSG_PEEK` تەنها POST-چات سنوردار دەکات (٤ هاوکات، زیادە → 429 یەکسەر)؛ health/models هەمیشە دەڕۆن؛ `_chat_thread` ـەکە sem ئازاد دەکاتەوە.
+  2. `_api_selfping_daemon`: ئەگەر 127.0.0.1/health ـی ٣ جار بێوەڵام بوو → `faulthandler.dump_traceback` + `os._exit(1)` (hang → ڕیستارتی خۆکار + دیاگنۆستیک).
+  3. `faulthandler.enable()` لە سەرەتاوە.
+  4. memwatch ڕێژەیی: GC لە 78% ی RAM، ڕیستارت لە 90% (بۆ 1GB: 800/920MB) + پشکنین هەر 2 خولەک (پێشتر 5).
+  5. harvester diet: candidates 40k→15k، wave 190→120، threads 20→10.
+- **fly.toml**: `[[http_service.checks]]` بۆ /health (grace 120s، interval 30s، timeout 15s) — Fly خۆکارانە مەشینی وەستاو ڕیستارت دەکاتەوە.
+- **پشکنین**: ast OK، pyflakes 35 (baseline، ٠ undefined، ٠ redefinition)، exec-test سۆکێتی ڕاستەقینە: 8 هاوکات → 4×200 + 4×429، health bypass، sem release — ALL OK.
+- **وانە**: edit_file ـی هاوکات لەسەر هەمان فایل ڕەیس دەکات (٨/١٣ edit ونبوون + پاشماوە لە EOF) — پاککرایەوە و بە سکریپتێکی ئەتۆمی دووبارە دانران؛ لەمەودوا edit ـەکان یەک-بە-یەک.

@@ -16,6 +16,8 @@ import json
 import os
 import random
 import re
+import socket
+import faulthandler
 import socketserver
 import subprocess
 import threading
@@ -28,6 +30,7 @@ import requests
 # #94U2: پاڵکردنی SSL-وارنینگ (crack verify=False)
 import urllib3 as _u3
 _u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
+faulthandler.enable()  # #94U15: traceback لەسەر crash/signal — بۆ دیاریکردنی هۆی وەستان
 
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
@@ -4194,7 +4197,7 @@ def _proxy_fetch_all():
     raw = list(dict.fromkeys(mixed))
     if len(raw) > 40000:
         random.shuffle(raw)
-        raw = raw[:40000]  # #91R: سنووری ڕاو — بۆ خێرایی خولانەوە
+        raw = raw[:15000]  # #91R+#94U15: سنووری ڕاو 15k — کەمکردنەوەی بیرگە/CPU دژە-OOM
     # #91W: وێبشەیر — ئەگەر تۆکەن هەبێت → هەموو جۆرەکانی (پرێمیۆم + داتاسنتر + منزلی) — خۆکارانە
     try:
         ws = json.load(open(os.path.join(DATA_DIR, "webshare.json")))
@@ -4241,7 +4244,7 @@ def _proxy_screen(batch, tmo=8):
             pass
 
     import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:  # #94U15: 20→10 دژە-OOM
         futs = [executor.submit(_one, px) for px in batch]
         concurrent.futures.wait(futs, timeout=tmo + 4)
     return res
@@ -4291,7 +4294,7 @@ def _proxy_pool_load():
             pass
 
 
-def _harvest_wave(wave=190):
+def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
     """#91H: یەک شەپۆل — خولانەوەی لیستی ڕاو بەبێ دووبارە، تا هەموو پرۆکسییەکان پشکنراون"""
     now = time.time()
     raw = PROXY_ST.get("raw") or []
@@ -4349,7 +4352,7 @@ def _proxy_harvester_daemon():
     time.sleep(45)
     while True:
         try:
-            _harvest_wave(190)
+            _harvest_wave(120)
         except Exception as e:
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
         time.sleep(240)
@@ -6654,12 +6657,55 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"answer": content, "server": srv["id"]})
 
 
+_API_CHAT_SEM = threading.Semaphore(4)  # #94U15 ANTI-CRASH: زۆرترین ٤ چاتی API لە هەمان کات — زیادە 429
+
+
 def start_api():
     """دەستپێکردنی سێرڤەری API لە تڕێدێکی جیاواز"""
     socketserver.ThreadingTCPServer.allow_reuse_address = True
 
     class TS(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
+
+        def process_request(self, request, client_address):
+            # #94U15 ANTI-CRASH: تەنها داواکاری چات سنوردارە (health/models هەمیشە دەڕۆن)
+            try:
+                _peek = request.recv(4096, socket.MSG_PEEK).decode("latin1", "ignore")
+                _line = _peek.split("\n", 1)[0]
+                _is_chat = _line.startswith("POST") and ("/chat" in _line)
+            except Exception:
+                _is_chat = True
+            if _is_chat and not _API_CHAT_SEM.acquire(blocking=False):
+                try:
+                    _b = b'{"error":"server busy - try again"}'
+                    request.sendall(b"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: "
+                                    + str(len(_b)).encode() + b"\r\nConnection: close\r\n\r\n" + _b)
+                except Exception:
+                    pass
+                try:
+                    self.close_request(request)
+                except Exception:
+                    pass
+                return
+            if not _is_chat:
+                return super().process_request(request, client_address)
+            _t = threading.Thread(target=self._chat_thread, args=(request, client_address), daemon=True)
+            _t.start()
+
+        def _chat_thread(self, request, client_address):
+            try:
+                self.finish_request(request, client_address)
+            except Exception:
+                try:
+                    self.handle_error(request, client_address)
+                except Exception:
+                    pass
+            finally:
+                try:
+                    self.shutdown_request(request)
+                except Exception:
+                    pass
+                _API_CHAT_SEM.release()
 
     def _api_serve():
         # #91A2: supervisor — ئەگەر serve_forever بمرێت → 2s → دووبارە
@@ -9719,11 +9765,17 @@ def _cbox_seed():
 
 
 def _memwatch_daemon():
-    """#94U10: چاودێری بیرگە — ئەگەر RSS > 450MB (لە 512) → GC + ئاگادار، >480 → خۆ-ڕیستارت"""
+    """#94U10+#94U15: چاودێری بیرگە — سنووری ڕێژەیی لە کۆی RAM (بۆ 1GB: GC لە 800MB، ڕیستارت لە 920MB)"""
     import gc as _gc
+    try:
+        with open("/proc/meminfo") as _f:
+            _mt = next(int(_l.split()[1]) for _l in _f if _l.startswith("MemTotal:"))
+        _GC_KB, _EXIT_KB = int(_mt * 0.78), int(_mt * 0.90)
+    except Exception:
+        _GC_KB, _EXIT_KB = 800 * 1024, 920 * 1024
     while True:
         try:
-            time.sleep(300)
+            time.sleep(120)
             rss = 0
             try:
                 with open("/proc/self/status") as f:
@@ -9734,7 +9786,7 @@ def _memwatch_daemon():
             except Exception:
                 continue
             mb = rss // 1024
-            if mb > 480:
+            if rss > _EXIT_KB:
                 print(f"[MEM] 🚨 {mb}MB — خۆ-ڕیستارت", flush=True)
                 try:
                     import requests as _rq
@@ -9746,11 +9798,37 @@ def _memwatch_daemon():
                 except Exception:
                     pass
                 os._exit(1)  # fly reboots the container
-            elif mb > 450:
+            elif rss > _GC_KB:
                 _gc.collect()
                 print(f"[MEM] ⚠️ {mb}MB — GC کرایەوە", flush=True)
         except Exception:
             time.sleep(60)
+
+
+def _api_selfping_daemon():
+    """#94U15 ANTI-CRASH: ئەگەر /health بێوەڵام بوو ٣ جار لەسەریەک → traceback + ڕیستارتی خۆکار"""
+    _fails = 0
+    time.sleep(150)
+    while True:
+        try:
+            _port = int(os.environ.get("API_PORT", 8080))
+            _r = requests.get(f"http://127.0.0.1:{_port}/health", timeout=10)
+            _ok = _r.status_code == 200
+        except Exception:
+            _ok = False
+        if _ok:
+            _fails = 0
+        else:
+            _fails += 1
+            print(f"[SELF-PING] ⚠️ /health بێوەڵام ({_fails}/3)", flush=True)
+            if _fails >= 3:
+                print("[SELF-PING] 💀 API وەستاوە — traceback + ڕیستارت", flush=True)
+                try:
+                    faulthandler.dump_traceback()
+                except Exception:
+                    pass
+                os._exit(1)
+        time.sleep(30)
 
 
 def _prewarm_daemon():
@@ -9789,6 +9867,7 @@ def main():
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_memwatch_daemon, daemon=True).start()
+    threading.Thread(target=_api_selfping_daemon, daemon=True).start()  # #94U15: پاسەوانی hang
     threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
     start_hf_keepalive()
