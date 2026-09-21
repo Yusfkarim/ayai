@@ -4526,13 +4526,21 @@ def _proxy_check(pxs, cap=18):
 
 
 def _proxy_mark_bad(px):
-    """#91H: مردوو لە باد-سێت و حەوز یەکسان لادەبرێت"""
+    """#91H: مردوو لە باد-سێت و حەوز یەکسان لادەبرێت؛ #94U39b: 3 زەبر پێش کوشتن (پرۆکسی هێواش ≠ مردوو)"""
     b = px.replace("http://", "")
+    _st = PROXY_ST.setdefault("strikes", {})
+    if len(_st) > 2000:
+        _st.clear()
+    _st[b] = (_st.get(b) or 0) + 1
+    if _st[b] < 3:
+        return False
     PROXY_ST["bad"].add(b)
+    _st.pop(b, None)
     try:
         PROXY_ST.get("pool", {}).pop(b, None)
     except Exception:
         pass
+    return True
 
 
 def _proxy_pool_save():
@@ -4824,6 +4832,7 @@ def _fb_signup(key, email, pw, ua):
                 if _pe is not None:
                     _pe["sg_ok"] = time.time()
                     _pe["sg_bad"] = 0
+                    (PROXY_ST.get("strikes") or {}).pop(px.split("://", 1)[-1], None)  # #94U39b: سەرکەوتن = سفرکردنەوەی زەبرەکان
             except Exception:
                 pass
             print(f"[FB] signUp بە پرۆکسی ✅ {px[:28]}", flush=True)
