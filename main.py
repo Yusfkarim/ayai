@@ -3939,7 +3939,7 @@ def _cb_cur_acc():
 
 
 def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-gate بازدەدات (بودجە+سەقف هەر ماوە)
-    """ئەکاونتی نوێ — سەرنج: ڕۆژانە زۆر نەبێت"""
+    """#94U35: ئەکاونتی نوێ — سایزی CA (مۆڵەتی بەکارهێنەر؛ #94U34 breaker دژە-سووتان چالاکە)"""
     import time as _t, datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     sg = CB_ST.get("signups") or {"date": "", "n": 0}
@@ -3956,11 +3956,11 @@ def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-g
             _ok = str(_ex.get(_a.get("email"), 0))[:10] != today
         if _ok:
             _healthy += 1
-    if _cb_n >= 800 or (not force and _healthy >= 100):
+    if _cb_n >= 10000 or (not force and _healthy >= 1000):  # #94U35: وەک CA (مۆڵەتی بەکارهێنەر + breaker)
         return None
     if not _sg_breaker_allow(CB_KEY):  # #94U34
         return None
-    if not _sg_reserve(CB_ST, 500, today, _CB_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 90→500 (وریا: CB هەستیارە)
+    if not _sg_reserve(CB_ST, 10000, today, _CB_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U35: →10000 (مۆڵەتی بەکارهێنەر؛ breaker دەیپارێزێت)
         return None
     n = CB_ST["next_num"] + random.randint(0, 3000)  # #94U32 jitter دژە-دەستنیشان
     for pref in ("komex", "bexud"):  # #94U32: 2 پریفیکس
@@ -4929,14 +4929,14 @@ def _pool_reap():
 
 
 def _pool_daemon():
-    """#94U32 ALL-FORTRESS: CA 1000/20 + CB 100/4 + NV 100/5 + AC 30/2 (زیندوو/بەچ) + پاککردنەوە"""
+    """#94U35: CA/CB/NV → 1000 زیندوو/بەچ 20 + AC 30/2 + پاککردنەوە"""
     time.sleep(60)
     # لازەی — دوای load ی هەموو ST ەکان (CB/NV دوای ئەم بلۆکە پێناسە دەکرێن لە فایلدا)
     import sys as _s
     _m = _s.modules[__name__]
     pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000, 20),
-             ("CB", _m.CB_ST, _m._cb_signup_new, 800, 100, 4),
-             ("NV", _m.NV_ST, _m._nv_signup_new, 1000, 100, 5),
+             ("CB", _m.CB_ST, _m._cb_signup_new, 10000, 1000, 20),
+             ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000, 20),
              ("AC", _m.AC_ST, _m._ac_signup_new, 300, 30, 2))
     while True:
         try:
@@ -5689,11 +5689,11 @@ def _nv_signup_new(force=False):  # #94U24: force = جێگۆڕکێ
             _ok = True
         if _ok:
             _healthy += 1
-    if _nv_n >= 1000 or (not force and _healthy >= 100):  # #94U32: حەوز 1000 + 100 تەندرووست
+    if _nv_n >= 10000 or (not force and _healthy >= 1000):  # #94U35: وەک CA
         return None
     if not _sg_breaker_allow(NV_KEY):  # #94U34
         return None
-    if not _sg_reserve(NV_ST, 1000, today, _NV_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 70→1000
+    if not _sg_reserve(NV_ST, 10000, today, _NV_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U35: →10000
         return None
     import time as _ts
     n = NV_ST["next_num"] + random.randint(0, 3000)  # #94U32 jitter دژە-دەستنیشان
@@ -6837,7 +6837,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 500), "nv": _pstat("nv_accounts.json", 1000), "ac": _pstat("ac_accounts.json", 200)},  # #94U32b
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 200)},  # #94U32b
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),

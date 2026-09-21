@@ -811,3 +811,9 @@
 - **پاچ**: circuit-breaker بۆ هەر کلیلێک — 10 شکستی throttle لەسەریەک → پشووی 2h؛ سەرکەوتن ڕیسیت؛ تەنها BLOCKED ژمارە (collision نەخەنە ئەستۆ).
 - گەیت لە هەر 4 ساینئەپ (CA/CB/NV/AC) پێش `_sg_reserve` — لە کاتی پشوو بودجە ناخورێت.
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (trip@10 + pause + per-key + reset + expiry) ✅.
+
+## #94U35 CB-NV-10K (2026-09-21) — CB و NV وەک CA: 10k
+- **CB**: بودجە 500→10000، حەوز 800→10000، floor 100→1000 (بە مۆڵەتی بەکارهێنەر؛ breaker U34 دەیپارێزێت).
+- **NV**: بودجە 1000→10000، حەوز 1000→10000، floor 100→1000.
+- daemon: CB/NV بەچ 20/خول؛ /health caps نوێکران.
+- **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (10k gates) ✅.
