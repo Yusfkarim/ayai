@@ -6247,6 +6247,12 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         # #91: health endpoint — چاودێری خێرا
         cp = self._clean_path()
+        # #94U11: honeypot — ڕێڕەوی تەڵە بۆ دزەکەران + بڵۆکی ئایپی لەسەر API
+        if cp in _HP_PATHS:
+            _note_honeypot(_sec_ip(self), cp)
+            return self._send(404, {"error": "not found"})
+        if cp.startswith("/v1/") and _ip_blocked(_sec_ip(self)):
+            return self._send(429, {"error": "blocked — خۆپاراستنی خۆکار"})
         if cp == "/health":
             st = _HEAL_STATE.get("status", {})
             def _n2(f):
@@ -6283,6 +6289,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             if _k and API_KEY:
                 import hmac as _hmac8
                 if not (_hmac8.compare_digest(_k.encode(), API_KEY.encode()) or _k in _API_KEYS):
+                    _note_badkey(_sec_ip(self))  # #94U11
                     return self._send(401, {"error": "invalid API key"})
             api_brain_ensure()
             data = [{"id": s["alias"], "object": "model", "owned_by": "smart-chatbot"}
@@ -6308,10 +6315,15 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         # دۆزینەوەی کلیل لە هیدەر، کوێری یان بۆدی
         key = self._extract_key() or (body.get("api_key") if isinstance(body, dict) else "") or (body.get("apiKey") if isinstance(body, dict) else "") or ""
         client_ip = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For") or (self.client_address[0] if self.client_address else "")
+        # #94U11: بڵۆکی ئایپی + ژماردنی بڕوتفۆرس
+        _sip = _sec_ip(self)
+        if _ip_blocked(_sip):
+            return self._send(429, {"error": "blocked — خۆپاراستنی خۆکار"})
         # #94U9: کلیدی درێژکراو + نادروست → 401 (بێ توندوتیژی لەسەر guest-i بێ-کلیل)
         if key and API_KEY:
             import hmac as _hmac9
             if not (_hmac9.compare_digest(key.encode(), API_KEY.encode()) or key in _API_KEYS):
+                _note_badkey(_sip)  # #94U11
                 return self._send(401, {"error": "invalid API key"})
         ok_rate, rate_err = _api_rate_ok(key, client_ip=client_ip)
         if not ok_rate:
@@ -8327,6 +8339,79 @@ _STS = {"t": 0.0, "ok": True, "last": ""}
 
 _STRANGE_KEY_RPM = 20      # Max 20 req/min بۆ وێب و کلیدی نامۆ
 _STRANGE_KEYS_SEEN = {}    # key -> {"count": int, "blocked_until": float, "burst": []}
+
+# ─── #94U11: قاتی پێنجەم — Honeypot + بڵۆکی بڕوتفۆرس + دزەگری دەستدرێژ ───
+_HP_PATHS = {"/.env", "/wp-login.php", "/wp-admin", "/admin", "/admin.php",
+             "/config", "/.git", "/.git/config", "/phpmyadmin", "/.aws",
+             "/credentials", "/xmlrpc.php", "/.DS_Store", "/backup.sql",
+             "/dump.sql", "/actuator", "/debug/var_dump", "/telemetry"}
+_IP_BLOCK = {}      # ip → کاتی کۆتایی بڵۆک
+_BADKEY = {}        # ip → [کاتەکانی هەوڵی کلیدی هەڵە]
+_HP_CNT = {}        # ip → ژمارەی داواکاری honeypot
+_SEC_ALERT = [0.0]  # دوا کاتی ئاگاداری TG (throttle)
+
+
+def _sec_ip(handler):
+    """ئایپی متمانەپێکراو — Fly-Client-IP لەلایەن edge ەوە دادەنرێت، لێدۆرا نابێت"""
+    try:
+        return (handler.headers.get("Fly-Client-IP")
+                or handler.headers.get("CF-Connecting-IP")
+                or (handler.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+                or (handler.client_address[0] if handler.client_address else "?"))
+    except Exception:
+        return "?"
+
+
+def _ip_blocked(ip):
+    """ئایا ئەم ئایپیه بلۆکراوە؟ خۆ-پاککردنەوەی بڵۆکە کۆنەکان"""
+    if not ip:
+        return False
+    exp = _IP_BLOCK.get(ip)
+    if exp is None:
+        return False
+    if exp <= time.time():
+        _IP_BLOCK.pop(ip, None)
+        return False
+    return True
+
+
+def _sec_alert(msg):
+    """ئاگاداری ئەمنی بۆ هەردوو چات — زۆتر لە یەک جار لە ٥ خولەک نانێردرێت"""
+    if time.time() - _SEC_ALERT[0] < 300:
+        return
+    _SEC_ALERT[0] = time.time()
+    for cid in (8381536661, 7585287282):
+        try:
+            tg("sendMessage", chat_id=cid, text=msg, parse_mode="HTML")
+        except Exception:
+            pass
+
+
+def _note_badkey(ip):
+    """هەوڵی کلیدی هەڵە — ١٠ هەوڵ لە ١٠ خولەکدا → بڵۆکی ١٥ خولەک + ئاگاداری TG"""
+    if not ip:
+        return
+    now = time.time()
+    arr = [x for x in (_BADKEY.get(ip) or []) if now - x < 600]
+    arr.append(now)
+    _BADKEY[ip] = arr[-25:]
+    if len(arr) >= 10:
+        _IP_BLOCK[ip] = now + 900
+        _BADKEY[ip] = []
+        print(f"[SEC] 🚨 brute-force لە {ip} — بڵۆک ١٥ خولەک", flush=True)
+        _sec_alert(f"🚨 <b>بڕوتفۆرسی کلیدی API</b>\nIP: <code>{ip}</code>\n١٠+ کلیدی هەڵە لە ١٠ خولەکدا — ئایپیه بڵۆک کرا بۆ ١٥ خولەک")
+
+
+def _note_honeypot(ip, path):
+    """ڕێڕەوی تەڵە — بڵۆکی خێرا ٦ کاتژمێر + ئاگاداری TG"""
+    if not ip:
+        return
+    now = time.time()
+    _IP_BLOCK[ip] = max(_IP_BLOCK.get(ip, 0), now + 21600)
+    _HP_CNT[ip] = (_HP_CNT.get(ip) or 0) + 1
+    print(f"[SEC] 🍯 honeypot {ip} → {path} (کۆی گشتی {_HP_CNT[ip]})", flush=True)
+    _sec_alert(f"🍯 <b>Honeypot — دەستدرێژکار دەستگیرکرا</b>\nIP: <code>{ip}</code>\nڕێڕەو: <code>{path}</code>\nبڵۆک ٦ کاتژمێر")
+
 
 def _api_rate_ok(key, client_ip=""):
     """#94U6: سەپاندنی ڕێژە — بەهێزکراو بۆ وێب و کلیلە سەرەکی و نامۆکان"""
