@@ -739,3 +739,8 @@
 - **کێشە**: تاقی PINEAPPLE شکستی خوارد — aff (fallback ـی سەرەکی) history ڕۆڵەکان پشتگوێ دەخات و تەنها question دەخوێنێتەوە.
 - **پاچ**: aff.question و yl.message ئێستا `[Instructions: {system}]` ـیان لە سەرەتایە (کاتێک system هەیە)؛ yl history ـش `_sys_keep`.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK.
+
+## #94U26 PROMPT-14K (2026-09-21) — system prompt تا 14,000 پیت بێ فەوتاندن
+- **کێشە**: cap ـەکان 6000 بوون + flat ـەکان `[-6000:]` یان دەکرد (system لە سەرەتا دەفەوتا).
+- **پاچ**: `_sys_txt` cap → 14000؛ 7 merge → [:14000]؛ 6 flat → `_flat_cut` (system تەواو + tail)؛ hk head-preserving.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK + تاقی زیندووی 14k.

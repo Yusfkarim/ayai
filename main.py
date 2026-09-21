@@ -139,8 +139,22 @@ def _sys_keep(msgs, n=19):
     return sys_m + rest
 
 
-def _sys_txt(msgs, cap=6000):
-    """#94U25: دەقی system ەکان — بۆ باسکەندە single-prompt ەکان (بێ فەوتاندن تا cap)"""
+def _flat_cut(lines, cap=16000):
+    """#94U26: بڕینی زیرەک — هێڵەکانی [Instructions] (system تا 14k) هەرگیز نافەوتێن + دوایین مێژوو"""
+    try:
+        sys_l = [l for l in lines if l.startswith("[Instructions]")]
+        rest = [l for l in lines if not l.startswith("[Instructions]")]
+        sys_txt = "\n".join(sys_l)[:14000]
+        rest_txt = "\n".join(rest)
+        room = cap - len(sys_txt) - 1
+        tail = rest_txt[-room:] if len(rest_txt) > room else rest_txt
+        return (sys_txt + "\n" + tail) if tail else sys_txt
+    except Exception:
+        return "\n".join(lines)[-cap:]
+
+
+def _sys_txt(msgs, cap=14000):
+    """#94U25+#94U26: دەقی system ەکان — بۆ باسکەندە single-prompt ەکان (بێ فەوتاندن تا 14k)"""
     try:
         return " ".join(str(m.get("content") or "") for m in (msgs or []) if isinstance(m, dict) and m.get("role") == "system")[:cap]
     except Exception:
@@ -1627,7 +1641,7 @@ def qb_chat(messages, timeout=60):  # #94U19: 110→60
     """چاتی quillbot — مێژووی وەک یەک نامەی یەکگیراو؛ NDJSON: type=content/usage"""
     import uuid as _uuid
     # مێژوو بۆ یەک پرسیار کۆبکەوە (سیستەم لە سەرەتا + دوا نامەی بەکارهێنەر)
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -2126,7 +2140,7 @@ def _duck_attempt(model_id, msgs, timeout):
 
 def duck_chat(model_id, messages, timeout=110):
     """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + ٢ هەوڵ"""
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     rest = [m for m in messages if m.get("role") != "system"][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest[0] = dict(rest[0])
@@ -2170,7 +2184,7 @@ def ak_chat(model_id, messages, timeout=110):
     import time as _t
     if _t.time() < _AK_COOLDOWN["until"]:
         raise EMError("ak: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     rest = [m for m in messages if m.get("role") in ("user", "assistant")][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest = [dict(rest[0])]
@@ -2481,7 +2495,7 @@ def ng_chat(messages, timeout=110):
     import time as _t
     if _t.time() < NG_LIMIT["until"]:
         raise EMError("ng: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -2941,7 +2955,7 @@ def hk_chat(messages, model_id="deepseek/deepseek-v4-flash", timeout=120):
     if not last:
         raise EMError("hk: هیچ پرسیار")
     _sys = _sys_txt(messages)  # #94U25: system مەفەوتێنە — بیخە سەر پرسیار
-    _q = (f"[Instructions: {_sys}]\n\n{last}" if _sys else last)[-6000:]
+    _q = (f"[Instructions: {_sys}]\n\n{last[-4000:]}" if _sys else last[-4000:])  # #94U26: system تەواو (14k) + کۆتایی پرسیار
     sid = _hk_session()
     body = {"model": model_id, "question": _q, "language": "English",
             "sessionId": sid, "previousQuestion": pq, "previousAnswer": pa,
@@ -3732,7 +3746,7 @@ def pi_chat(messages, model_id="pi-chat", timeout=50):  # #94U19: 110→50 (stre
     if not lines:
         raise EMError("pi: هیچ نامە")
     lines.append("[Assistant]")
-    text = "\n".join(lines)[-6000:]
+    text = _flat_cut(lines)
     import re as _re
     text = _re.sub(r"\[User\]\s*\[Assistant\]", "", text)
     last = ""
@@ -4034,7 +4048,7 @@ def cb_chat(messages, model_id, timeout=110):
     if not lines:
         raise EMError("cb: هیچ نامە")
     lines.append("[Assistant]")
-    prompt = "\n".join(lines)[-6000:]
+    prompt = _flat_cut(lines)
     last_err = ""
     for attempt in range(max_att):
         try:
@@ -4956,7 +4970,7 @@ def ca_chat(messages, model_id, timeout=110):
     if not lines:
         raise EMError("ca: هیچ نامە")
     lines.append("[Assistant]")
-    prompt = "\n".join(lines)[-6000:]
+    prompt = _flat_cut(lines)
     last_err = ""
     for attempt in range(8):
         try:
@@ -5338,7 +5352,7 @@ def ac_chat(messages, model_id, timeout=110):
     if not lines:
         raise EMError("ac: هیچ نامە")
     lines.append("[Assistant]")
-    prompt = "\n".join(lines)[-6000:]
+    prompt = _flat_cut(lines)
     last_err = ""
     for attempt in range(8):
         try:
@@ -5689,7 +5703,7 @@ def nv_chat(messages, model_id, timeout=110):
     if not lines:
         raise EMError("nv: هیچ نامە")
     lines.append("[Assistant]")
-    prompt = "\n".join(lines)[-6000:]
+    prompt = _flat_cut(lines)
     last_err = ""
     import datetime as _dtm
     _today = _dtm.datetime.utcnow().strftime("%Y-%m-%d")
@@ -5974,7 +5988,7 @@ def al_chat(messages, model_id, timeout=110):
     if not lines:
         raise EMError("al: هیچ نامە")
     lines.append("[Assistant]")
-    prompt = "\n".join(lines)[-6000:]
+    prompt = _flat_cut(lines)
     H = {"User-Agent": AL_UA, "Content-Type": "application/json",
          "Origin": "https://allchatbots.ai", "Referer": "https://allchatbots.ai/"}
     ck = {AL_COOKIE: json.dumps(sess)}
@@ -9732,7 +9746,7 @@ def alle_chat(messages, model_id, timeout=110, depth=0):
         acc = _alle_pick(model_id)
     if not acc:
         raise EMError("alle: هیچ ئەکاونتێکی بەردەست نییە (لیمیت؟)")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     rest = [m for m in messages if m.get("role") != "system"][-9:]
     if rest and rest[-1].get("role") == "user":
         last = rest.pop()
@@ -9862,7 +9876,7 @@ def pia_chat(messages, agent_id, timeout=110, depth=0):
         acc = _pia_pick(agent_id)
     if not acc:
         raise EMError("piax: هیچ ئەکاونتێکی بەردەست نییە")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:
@@ -10137,7 +10151,7 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
     acc = _cbox_pick()
     if not acc:
         raise EMError("cx: ئەکاونت نەدروست بوو")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:
