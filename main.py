@@ -3958,6 +3958,8 @@ def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-g
             _healthy += 1
     if _cb_n >= 800 or (not force and _healthy >= 100):
         return None
+    if not _sg_breaker_allow(CB_KEY):  # #94U34
+        return None
     if not _sg_reserve(CB_ST, 500, today, _CB_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 90→500 (وریا: CB هەستیارە)
         return None
     n = CB_ST["next_num"] + random.randint(0, 3000)  # #94U32 jitter دژە-دەستنیشان
@@ -4316,6 +4318,8 @@ def _ca_signup_new(mkey=None, force=False):  # #94U24: force = جێگۆڕکێ
         _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
                      if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
     if _accs_n >= 10000 or (not force and _alive >= 1000):  # #94U31: هەتا 1000 زیندوو نەبێت بەردەوامبە
+        return None
+    if not _sg_breaker_allow(CA_KEY):  # #94U34: کلیل لە پشوودایە — بودجە مەسووتێنە
         return None
     if not _sg_reserve(CA_ST, 10000, today, _CA_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U31: →10000/ڕۆژ بە مۆڵەتی بەکارهێنەر
         return None
@@ -4690,6 +4694,8 @@ def _proxy_get(n=4):
 
 _FB_BLOCK = ("TOO_MANY_ATTEMPTS_TRY_LATER", "OPERATION_NOT_ALLOWED", "QUOTA_EXCEEDED", "RESOURCE_EXHAUSTED")
 _FB_DIRECT_BAD = {}  # #94U18: key → ڕۆژی بلۆکبوونی IP ی ڕاستەوخۆ (تاگ بۆ proxy-first)
+_SG_BREAKER = {}  # #94U34: key → {"fail": n, "until": ts} — پاراستنی کلیلی Firebase لە سووتان
+_SG_BREAKER_LK = threading.Lock()
 
 
 def _proxy_signup_best(n=6):
@@ -4723,6 +4729,33 @@ def _proxy_signup_best(n=6):
     return out
 
 
+def _sg_breaker_allow(key):
+    """#94U34: ئایا ساینئەپ بۆ ئەم کلیلە ڕێگەپێدراوە؟ (دوای 10 شکستی throttle لەسەریەک → پشووی 2h)"""
+    try:
+        with _SG_BREAKER_LK:
+            b = _SG_BREAKER.get(key) or {}
+            return not (b.get("until", 0) > time.time())
+    except Exception:
+        return True
+
+
+def _sg_breaker_hit(key, ok):
+    """#94U34: تۆماری ئەنجام — سەرکەوتن ڕیسیت، شکستی throttle ژمارە + trip لە 10"""
+    try:
+        with _SG_BREAKER_LK:
+            b = _SG_BREAKER.setdefault(key, {"fail": 0, "until": 0})
+            if ok:
+                b["fail"] = 0
+                return
+            b["fail"] = b.get("fail", 0) + 1
+            if b["fail"] >= 10 and b.get("until", 0) <= time.time():
+                b["until"] = time.time() + 7200
+                b["fail"] = 0
+                print("[BREAKER] ⏸ پشووی 2h بۆ ساینئەپ (10 throttle لەسەریەک — پاراستنی کلیل)", flush=True)
+    except Exception:
+        pass
+
+
 def _fb_signup(key, email, pw, ua):
     """#94U31: signUp بە پرۆکسی-یەکەم (8 باشترین: منزلی→کەم-هەڵە→خێرا)؛ ڕاستەوخۆ تەنها دوایین چارەسەر"""
     def _call(px=None):
@@ -4744,12 +4777,15 @@ def _fb_signup(key, email, pw, ua):
         return ("BLOCKED", msg) if msg in _FB_BLOCK else None
     _today = time.strftime("%Y-%m-%d", time.gmtime())
     _direct_bad = _FB_DIRECT_BAD.get(key) == _today
+    _saw_blocked = False  # #94U34
     for px in _proxy_signup_best(8):  # #94U31: هەمیشە پرۆکسی یەکەم — IP ڕاستەوخۆ مەخەرە مەترسییەوە
         try:
             r2 = _call(px)
         except Exception:
             _proxy_mark_bad(px)  # پرۆکسی مردووە — لاببرێت
             continue
+        if r2 and r2[0] == "BLOCKED":
+            _saw_blocked = True
         _pool = PROXY_ST.get("pool") or {}
         _pe = _pool.get(px) or _pool.get(px.split("://", 1)[-1])
         if r2 and r2[0] != "BLOCKED":
@@ -4760,6 +4796,7 @@ def _fb_signup(key, email, pw, ua):
             except Exception:
                 pass
             print(f"[FB] signUp بە پرۆکسی ✅ {px[:28]}", flush=True)
+            _sg_breaker_hit(key, True)
             return r2
         try:
             if _pe is not None:
@@ -4772,11 +4809,15 @@ def _fb_signup(key, email, pw, ua):
         r = _call()
         if r and r[0] != "BLOCKED":
             _FB_DIRECT_BAD.pop(key, None)
+            _sg_breaker_hit(key, True)
             return r
         if r and r[0] == "BLOCKED":
             _FB_DIRECT_BAD[key] = _today
+            _saw_blocked = True
     except Exception:
         pass
+    if _saw_blocked:  # #94U34: تەنها throttle ژمارە — collision (EMAIL_EXISTS) نەخەرە ئەستۆی کلیل
+        _sg_breaker_hit(key, False)
     return None
 
 
@@ -5291,6 +5332,8 @@ def _ac_signup_new():
         sg = {"date": today, "n": 0}
     if len(AC_ST.get("accounts") or []) >= 300:  # #94U32: 40→300
         return None
+    if not _sg_breaker_allow(AC_KEY):  # #94U34
+        return None
     if not _sg_reserve(AC_ST, 200, today, _AC_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 20→200
         return None
     n = AC_ST["next_num"] + random.randint(0, 2000)  # #94U32 jitter
@@ -5647,6 +5690,8 @@ def _nv_signup_new(force=False):  # #94U24: force = جێگۆڕکێ
         if _ok:
             _healthy += 1
     if _nv_n >= 1000 or (not force and _healthy >= 100):  # #94U32: حەوز 1000 + 100 تەندرووست
+        return None
+    if not _sg_breaker_allow(NV_KEY):  # #94U34
         return None
     if not _sg_reserve(NV_ST, 1000, today, _NV_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 70→1000
         return None

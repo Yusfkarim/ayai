@@ -805,3 +805,9 @@
 - **دۆزراوە لە لۆگی زیندوو**: 13 ساینئەپ لە 90 چرکەدا هەموو بە یەک پرۆکسی (fingerprint مەترسیە بۆ throttle ی Firebase).
 - **پاچ**: `_proxy_signup_best` — شەفڵ لەناو هەر چینێک (منزلییەکان شەفڵکراو یەکەم، پاشان ئەوانی تر) — سوود بۆ هەموو ساینئەپەکانی Firebase (CA/CB/NV/AC).
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (res-first + 19/20 variance) ✅.
+
+## #94U34 KEY-GUARD (2026-09-21) — پاراستنی کلیلەکانی Firebase لە سووتان
+- **مەترسی**: ئەگەر پرۆژەیەک throttle بکات، daemon بەردەوام هەوڵ دەداتەوە (سووتاندنی کلیل + بودجە).
+- **پاچ**: circuit-breaker بۆ هەر کلیلێک — 10 شکستی throttle لەسەریەک → پشووی 2h؛ سەرکەوتن ڕیسیت؛ تەنها BLOCKED ژمارە (collision نەخەنە ئەستۆ).
+- گەیت لە هەر 4 ساینئەپ (CA/CB/NV/AC) پێش `_sg_reserve` — لە کاتی پشوو بودجە ناخورێت.
+- **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (trip@10 + pause + per-key + reset + expiry) ✅.
