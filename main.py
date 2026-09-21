@@ -5763,14 +5763,16 @@ def _nv_rotate():
     now = _ts.time()
     chosen = None
     with _NV_LK:
-        for _pass in (0, 1):  # #94U36: یەکەم exc<3 (مردوو مەدەرەوە)؛ دووەم هەر ئازادێک
-            for _ in range(len(accs)):
-                NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
-                acc = accs[NV_ST["idx"]]
+        _n = len(accs)
+        for _pass in (0, 1):  # #94U37: لە کۆتاییەوە (نوێترین یەکەم — کرێدیتی تازە)؛ pass 0: exc<3
+            for _i in range(_n):
+                _j = _n - 1 - _i
+                acc = accs[_j]
                 if float(ex.get(acc["email"], 0)) > now:
                     continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
                 if _pass == 0 and (xc.get(acc["email"], 0) or 0) >= 3:
                     continue  # #94U36: ٣+ insufficient ئەمڕۆ — مەیدەرەوە ئەگەر ئاڵتەرناتیڤ هەیە
+                NV_ST["idx"] = _j
                 chosen = acc
                 break
             if chosen is not None:
@@ -5804,7 +5806,7 @@ def nv_chat(messages, model_id, timeout=110):
         raise EMError("nv: مۆدێڵ نییە")
     bot_id = meta.get("botId") or 0
     tier = meta.get("tier") or "f"
-    max_att = 3 if tier == "p" else (1 if tier == "x" else 8)
+    max_att = 3 if tier == "p" else (1 if tier == "x" else 12)  # #94U37: 8→12 بۆ punch-through لەناو مردووەکان
     lines = []
     for m in _sys_keep(messages, 11):
         role = m.get("role")
@@ -5824,6 +5826,7 @@ def nv_chat(messages, model_id, timeout=110):
     last_err = ""
     import datetime as _dtm
     _today = _dtm.datetime.utcnow().strftime("%Y-%m-%d")
+    _ens_retried = set()  # #94U37: ensure+retry یەک جار بۆ هەر ئەکاونتێک لەم بانگەوازە
     for attempt in range(max_att):
         try:
             tok, uid = _nv_token()
@@ -5880,10 +5883,27 @@ def nv_chat(messages, model_id, timeout=110):
                 if acc is None:
                     _accs = NV_ST.get("accounts") or []
                     acc = _accs[NV_ST["idx"] % len(_accs)] if _accs else None
+                _em = (acc or {}).get("email") or ""
+                if acc is not None and _em not in _ens_retried:  # #94U37: grant ماوە؟ — ensure + 1 retry پێش ناسناخەکە
+                    _ens_retried.add(_em)
+                    try:
+                        requests.get(NV_BASE + "/api/v2/ensure-credits",
+                                     headers={"User-Agent": NV_UA, "X_Token": tok, "X_User_Id": uid,
+                                              "X_Platform": "web", "Origin": "https://chat.novaapp.ai",
+                                              "Referer": "https://chat.novaapp.ai/"}, timeout=(10, 20))
+                    except Exception:
+                        pass
+                    try:
+                        NV_ST.setdefault("ensured", {})[_em] = _today
+                        _nv_save_acc()
+                    except Exception:
+                        pass
+                    _t.sleep(2)
+                    continue  # هەمان ئەکاونت دووبارە (بێ rotate، بێ exc+)
                 if acc is not None:
                     NV_ST.setdefault("exhausted", {})[acc["email"]] = _t.time() + 600  # کۆڵ ١٠ خولەک
                     _replace_dead_soon("nv")  # #94U24: لە جێی ئەمە → نوێ یەکسەر
-                    NV_ST.setdefault("exc", {})[acc["email"]] = (NV_ST.get("exc") or {}).get(acc["email"], 0) + 1
+                    NV_ST.setdefault("exc", {})[acc["email"]] = (NV_ST.get("exc") or {}).get(acc["email"], 0) + 3  # #94U37: پشتڕاستکراوە-مردوو (دوای ensure+retry) → skip یەکسەر
                 if not _nv_rotate():
                     raise EMError("nv: حەوزی ئەکاونتەکان تەواوە")
                 _t.sleep(1.5)
