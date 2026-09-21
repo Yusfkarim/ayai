@@ -6714,6 +6714,8 @@ LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mi
 def leaks(s):
     return bool(LEAK_RE.search(str(s).translate(_LEAK_NORM)))
 _lock = threading.Lock()
+_MSG_SEM = threading.Semaphore(6)  # #94U13 NEVER-STOP: زۆرترین ٦ هاندڵەری نامەی هاوکات — پاراستن لە لافاوی بەکارهێنەر
+_POLL_FAILS = [0]  # #94U13 NEVER-STOP: ژمارەی شکستی لەسەریەکی getUpdates
 
 
 
@@ -9856,7 +9858,16 @@ def main():
     else:
         print("⚠️ هیچ سەرچاوەیەک نەدۆزرایەوە — دواتر دووبارە هەوڵ دەدرێتەوە", flush=True)
 
-    tg("deleteWebhook")
+    # #94U13 NEVER-STOP: webhook لە سەرەتاوە خۆکارانە دەسڕدرێتەوە + لۆگی ئەنجام + دووبارەکردنەوە
+    try:
+        _dw = tg("deleteWebhook", drop_pending_updates=False) or {}
+        print(f"[BOOT] deleteWebhook ok={_dw.get('ok')}", flush=True)
+        if not _dw.get("ok"):
+            time.sleep(2)
+            _dw2 = tg("deleteWebhook", drop_pending_updates=False) or {}
+            print(f"[BOOT] deleteWebhook-retry ok={_dw2.get('ok')}", flush=True)
+    except Exception as _e:
+        print(f"[BOOT] deleteWebhook هەڵە: {_e}", flush=True)
     setup_commands()
     # 🔄 چاودێری لیستی مۆدەڵەکان — هەر ٥ خولەک
     threading.Thread(target=auto_refresh, daemon=True).start()
@@ -9876,6 +9887,14 @@ def main():
             except Exception:
                 pass
 
+    def _throttled_handle(m):
+        # #94U13 NEVER-STOP: لافاو-پارێز — ئەگەر ٦ هاندڵەر سەرقاڵ بن، ئەوانی تر ڕیز دەبن (نەک crash)
+        _MSG_SEM.acquire()
+        try:
+            _safe_handle(m)
+        finally:
+            _MSG_SEM.release()
+
     # #91A11: offset پاشەکەوت دەکرێت — دوای restart نامەی کۆن دووبارە نایەتەوە
     try:
         offset = int(_json_load_safe(os.path.join(DATA_DIR, "tg_offset.json"), 0) or 0)
@@ -9891,9 +9910,24 @@ def main():
             _HB["t"] = time.time()
             r = tg("getUpdates", offset=offset, timeout=8, allowed_updates=["message"])
             if not r.get("ok"):
-                print(f"[POLL] ok=false: {r.get('description', '?')}", flush=True)
+                _desc = str(r.get("description", "?"))
+                print(f"[POLL] ok=false: {_desc}", flush=True)
+                # #94U13 NEVER-STOP: webhook-conflict → خۆ-چاککردنەوەی یەکسەر (بێ ڕیستارت)
+                if "webhook" in _desc.lower():
+                    try:
+                        _dw = tg("deleteWebhook", drop_pending_updates=False) or {}
+                        print(f"[POLL-HEAL] deleteWebhook ok={_dw.get('ok')}", flush=True)
+                    except Exception as _e:
+                        print(f"[POLL-HEAL] هەڵە: {_e}", flush=True)
+                    time.sleep(2)
+                    continue
+                _POLL_FAILS[0] += 1
+                if _POLL_FAILS[0] >= 60:
+                    print("[POLL-HEAL] ٦٠ شکستی لەسەریەک — ڕیستارتی خۆکار", flush=True)
+                    os._exit(1)
                 time.sleep(3)
                 continue
+            _POLL_FAILS[0] = 0
             for u in r.get("result", []):
                 offset = u["update_id"] + 1
                 try:
@@ -10482,4 +10516,12 @@ def _crack_cmd(chat_id, arg):
 
 
 if __name__ == "__main__":
-    main()
+    # #94U13 NEVER-STOP: هەر crashێک traceback لۆگ دەکات و Fly یەکسەر ڕیستارتی دەکاتەوە
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise
