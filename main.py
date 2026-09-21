@@ -4445,6 +4445,33 @@ def _proxy_get(n=4):
 
 
 _FB_BLOCK = ("TOO_MANY_ATTEMPTS_TRY_LATER", "OPERATION_NOT_ALLOWED", "QUOTA_EXCEEDED", "RESOURCE_EXHAUSTED")
+_FB_DIRECT_BAD = {}  # #94U18: key → ڕۆژی بلۆکبوونی IP ی ڕاستەوخۆ (تاگ بۆ proxy-first)
+
+
+def _proxy_signup_best(n=6):
+    """#94U18: باشترین پرۆکسی بۆ ساینئەپ — منزلی یەکەم، کەم-هەڵە، خێرا"""
+    pool = PROXY_ST.get("pool") or {}
+    bad = PROXY_ST.get("bad") or set()
+    cands = []
+    for k, v in pool.items():
+        if k in bad:
+            continue
+        v = v or {}
+        if (v.get("sg_bad") or 0) >= 3:
+            continue
+        cands.append((0 if v.get("res") else 1, v.get("sg_bad") or 0, v.get("lat", 9), k))
+    cands.sort()
+    out = [(k if "://" in k else "http://" + k) for _, _, _, k in cands[:n]]
+    if len(out) < n:
+        try:
+            for p in _proxy_get(n):
+                if p not in out:
+                    out.append(p)
+                if len(out) >= n:
+                    break
+        except Exception:
+            pass
+    return out
 
 
 def _fb_signup(key, email, pw, ua):
@@ -4466,19 +4493,45 @@ def _fb_signup(key, email, pw, ua):
         except Exception:
             msg = ""
         return ("BLOCKED", msg) if msg in _FB_BLOCK else None
-    r = _call()
-    if r and r[0] != "BLOCKED":
-        return r
-    for px in _proxy_get(4):
+    _today = time.strftime("%Y-%m-%d", time.gmtime())
+    _direct_bad = _FB_DIRECT_BAD.get(key) == _today
+    if not _direct_bad:
+        r = _call()
+        if r and r[0] != "BLOCKED":
+            return r
+        if r and r[0] == "BLOCKED":
+            _FB_DIRECT_BAD[key] = _today  # IP ی ڕاستەوخۆ ئەمڕۆ بلۆکە → لەمەودوا proxy-first
+    for px in _proxy_signup_best(6):
         try:
             r2 = _call(px)
         except Exception:
-            _proxy_mark_bad(px)
+            _proxy_mark_bad(px)  # پرۆکسی مردووە — لاببرێت
             continue
+        _pool = PROXY_ST.get("pool") or {}
+        _pe = _pool.get(px) or _pool.get(px.split("://", 1)[-1])
         if r2 and r2[0] != "BLOCKED":
+            try:
+                if _pe is not None:
+                    _pe["sg_ok"] = time.time()
+                    _pe["sg_bad"] = 0
+            except Exception:
+                pass
             print(f"[FB] signUp بە پرۆکسی ✅ {px[:28]}", flush=True)
             return r2
-        _proxy_mark_bad(px)
+        try:
+            if _pe is not None:
+                _pe["sg_bad"] = (_pe.get("sg_bad") or 0) + 1
+        except Exception:
+            pass
+        # BLOCKED لەڕێی پرۆکسییەوە = IP ـەکە لای Firebase فلەگە — بۆ ساینئەپ بەکارمەهێنە بەڵام مەیسڕە (بۆ کاری تر باشە)
+    if _direct_bad:
+        try:
+            r = _call()  # دوایین هەوڵ: ڕاستەوخۆ (لەوانەیە بلۆکەکە کاتی بووبێت)
+            if r and r[0] != "BLOCKED":
+                _FB_DIRECT_BAD.pop(key, None)
+                return r
+        except Exception:
+            pass
     return None
 
 
@@ -4608,7 +4661,7 @@ def _pool_daemon():
                 after = len(st.get("accounts") or [])
                 if after > before:
                     print(f"[POOL-{name}] {after}/{tgt} ئەکاونت", flush=True)
-                    time.sleep(75)  # پشووی نێوان سەرکەوتنەکان
+                    time.sleep(45)  # #94U18: خێراتر (45s) — سنوورە ڕۆژانەکان هەر سنووردارن
             except Exception as e:
                 print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
         time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
@@ -5244,8 +5297,23 @@ def _nv_signup_new():
     sg = NV_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 70 or len(NV_ST.get("accounts") or []) >= 70:
+    if sg.get("n", 0) >= 70:
         return None
+    _nv_n = len(NV_ST.get("accounts") or [])
+    if _nv_n >= 70:
+        # #94U18: وەک CB — تەنها ئەگەر ٠ ئەکاونتی ساردبووەوە مابێت → تا 110؛ ڕۆژانە 70 وەک خۆی
+        _ex = NV_ST.get("exhausted") or {}
+        _now = time.time()
+        _healthy = 0
+        for _a in (NV_ST.get("accounts") or []):
+            try:
+                _ok = float(_ex.get(_a.get("email"), 0) or 0) <= _now
+            except Exception:
+                _ok = True
+            if _ok:
+                _healthy += 1
+        if _healthy > 0 or _nv_n >= 110:
+            return None
     import time as _ts
     n = NV_ST["next_num"]
     for off in (0, 3, 13, 40, 100, 250):

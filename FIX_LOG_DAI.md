@@ -671,3 +671,13 @@
   2. دێدلاینی گشتی fallback: API 100s (`t_api0`) + TG ask 110s — slot/thread هەمیشەیی گیر ناخوات.
   3. `_proxy_get` single-flight: تەنها ١ fetch+screen لە هەمان کات؛ ئەوانی تر `[]` یەکسەر (fail-fast) — نەهێشتنی thread-storm لە کاتی pool=0.
 - **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (re-arm بێ-dump، stall→dump، single-flight 1+4) OK.
+
+## #94U18 PROXY-SIGNUP (2026-09-21) — ساینئەپی بەردەوامی CA/CB/NV بە باشترین پرۆکسی (منزلی-یەکەم)
+- **داواکاری**: هەر ئەکاونتێکی nv/cb/ca سنوور تەواو بکات → بەردەوام ئەکاونتی نوێ بە پرۆکسی بەهێز دروست بکرێتەوە.
+- **پاچ**:
+  1. `_proxy_signup_best(6)` — هەڵبژاردنی تایبەت بۆ ساینئەپ: منزلی (`res`) یەکەم، کەمترین `sg_bad`، خێراترین؛ دواتر fallback بۆ `_proxy_get`.
+  2. `_fb_signup` proxy-first: ئەگەر IP ی ڕاستەوخۆ ئەمڕۆ لای Firebase بلۆک بوو (`_FB_DIRECT_BAD`) → ساینئەپ یەکسەر بە ٦ باشترین پرۆکسی دەستپێدەکات (پێشتر ٤ و تەنها دوای بلۆک)؛ لە کۆتاییدا دوایین هەوڵی ڕاستەوخۆ.
+  3. فێربوونی کوالیتی: ساینئەپی سەرکەوتوو بە پرۆکسی → `sg_ok` + ڕیسێتی `sg_bad`؛ بلۆک لەڕێی پرۆکسییەوە → `sg_bad++` بەڵام پرۆکسی ناسڕدرێتەوە (بۆ کاری تر دەمێنێتەوە)؛ تەنها پرۆکسی مردوو (network error) mark_bad دەکرێت. Picker ـەکە `sg_bad>=3` بۆ ساینئەپ پشتگوێ دەخات.
+  4. NV headroom وەک CB: ئەگەر ٠ ئەکاونتی ساردبووەوە مابێت → تا 110 ئەکاونت (ڕۆژانە 70 وەک خۆی).
+  5. `_pool_daemon` خێراتر: پشووی نێوان سەرکەوتنەکان 75s→45s (کۆی ڕۆژانە هەر بە cap سنووردارە: CA 80 / CB 90 / NV 70).
+- **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (ranking + NV gate + proxy-first flow) OK.
