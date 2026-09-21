@@ -4694,8 +4694,9 @@ def _proxy_get(n=4):
 
 _FB_BLOCK = ("TOO_MANY_ATTEMPTS_TRY_LATER", "OPERATION_NOT_ALLOWED", "QUOTA_EXCEEDED", "RESOURCE_EXHAUSTED")
 _FB_DIRECT_BAD = {}  # #94U18: key → ڕۆژی بلۆکبوونی IP ی ڕاستەوخۆ (تاگ بۆ proxy-first)
-_SG_BREAKER = {}  # #94U34: key → {"fail": n, "until": ts} — پاراستنی کلیلی Firebase لە سووتان
+_SG_BREAKER = {}  # #94U34: key → {"fail": n, "until": ts, "trips": t} — پاراستنی کلیلی Firebase لە سووتان
 _SG_BREAKER_LK = threading.Lock()
+_SG_KEY_NAMES = None  # #94U38: lazy map key→pool بۆ لۆگ
 
 
 def _proxy_signup_best(n=6):
@@ -4739,19 +4740,34 @@ def _sg_breaker_allow(key):
         return True
 
 
+def _sg_key_name(key):
+    """#94U38: ناوی حەوز بۆ لۆگ (کلیلەکە خۆی چاپ مەکە)"""
+    global _SG_KEY_NAMES
+    try:
+        if _SG_KEY_NAMES is None:
+            _SG_KEY_NAMES = {CA_KEY: "CA", CB_KEY: "CB", NV_KEY: "NV", AC_KEY: "AC"}
+        return _SG_KEY_NAMES.get(key, "?")
+    except Exception:
+        return "?"
+
+
 def _sg_breaker_hit(key, ok):
-    """#94U34: تۆماری ئەنجام — سەرکەوتن ڕیسیت، شکستی throttle ژمارە + trip لە 10"""
+    """#94U34: تۆماری ئەنجام — سەرکەوتن ڕیسیت، شکستی throttle ژمارە + trip لە 10؛ #94U38: backoff 15m→120m"""
     try:
         with _SG_BREAKER_LK:
-            b = _SG_BREAKER.setdefault(key, {"fail": 0, "until": 0})
+            b = _SG_BREAKER.setdefault(key, {"fail": 0, "until": 0, "trips": 0})
             if ok:
                 b["fail"] = 0
+                b["trips"] = 0
                 return
             b["fail"] = b.get("fail", 0) + 1
             if b["fail"] >= 10 and b.get("until", 0) <= time.time():
-                b["until"] = time.time() + 7200
+                t = b.get("trips", 0)
+                pause = min(900 * (2 ** t), 7200)  # 15m → 30m → 60m → 120m cap
+                b["until"] = time.time() + pause
                 b["fail"] = 0
-                print("[BREAKER] ⏸ پشووی 2h بۆ ساینئەپ (10 throttle لەسەریەک — پاراستنی کلیل)", flush=True)
+                b["trips"] = t + 1
+                print(f"[BREAKER-{_sg_key_name(key)}] ⏸ پشووی {int(pause // 60)}m (10 throttle — پاراستنی کلیل)", flush=True)
     except Exception:
         pass
 
@@ -8322,12 +8338,34 @@ def handle_message(msg):
                     return len(d)
                 except Exception:
                     return 0
-            ca, cb, nv = _n("ca_accounts.json"), _n("cb_accounts.json"), _n("nv_accounts.json")
+            def _a(f):
+                # #94U38: ژمارەی زیندوو (وەک /health) — نەک کۆی گشتی
+                try:
+                    d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
+                    accs = d.get("accounts", []) or []
+                    lim = d.get("limits") or {}
+                    exh = d.get("exhausted") or {}
+                    td = _lim_today()
+                    def _ok(a):
+                        e = a.get("email") or "?"
+                        if td in (lim.get(e) or {}).values():
+                            return False
+                        v = exh.get(e)
+                        if v in (None, 0, "", False):
+                            return True
+                        try:
+                            return float(v) <= time.time()
+                        except Exception:
+                            return str(v)[:10] != td
+                    return sum(1 for a in accs if _ok(a))
+                except Exception:
+                    return 0
+            ca, cb, nv, ac = _a("ca_accounts.json"), _a("cb_accounts.json"), _a("nv_accounts.json"), _a("ac_accounts.json")
             nmodels = len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز: CA {ca}/50 · CB {cb}/50 · NV {nv}/50\n",
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/30\n",  # #94U38
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):

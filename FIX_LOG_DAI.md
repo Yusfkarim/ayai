@@ -829,3 +829,10 @@
 - **پاچ**: (1) rotate لە کۆتاییەوە (نوێترین یەکەم — کرێدیتی تازە)؛ (2) ensure+retry یەک جار پێش ناسناخ؛ (3) دوای پشتڕاستکردنەوە exc+=3 (skip یەکسەر)؛ (4) attempts 8→12.
 - CA/CB دەستلێنەدرا (quota ڕۆژانە → round-robin ڕاستە).
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (fresh/skip/lastresort/exc3/retry-once) ✅.
+
+## #94U38 BREAKER-BACKOFF (2026-09-21) — وەستانی CA + ڕاپۆرتی کۆن
+- **دۆزراوە لە لۆگ**: `[BREAKER] ⏸ 2h` — کلیلی CA لەلایەن Firebase throttle کرا → پشووی 2h → CA لە 382 وەستا (CB/NV بەردەوام بوون: +18/+20).
+- **پاچ**: backoff 15m→30m→60m→120m (لەبری 2h ی ڕەق) + لۆگ بە ناوی حەوز `[BREAKER-CA]`؛ deploy = ڕیسیتی پشووەکە → CA یەکسەر دەستپێدەکاتەوە.
+- **ڕاپۆرت**: `/status` ژمارەی کۆنی n/50 نیشان دەدا → بوو بە زیندوو/ئامانج (CA/1000 · CB/1000 · NV/1000 · AC/30).
+- خێراکردنی daemon نەکرا بە ئەنقەست — خێراتر = throttle زیاتر.
+- **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (backoff + alive) ✅.
