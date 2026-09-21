@@ -3947,9 +3947,16 @@ def _cb_signup_new(force=False):  # #94U24: force = جێگۆڕکێ — healthy-g
         sg = {"date": today, "n": 0}
     _cb_n = len(CB_ST.get("accounts") or [])
     _ex = CB_ST.get("exhausted", {}) or {}
-    _healthy = sum(1 for _a in (CB_ST.get("accounts") or [])
-                   if str(_ex.get(_a.get("email"), 0))[:10] != today)
-    if _cb_n >= 800 or (not force and _healthy >= 100):  # #94U32: حەوز 800 + 100 تەندرووست
+    _now = time.time()
+    _healthy = 0
+    for _a in (CB_ST.get("accounts") or []):  # #94U32b: cooldown-aware (وەک NV + /health)
+        try:
+            _ok = float(_ex.get(_a.get("email"), 0) or 0) <= _now
+        except Exception:
+            _ok = str(_ex.get(_a.get("email"), 0))[:10] != today
+        if _ok:
+            _healthy += 1
+    if _cb_n >= 800 or (not force and _healthy >= 100):
         return None
     if not _sg_reserve(CB_ST, 500, today, _CB_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 90→500 (وریا: CB هەستیارە)
         return None
@@ -5193,7 +5200,7 @@ def sync_ca_models(force=False):
 AC_KEY = "AIzaSyBIjexOfpMhsws3weHS6Hko4d5Arin3Zzs"
 AC_BASE = "https://askaichat.app"
 AC_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
-AC_ACC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ac_accounts.json")
+AC_ACC_FILE = os.path.join(DATA_DIR, "ac_accounts.json")  # #94U32b: مانەوە لەسەر /data (پێشتر بە هەر deploy ێک دەسڕایەوە)
 AC_ST = {"tok": None, "tok_t": 0.0, "idx": 0, "next_num": 82407,
          "accounts": [{"email": "komex82398@duidir.com", "password": "komex82398@duidir.com"},
                       {"email": "komex82406@duidir.com", "password": "komex82406@duidir.com"}],
@@ -6780,7 +6787,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 80), "cb": _pstat("cb_accounts.json", 90), "nv": _pstat("nv_accounts.json", 70)},
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 500), "nv": _pstat("nv_accounts.json", 1000), "ac": _pstat("ac_accounts.json", 200)},  # #94U32b
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),

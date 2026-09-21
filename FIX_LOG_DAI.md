@@ -793,3 +793,10 @@
 - **daemon**: CA 1000/20 + CB 100/4 + NV 100/5 + AC 30/2؛ CB/NV trim نییە/کوالێتیە — نەگۆڕدران.
 - proxy-first پێشتر گڵۆباڵە (U31) — CB/NV خۆکار سوودمەند بوون.
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (gates/daemon/shape) ✅.
+
+## #94U32b FORTRESS-FIX (2026-09-21) — ٣ کێشەی دۆزراوەی زیندوو چاککران
+- **CB stall**: گەیتی CB timestamp-cooldown بە «تەندرووست» دەژمارد → حەوز لە 62 زیندوو وەستا. بوو بە cooldown-aware (وەک NV+/health).
+- **AC persistence**: فایلی AC لەناو کۆنتێینەر بوو (بە هەر deploy ێک دەسڕایەوە!) → گوازرایەوە بۆ /data.
+- **/health**: caps کۆن (80/90/70) → نوێ (10000/500/1000) + حەوزی AC زیادکرا.
+- پرۆکسی خۆی چاکبووەوە (1→45، منزلی 12) — هیچ پاچێک پێویست نەبوو.
+- **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (old-bug vs new) ✅.
