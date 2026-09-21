@@ -4693,7 +4693,7 @@ _FB_DIRECT_BAD = {}  # #94U18: key → ڕۆژی بلۆکبوونی IP ی ڕاس�
 
 
 def _proxy_signup_best(n=6):
-    """#94U18: باشترین پرۆکسی بۆ ساینئەپ — منزلی یەکەم، کەم-هەڵە، خێرا"""
+    """#94U18: باشترین پرۆکسی بۆ ساینئەپ — منزلی یەکەم، کەم-هەڵە، خێرا؛ #94U33: شەفڵ لەناو هەر چینێک (بڵاوکردنەوە لەسەر چەند IP)"""
     pool = PROXY_ST.get("pool") or {}
     bad = PROXY_ST.get("bad") or set()
     cands = []
@@ -4705,7 +4705,12 @@ def _proxy_signup_best(n=6):
             continue
         cands.append((0 if v.get("res") else 1, v.get("sg_bad") or 0, v.get("lat", 9), k))
     cands.sort()
-    out = [(k if "://" in k else "http://" + k) for _, _, _, k in cands[:n]]
+    top = cands[:n]
+    _res = [k for r, _, _, k in top if r == 0]
+    _oth = [k for r, _, _, k in top if r != 0]
+    random.shuffle(_res)
+    random.shuffle(_oth)
+    out = [(k if "://" in k else "http://" + k) for k in (_res + _oth)]
     if len(out) < n:
         try:
             for p in _proxy_get(n):
