@@ -6182,7 +6182,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             st = _HEAL_STATE.get("status", {})
             def _n2(f):
                 try:
-                    d = json.load(open(os.path.join(DATA_DIR, f)))
+                    d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
                     return len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
                 except Exception:
                     return 0
@@ -7440,7 +7440,7 @@ def handle_message(msg):
         try:
             def _n(f):
                 try:
-                    d = json.load(open(os.path.join(DATA_DIR, f)))
+                    d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
                     if isinstance(d, dict):
                         return len(d.get("accounts", []))
                     return len(d)
@@ -8069,7 +8069,7 @@ def _daily_report():
                 po = {}
                 for nm, f in (("CA", "ca_accounts.json"), ("CB", "cb_accounts.json"), ("NV", "nv_accounts.json")):
                     try:
-                        d = json.load(open(os.path.join(DATA_DIR, f)))
+                        d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
                         po[nm] = len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
                     except Exception:
                         po[nm] = 0
