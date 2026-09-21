@@ -698,3 +698,9 @@
 - **نیشانە**: `[SAVE] هەڵەی پاشەکەوت /data/model_sync.json: [Errno 2] ... .tmp` — دوو تڕێد هەمان `.tmp` ـیان بەکاردەهێنا و rename ڕەیس دەکرد.
 - **پاچ**: per-path `threading.Lock` + tmp ناوی ناوازە (`pid.ident.tmp`) — ` _json_save` → wrapper + `_json_save_locked`.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (20 تڕێد × 10 نووسین = 200) OK — JSON ـەکە هەمیشە valid.
+
+## #94U20 RES+VIS (2026-09-21) — پشکی پارێزراوی منزلی + بینینی بودجەی حەوزەکان
+- **پاچ**:
+  1. حەوزی پرۆکسی: لەبری «100 خێراکە» → 40 منزلی پارێزراو + 60 خێرا (داتاسەنتەرە خێراکان منزلییە بەهێزەکان ناسڕنەوە).
+  2. `/health`: `pools` بوو بە `{n, alive, signups: used/cap}` بۆ ca/cb/nv + `proxies_res` (ژمارەی منزلی) — بۆ بینینی ڕاستەقینەی دۆخی حەوز و بودجە.
+- **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (trim + alive) OK.

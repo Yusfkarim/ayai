@@ -4388,8 +4388,12 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
         pass
     PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
     if len(PROXY_ST["pool"]) > 100:
-        keep = sorted(PROXY_ST["pool"].items(), key=lambda kv: kv[1].get("lat", 9))[:100]
-        PROXY_ST["pool"] = dict(keep)
+        # #94U20: پشکی پارێزراو بۆ منزلی — 40 منزلی + 60 خێرا (داتاسەنتەرە خێراکان منزلییەکان ناسڕنەوە)
+        _items = list(PROXY_ST["pool"].items())
+        _res = sorted([kv for kv in _items if (kv[1] or {}).get("res")], key=lambda kv: kv[1].get("lat", 9))[:40]
+        _resk = {k for k, _ in _res}
+        _fast = sorted([kv for kv in _items if kv[0] not in _resk], key=lambda kv: kv[1].get("lat", 9))[:100 - len(_res)]
+        PROXY_ST["pool"] = dict(_res + _fast)
     _proxy_pool_save()
     print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو (socks: {n_socks}) | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
 
@@ -6418,6 +6422,31 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     return len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
                 except Exception:
                     return 0
+            def _pstat(f, cap):
+                # #94U20: ژمارەی ئەکاونت + زیندووی ئەمڕۆ + بودجەی ساینئەپی ماوە
+                try:
+                    d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
+                    accs = d.get("accounts", []) or []
+                    lim = d.get("limits") or {}
+                    exh = d.get("exhausted") or {}
+                    today = _lim_today()
+                    def _ok(a):
+                        e = a.get("email") or "?"
+                        if today in (lim.get(e) or {}).values():
+                            return False
+                        v = exh.get(e)
+                        if v in (None, 0, "", False):
+                            return True
+                        try:
+                            return float(v) <= time.time()
+                        except Exception:
+                            return str(v)[:10] != today
+                    alive = sum(1 for a in accs if _ok(a))
+                    sg = d.get("signups") or {}
+                    used = sg.get("n", 0) if sg.get("date") == today else 0
+                    return {"n": len(accs), "alive": alive, "signups": f"{used}/{cap}"}
+                except Exception:
+                    return {"n": 0, "alive": 0, "signups": f"0/{cap}"}
             try:
                 api_brain_ensure()  # #94U2: /health ەش دڵنیابێت لە API-BRAIN
             except Exception:
@@ -6431,9 +6460,10 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _n2("ca_accounts.json"), "cb": _n2("cb_accounts.json"), "nv": _n2("nv_accounts.json")},
+                "pools": {"ca": _pstat("ca_accounts.json", 80), "cb": _pstat("cb_accounts.json", 90), "nv": _pstat("nv_accounts.json", 70)},
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
+                "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
             }
             return self._send(200, body)
         if cp in ("/", "/health"):
