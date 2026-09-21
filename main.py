@@ -4380,7 +4380,10 @@ def _proxy_fetch_all():
         "https://proxyspace.pro/http.txt",
         "https://openproxylist.xyz/http.txt",
         "https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/http_proxies.txt",
-    ]
+        "https://raw.githubusercontent.com/saschazesiger/Free-Proxies/master/proxies/http.txt",
+        "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
+        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/https/data.txt",
+    ]  # #94U39: +3 (17 HTTP)
     def _pull(u):
         try:
             r = requests.get(u, timeout=(8, 16))
@@ -4408,7 +4411,14 @@ def _proxy_fetch_all():
                    ("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt", "socks5://"),
                    ("https://raw.githubusercontent.com/zloi-user/hideip.me/main/socks5.txt", "socks5://"),
                    ("https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks4.txt", "socks4://"),
-                   ("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt", "socks4://")):
+                   ("https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks4.txt", "socks4://"),
+                   ("https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/saschazesiger/Free-Proxies/master/proxies/socks5.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/saschazesiger/Free-Proxies/master/proxies/socks4.txt", "socks4://"),
+                   ("https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/socks5_proxies.txt", "socks5://"),
+                   ("https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=8000", "socks5://")):  # #94U39: +7
         try:
             r = requests.get(u, timeout=(8, 14))
             if r.status_code == 200:
@@ -4559,7 +4569,7 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
         PROXY_ST["raw"] = raw
         PROXY_ST["src_t"] = now
         PROXY_ST["cur"] = 0
-        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ١٦ سەرچاوە", flush=True)
+        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ٣٠+ سەرچاوە", flush=True)
     if not raw:
         return
     bad, pool = PROXY_ST["bad"], PROXY_ST.setdefault("pool", {})
@@ -4596,23 +4606,28 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
     except Exception:
         pass
     PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
-    if len(PROXY_ST["pool"]) > 100:
-        # #94U20: پشکی پارێزراو بۆ منزلی — 40 منزلی + 60 خێرا (داتاسەنتەرە خێراکان منزلییەکان ناسڕنەوە)
+    if len(PROXY_ST["pool"]) > 200:  # #94U39: 100→200 (بافەری گەورەتر دژە-وشکبوون)
+        # #94U20: پشکی پارێزراو بۆ منزلی — 60 منزلی + خێرا (داتاسەنتەرە خێراکان منزلییەکان ناسڕنەوە)
         _items = list(PROXY_ST["pool"].items())
-        _res = sorted([kv for kv in _items if (kv[1] or {}).get("res")], key=lambda kv: kv[1].get("lat", 9))[:40]
+        _res = sorted([kv for kv in _items if (kv[1] or {}).get("res")], key=lambda kv: kv[1].get("lat", 9))[:60]
         _resk = {k for k, _ in _res}
-        _fast = sorted([kv for kv in _items if kv[0] not in _resk], key=lambda kv: kv[1].get("lat", 9))[:100 - len(_res)]
+        _fast = sorted([kv for kv in _items if kv[0] not in _resk], key=lambda kv: kv[1].get("lat", 9))[:200 - len(_res)]
         PROXY_ST["pool"] = dict(_res + _fast)
     _proxy_pool_save()
     print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو (socks: {n_socks}) | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
 
 
 def _proxy_harvester_daemon():
-    """#91H: بەردەوام — هەر ٤ خولەک شەپۆلێک کراک → گەورەترین و تازەترین حەوز بەبێ وەستان"""
+    """#91H: بەردەوام — هەر ٤ خولەک شەپۆلێکی 200 کراک → گەورەترین و تازەترین حەوز بەبێ وەستان؛ #94U39: ئەگەر حەوز <15 → تا 3 شەپۆل"""
     time.sleep(45)
     while True:
         try:
-            _harvest_wave(120)
+            _harvest_wave(200)
+            _extra = 0
+            while len(PROXY_ST.get("pool") or {}) < 15 and _extra < 2:
+                _extra += 1
+                print(f"[HARVESTER] 🆘 حەوز کەمە — شەپۆلی فریاکەوتنی {_extra}", flush=True)
+                _harvest_wave(200)
         except Exception as e:
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
         time.sleep(240)
