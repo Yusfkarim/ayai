@@ -9588,12 +9588,30 @@ def _cbox_seed():
         print(f"[CX] seed: {str(e)[:70]}", flush=True)
 
 
-def _cbox_daemon():
-    """هەر ٢ کاتژمێر — ئەگەر زیندوو < ٢ → نوێ"""
+def _prewarm_daemon():
+    """#94U8: pre-warm — هەر ٤٥ خولەک توکنی هەر سێ حەوز نوێ بکەرەوە
+    تا یەکەم داواکاری بەکارهێنەر چاوەڕوانی fetch-token نەبێت (خێرایی-یەکەم-توکن)"""
     while True:
         try:
-            time.sleep(3600 * 2)
-            if len(_cbox_alive()) < 2:
+            time.sleep(2700)
+            try:
+                _ca_token()
+            except Exception:
+                pass
+            try:
+                _cb_token()
+            except Exception:
+                pass
+        except Exception:
+            time.sleep(60)
+
+
+def _cbox_daemon():
+    """#94U8: هەر ٣٠ خولەک — تا ١٠ ئەکاونتی زیندوو (لۆد + خێرایی)"""
+    while True:
+        try:
+            time.sleep(1800)
+            if len(_cbox_alive()) < 10:
                 _cbox_new_account()
         except Exception:
             time.sleep(300)
@@ -9603,6 +9621,7 @@ def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     _check_code_integrity(is_boot=True)
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
+    threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
     start_hf_keepalive()
