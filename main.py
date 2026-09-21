@@ -10576,6 +10576,14 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
                     if na and depth == 0:
                         return cbox_chat(messages, model_key, timeout, depth=1)
                     raise _CxLimit(err_evt[:90])
+                # #94U42: هەڵەی کاتی سێرڤەر (SERVER_ERROR) → یەک دووبارە بە ئەکاونتی نوێ، نەک ❌ یەکسەر
+                if depth == 0:
+                    try:
+                        na = _cbox_new_account()
+                    except Exception:
+                        na = None
+                    if na:
+                        return cbox_chat(messages, model_key, timeout, depth=1)
                 raise EMError(f"cx: {err_evt[:90]}")
             ans = (final_msg or "".join(parts)).strip()
             if not ans:
