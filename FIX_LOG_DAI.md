@@ -754,3 +754,8 @@
 - **کێشە**: مۆدێلێکی لاواز هەمان پاراگراف 10 جار دووبارە کردەوە (repetition loop) و پرۆمپتی پشتگوێ خست.
 - **پاچ**: `_resp_degenerate` (0/2/3: بلۆکی 120-پیت + ڕێژەی ڕستە + type-token) لە do_POST (loop + rebind) — وەڵامی تێکچوو → revive + fallback؛ spare وەک دوایین چارە.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (user-loop=3، normal/code/list/short=0) OK.
+
+## #94U28 PROMPT-32K (2026-09-21) — پرۆمپت تا 32k لە هەموو ڕێڕەوی ناوخۆیی + 80k سەلمێنراوە end-to-end
+- **پشکنین**: تاقی زیندوو — 14k/20k/28k/36k/50k/80k هەموو ✅ (یاسا لە کۆتایی) لە ڕێڕەوی full-message.
+- **پاچ**: caps 14k→32k (merges×7 + _sys_txt + _flat_cut sys) + flat total 16k→40k — هەڵەی باسکەند → fallback (لە بڕینی بێدەنگ باشترە).
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK.

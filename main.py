@@ -169,12 +169,12 @@ def _sys_keep(msgs, n=19):
     return sys_m + rest
 
 
-def _flat_cut(lines, cap=16000):
-    """#94U26: بڕینی زیرەک — هێڵەکانی [Instructions] (system تا 14k) هەرگیز نافەوتێن + دوایین مێژوو"""
+def _flat_cut(lines, cap=40000):
+    """#94U26+#94U28: بڕینی زیرەک — system تا 32k + مێژوو تا 40k (هەڵە → fallback)"""
     try:
         sys_l = [l for l in lines if l.startswith("[Instructions]")]
         rest = [l for l in lines if not l.startswith("[Instructions]")]
-        sys_txt = "\n".join(sys_l)[:14000]
+        sys_txt = "\n".join(sys_l)[:32000]
         rest_txt = "\n".join(rest)
         room = cap - len(sys_txt) - 1
         tail = rest_txt[-room:] if len(rest_txt) > room else rest_txt
@@ -183,8 +183,8 @@ def _flat_cut(lines, cap=16000):
         return "\n".join(lines)[-cap:]
 
 
-def _sys_txt(msgs, cap=14000):
-    """#94U25+#94U26: دەقی system ەکان — بۆ باسکەندە single-prompt ەکان (بێ فەوتاندن تا 14k)"""
+def _sys_txt(msgs, cap=32000):
+    """#94U25+#94U26+#94U28: دەقی system ەکان — تا 32k (هەڵەی باسکەند → fallback؛ بڕینی بێدەنگ قەدەغە)"""
     try:
         return " ".join(str(m.get("content") or "") for m in (msgs or []) if isinstance(m, dict) and m.get("role") == "system")[:cap]
     except Exception:
@@ -1671,7 +1671,7 @@ def qb_chat(messages, timeout=60):  # #94U19: 110→60
     """چاتی quillbot — مێژووی وەک یەک نامەی یەکگیراو؛ NDJSON: type=content/usage"""
     import uuid as _uuid
     # مێژوو بۆ یەک پرسیار کۆبکەوە (سیستەم لە سەرەتا + دوا نامەی بەکارهێنەر)
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -2170,7 +2170,7 @@ def _duck_attempt(model_id, msgs, timeout):
 
 def duck_chat(model_id, messages, timeout=110):
     """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + ٢ هەوڵ"""
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") != "system"][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest[0] = dict(rest[0])
@@ -2214,7 +2214,7 @@ def ak_chat(model_id, messages, timeout=110):
     import time as _t
     if _t.time() < _AK_COOLDOWN["until"]:
         raise EMError("ak: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") in ("user", "assistant")][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest = [dict(rest[0])]
@@ -2525,7 +2525,7 @@ def ng_chat(messages, timeout=110):
     import time as _t
     if _t.time() < NG_LIMIT["until"]:
         raise EMError("ng: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -9804,7 +9804,7 @@ def alle_chat(messages, model_id, timeout=110, depth=0):
         acc = _alle_pick(model_id)
     if not acc:
         raise EMError("alle: هیچ ئەکاونتێکی بەردەست نییە (لیمیت؟)")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") != "system"][-9:]
     if rest and rest[-1].get("role") == "user":
         last = rest.pop()
@@ -9934,7 +9934,7 @@ def pia_chat(messages, agent_id, timeout=110, depth=0):
         acc = _pia_pick(agent_id)
     if not acc:
         raise EMError("piax: هیچ ئەکاونتێکی بەردەست نییە")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:
@@ -10209,7 +10209,7 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
     acc = _cbox_pick()
     if not acc:
         raise EMError("cx: ئەکاونت نەدروست بوو")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:14000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:
