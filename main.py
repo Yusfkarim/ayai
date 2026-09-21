@@ -4383,7 +4383,16 @@ def _proxy_fetch_all():
         "https://raw.githubusercontent.com/saschazesiger/Free-Proxies/master/proxies/http.txt",
         "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt",
         "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/https/data.txt",
-    ]  # #94U39: +3 (17 HTTP)
+        "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",
+        "https://raw.githubusercontent.com/zloi-user/hideip.me/main/https.txt",
+        "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt",
+        "https://raw.githubusercontent.com/mmpx12/proxy-list/master/https.txt",
+        "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+        "https://raw.githubusercontent.com/saschazesiger/Free-Proxies/master/proxies/https.txt",
+        "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-https.txt",
+        "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
+        "https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/http/http.txt",
+    ]  # #94U39: +3 (17 HTTP)؛ #94U41: +9 (26 HTTP)
     def _pull(u):
         try:
             r = requests.get(u, timeout=(8, 16))
@@ -4418,7 +4427,11 @@ def _proxy_fetch_all():
                    ("https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt", "socks5://"),
                    ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt", "socks5://"),
                    ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/socks5_proxies.txt", "socks5://"),
-                   ("https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=8000", "socks5://")):  # #94U39: +7
+                   ("https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=socks5&timeout=8000", "socks5://"),
+                   ("https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks4/data.txt", "socks4://"),
+                   ("https://raw.githubusercontent.com/sunny9577/proxy-scraper/master/generated/socks4_proxies.txt", "socks4://"),
+                   ("https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt", "socks5://"),
+                   ("https://raw.githubusercontent.com/officialputuid/KangProxy/KangProxy/socks5/socks5.txt", "socks5://")):  # #94U39: +7؛ #94U41: +4 (15 SOCKS)
         try:
             r = requests.get(u, timeout=(8, 14))
             if r.status_code == 200:
@@ -4526,21 +4539,57 @@ def _proxy_check(pxs, cap=18):
 
 
 def _proxy_mark_bad(px):
-    """#91H: مردوو لە باد-سێت و حەوز یەکسان لادەبرێت؛ #94U39b: 3 زەبر پێش کوشتن (پرۆکسی هێواش ≠ مردوو)"""
+    """#91H: مردوو لە باد-سێت و حەوز یەکسان لادەبرێت؛ #94U39b: 3 زەبر (هێواش ≠ مردوو)؛ #94U41: منزلی 5 زەبر + کەلەپوور + چاکی کلی socks"""
     b = px.replace("http://", "")
+    bk = px.split("://", 1)[-1]  # کلیلی strikes (هاوشێوەی سفرکردنەوە لەسەر سەرکەوتن)
+    _pool = PROXY_ST.get("pool") or {}
+    _pe = _pool.get(b) or _pool.get(bk) or _pool.get(px)
+    _was_res = bool((_pe or {}).get("res"))
+    _lim = 5 if _was_res else 3
     _st = PROXY_ST.setdefault("strikes", {})
     if len(_st) > 2000:
         _st.clear()
-    _st[b] = (_st.get(b) or 0) + 1
-    if _st[b] < 3:
+    _st[bk] = (_st.get(bk) or 0) + 1
+    if _st[bk] < _lim:
         return False
     PROXY_ST["bad"].add(b)
-    _st.pop(b, None)
+    _st.pop(bk, None)
     try:
-        PROXY_ST.get("pool", {}).pop(b, None)
+        _pool.pop(b, None)
+        _pool.pop(bk, None)
+        _pool.pop(px, None)
     except Exception:
         pass
+    if _was_res:
+        _dr = PROXY_ST.setdefault("dead_res", set())
+        _dr.add(px)
+        while len(_dr) > 500:
+            _dr.pop()
     return True
+
+
+def _proxy_revive_res():
+    """#94U41: زیندووکردنەوەی منزلییە مردووەکان — IP ی ماڵەوە دەگەڕێتەوە؛ هەر کاتژمێرێک 100"""
+    try:
+        _dr = PROXY_ST.get("dead_res") or set()
+        if not _dr:
+            return
+        _pool = PROXY_ST.setdefault("pool", {})
+        _bad = PROXY_ST["bad"]
+        _cands = [x for x in _dr if x not in _pool and x.split("://", 1)[-1] not in _pool][:100]
+        if not _cands:
+            return
+        res = _proxy_screen(_cands)
+        for lat, px in res:
+            _pool[px] = {"t": time.time(), "lat": round(lat, 2), "res": True}
+            _bad.discard(px)
+            _bad.discard(px.split("://", 1)[-1])
+        for x in _cands:
+            _dr.discard(x)
+        _proxy_pool_save()
+        print(f"[RES-REVIVE] ♻️ {len(_cands)} تاقیکرا → {len(res)} منزلی گەڕانەوە | حەوز: {len(_pool)}", flush=True)
+    except Exception as e:
+        print(f"[RES-REVIVE] هەڵە: {str(e)[:50]}", flush=True)
 
 
 def _proxy_pool_save():
@@ -4556,7 +4605,7 @@ def _proxy_pool_load():
     try:
         d = json.load(open(os.path.join(DATA_DIR, "proxy_pool.json")))
         now = time.time()
-        PROXY_ST["pool"] = {k: v for k, v in (d.get("pool") or {}).items() if now - (v or {}).get("t", 0) < 2700}
+        PROXY_ST["pool"] = {k: v for k, v in (d.get("pool") or {}).items() if now - (v or {}).get("t", 0) < (7200 if (v or {}).get("res") else 2700)}  # #94U41
         for b in (d.get("bad") or [])[:600]:
             PROXY_ST["bad"].add(b)
         print(f"[HARVESTER] حەوزی پاشەکەوتکراو: {len(PROXY_ST['pool'])} زیندوو | {len(PROXY_ST['bad'])} مردوو", flush=True)
@@ -4577,7 +4626,7 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
         PROXY_ST["raw"] = raw
         PROXY_ST["src_t"] = now
         PROXY_ST["cur"] = 0
-        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ٣٠+ سەرچاوە", flush=True)
+        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ٤٠+ سەرچاوە", flush=True)
     if not raw:
         return
     bad, pool = PROXY_ST["bad"], PROXY_ST.setdefault("pool", {})
@@ -4598,11 +4647,11 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
     n_socks = sum(1 for _, px in res if px.startswith("socks"))
     for lat, px in res:
         pool[px] = {"t": now, "lat": round(lat, 2)}
-    # #91R: تاگی منزلی — تا 200 ی تاگی‌نەکراو لە ip-api (hosting=false = منزلی/ISP)
+    # #91R: تاگی منزلی لە ip-api (hosting=false = منزلی/ISP)؛ #94U41: socks ـیش + 100/جار (سنووری batch — 200 یەکجار هەمووی دەفەوتاند)
     try:
-        _untagged = [k for k, v in pool.items() if "res" not in v and not k.startswith("socks")][:200]
+        _untagged = [k for k, v in pool.items() if "res" not in v][:100]
         if _untagged:
-            _ips = [k.split(":")[0] for k in _untagged]
+            _ips = [k.split("://", 1)[-1].split(":")[0] for k in _untagged]
             _rj = requests.post("http://ip-api.com/batch?fields=query,hosting", json=_ips, timeout=(8, 20))
             if _rj.status_code == 200:
                 _n_res = 0
@@ -4613,21 +4662,29 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
                 print(f"[RES-TAG] {_n_res} منزلی لە {len(_untagged)}", flush=True)
     except Exception:
         pass
-    PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - v.get("t", 0) < 2700}
-    if len(PROXY_ST["pool"]) > 200:  # #94U39: 100→200 (بافەری گەورەتر دژە-وشکبوون)
-        # #94U20: پشکی پارێزراو بۆ منزلی — 60 منزلی + خێرا (داتاسەنتەرە خێراکان منزلییەکان ناسڕنەوە)
+    _pruned_res = [k for k, v in pool.items() if (v or {}).get("res") and now - (v or {}).get("t", 0) >= 7200]
+    if _pruned_res:  # #94U41: منزلی بەسەرچوو → کەلەپووری زیندووکردنەوە (نافەوتێت)
+        _dr = PROXY_ST.setdefault("dead_res", set())
+        for _k in _pruned_res:
+            _dr.add(_k)
+        while len(_dr) > 500:
+            _dr.pop()
+    PROXY_ST["pool"] = {k: v for k, v in pool.items() if now - (v or {}).get("t", 0) < (7200 if (v or {}).get("res") else 2700)}  # #94U41: منزلی 2h، ئاسایی 45m
+    if len(PROXY_ST["pool"]) > 300:  # #94U39: 100→200؛ #94U41: →300
+        # #94U20: پشکی پارێزراو بۆ منزلی — 100 منزلی + خێرا (داتاسەنتەرە خێراکان منزلییەکان ناسڕنەوە)
         _items = list(PROXY_ST["pool"].items())
-        _res = sorted([kv for kv in _items if (kv[1] or {}).get("res")], key=lambda kv: kv[1].get("lat", 9))[:60]
+        _res = sorted([kv for kv in _items if (kv[1] or {}).get("res")], key=lambda kv: kv[1].get("lat", 9))[:100]
         _resk = {k for k, _ in _res}
-        _fast = sorted([kv for kv in _items if kv[0] not in _resk], key=lambda kv: kv[1].get("lat", 9))[:200 - len(_res)]
+        _fast = sorted([kv for kv in _items if kv[0] not in _resk], key=lambda kv: kv[1].get("lat", 9))[:300 - len(_res)]
         PROXY_ST["pool"] = dict(_res + _fast)
     _proxy_pool_save()
     print(f"[HARVESTER] شەپۆل: {len(batch)} تاقیکرا → {len(res)} زیندوو (socks: {n_socks}) | حەوز: {len(PROXY_ST['pool'])} خێراترین", flush=True)
 
 
 def _proxy_harvester_daemon():
-    """#91H: بەردەوام — هەر ٤ خولەک شەپۆلێکی 200 کراک → گەورەترین و تازەترین حەوز بەبێ وەستان؛ #94U39: ئەگەر حەوز <15 → تا 3 شەپۆل"""
+    """#91H: بەردەوام — هەر 3 خولەک شەپۆلێکی 200 کراک → گەورەترین و تازەترین حەوز بەبێ وەستان؛ #94U39: ئەگەر حەوز <15 → تا 3 شەپۆل؛ #94U41: revive ی منزلی هەر کاتژمێرێک"""
     time.sleep(45)
+    _last_rev = 0
     while True:
         try:
             _harvest_wave(200)
@@ -4636,9 +4693,12 @@ def _proxy_harvester_daemon():
                 _extra += 1
                 print(f"[HARVESTER] 🆘 حەوز کەمە — شەپۆلی فریاکەوتنی {_extra}", flush=True)
                 _harvest_wave(200)
+            if time.time() - _last_rev > 3600:
+                _last_rev = time.time()
+                _proxy_revive_res()
         except Exception as e:
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
-        time.sleep(240)
+        time.sleep(180)
 
 
 def _proxy_get(n=4):
