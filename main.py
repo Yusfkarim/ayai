@@ -126,6 +126,27 @@ def _replace_dead_worker(kind):
         print(f"[REPLACE] {kind}: {str(e)[:50]}", flush=True)
 
 
+def _sys_keep(msgs, n=19):
+    """#94U25: کورتکردنەوەی مێژوو بەبێ فەوتاندنی system — هەموو system ەکان + دوایین N"""
+    try:
+        msgs = list(msgs or [])
+    except Exception:
+        return []
+    sys_m = [m for m in msgs if isinstance(m, dict) and m.get("role") == "system"]
+    rest = [m for m in msgs if not (isinstance(m, dict) and m.get("role") == "system")]
+    if len(rest) > n:
+        rest = rest[-n:]
+    return sys_m + rest
+
+
+def _sys_txt(msgs, cap=6000):
+    """#94U25: دەقی system ەکان — بۆ باسکەندە single-prompt ەکان (بێ فەوتاندن تا cap)"""
+    try:
+        return " ".join(str(m.get("content") or "") for m in (msgs or []) if isinstance(m, dict) and m.get("role") == "system")[:cap]
+    except Exception:
+        return ""
+
+
 def _sg_reserve(ST, cap, today, lock):
     """#94U23: بودجەی ساینئەپ — پشکنین+تۆمار لەژێر لۆک (ڕەیس-دژە؛ کاپ ڕەق؛ هەوڵی شکستخواردووش بودجە دەخوات)"""
     try:
@@ -808,7 +829,7 @@ def get_pol_servers(timeout=15):
 
 def pol_chat(model, history, timeout=110):
     """پرسیار بۆ pollinations — وەڵامی تەواو دەگەڕێنێتەوە (لەگەڵ دووبارەهەوڵ بۆ 429)"""
-    msgs = history[-20:]
+    msgs = _sys_keep(history, 19)  # #94U25
     last = "وەڵامێک نەگەڕایەوە"
     for attempt in range(3):
         try:
@@ -1309,8 +1330,8 @@ def act_chat(model_id, messages, timeout=110):
             "Referer": "https://www.aichatting.net/free-chatgpt/",
             "Accept": "text/event-stream,application/json",
         }
-        msgs = [{"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
-                for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+        msgs = _sys_keep([{"role": m["role"], "content": [{"type": "text", "text": m["content"]}]}
+                            for m in messages if m.get("role") in ("user", "assistant", "system")], 19)
         payload = {"spaceHandle": True, "roleId": None, "messages": msgs,
                    "conversationId": None, "model": model_id}
         try:
@@ -1386,11 +1407,13 @@ def fla_chat(messages, timeout=110):
                                  history_nonce=sess["history_nonce"], operation="save",
                                  values=json.dumps({**ld["values"], "allChats": json.dumps(chats)}),
                                  revision=str(ld["revision"])), timeout=(15, 30))
-        msgs = [{"role": m["role"], "content": m["content"]}
-                for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+        msgs = _sys_keep([{"role": m["role"], "content": m["content"]}
+                            for m in messages if m.get("role") in ("user", "assistant", "system")], 19)
         sys_txt = ""
-        if msgs and msgs[0]["role"] == "system":
-            sys_txt = msgs.pop(0)["content"]
+        for _i, _m in enumerate(msgs):  # #94U25: system لە هەر شوێنێک بێت بدۆزەرەوە
+            if _m.get("role") == "system" and _m.get("content"):
+                sys_txt = msgs.pop(_i)["content"]
+                break
         r = s.post(FLA_AJAX, files=F(action="my_chatbot", nonce=sess["nonce"],
                                      history_nonce=sess["history_nonce"],
                                      request_id=str(_uuid.uuid4()), chat_id=chat_id,
@@ -1536,8 +1559,8 @@ def z02_chat(messages, model_id="gemini-2.5-flash-lite", timeout=110):
         "Origin": "https://app.zerotwo.ai", "Referer": "https://app.zerotwo.ai/",
         "X-ZeroTwo-Platform": "web", "Content-Type": "application/json",
     }
-    msgs = [{"role": m["role"], "content": m["content"]}
-            for m in messages if m.get("role") in ("user", "assistant", "system")][-20:]
+    msgs = _sys_keep([{"role": m["role"], "content": m["content"]}
+                        for m in messages if m.get("role") in ("user", "assistant", "system")], 19)
     for attempt in (0, 1):
         if attempt == 1:
             try:
@@ -1604,7 +1627,7 @@ def qb_chat(messages, timeout=60):  # #94U19: 110→60
     """چاتی quillbot — مێژووی وەک یەک نامەی یەکگیراو؛ NDJSON: type=content/usage"""
     import uuid as _uuid
     # مێژوو بۆ یەک پرسیار کۆبکەوە (سیستەم لە سەرەتا + دوا نامەی بەکارهێنەر)
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -2103,7 +2126,7 @@ def _duck_attempt(model_id, msgs, timeout):
 
 def duck_chat(model_id, messages, timeout=110):
     """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + ٢ هەوڵ"""
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     rest = [m for m in messages if m.get("role") != "system"][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest[0] = dict(rest[0])
@@ -2147,7 +2170,7 @@ def ak_chat(model_id, messages, timeout=110):
     import time as _t
     if _t.time() < _AK_COOLDOWN["until"]:
         raise EMError("ak: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     rest = [m for m in messages if m.get("role") in ("user", "assistant")][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
         rest = [dict(rest[0])]
@@ -2458,7 +2481,7 @@ def ng_chat(messages, timeout=110):
     import time as _t
     if _t.time() < NG_LIMIT["until"]:
         raise EMError("ng: cooldown")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     user_txt = ""
     for m in reversed(messages):
         if m.get("role") == "user":
@@ -2915,8 +2938,10 @@ def hk_chat(messages, model_id="deepseek/deepseek-v4-flash", timeout=120):
             pq = c
     if not last:
         raise EMError("hk: هیچ پرسیار")
+    _sys = _sys_txt(messages)  # #94U25: system مەفەوتێنە — بیخە سەر پرسیار
+    _q = (f"[Instructions: {_sys}]\n\n{last}" if _sys else last)[-6000:]
     sid = _hk_session()
-    body = {"model": model_id, "question": last[-4000:], "language": "English",
+    body = {"model": model_id, "question": _q, "language": "English",
             "sessionId": sid, "previousQuestion": pq, "previousAnswer": pa,
             "imgUrls": [], "superSmartMode": False}
     try:
@@ -3038,7 +3063,7 @@ def hf_chat(messages, model_id="deepseek-ai/DeepSeek-V4.1-Flash", timeout=110):
     import time as _t
     if _t.time() < HF_LIMIT["until"]:
         raise EMError("hf: credit cooldown")
-    body = {"model": model_id, "messages": messages[-24:], "max_tokens": 1200}
+    body = {"model": model_id, "messages": _sys_keep(messages, 23), "max_tokens": 1200}  # #94U25
     try:
         r = requests.post(HF_BASE + "/chat/completions", json=body,
                           headers=_hf_headers(), timeout=(15, timeout))
@@ -3342,8 +3367,8 @@ def hb_chat(messages, model_id="hotbot-chat", timeout=110):
         raise
     except Exception:
         pass
-    hist = [{"role": m.get("role", "user"), "content": m.get("content") or ""}
-            for m in messages if m.get("content")][-12:]
+    hist = _sys_keep([{"role": m.get("role", "user"), "content": m.get("content") or ""}
+                        for m in messages if m.get("content")], 11)
     try:
         r = requests.post(HB_BASE + "/api/chat",
                           json={"messages": hist, "model": "hotbot-chat", "chatId": cid,
@@ -3411,8 +3436,8 @@ def gk_chat(messages, model_id="glm-4-flash", timeout=150):
     import time as _t
     if _t.time() < GK_LIMIT["until"]:
         raise EMError("gk: cooldown")
-    hist = [{"role": m.get("role", "user"), "content": m.get("content") or ""}
-            for m in messages if m.get("content")][-16:]
+    hist = _sys_keep([{"role": m.get("role", "user"), "content": m.get("content") or ""}
+                        for m in messages if m.get("content")], 15)
     if not hist:
         raise EMError("gk: هیچ نامە")
     try:
@@ -3492,8 +3517,8 @@ def gz_chat(messages, model_id, timeout=110):
     import time as _t
     if _t.time() < _GZ_BADC.get(model_id, 0):
         raise EMError("gz: cooldown")
-    hist = [{"type": (m.get("role") or "user"), "content": m.get("content") or ""}
-            for m in messages if m.get("content")][-12:]
+    hist = _sys_keep([{"type": (m.get("role") or "user"), "content": m.get("content") or ""}
+                        for m in messages if m.get("content")], 11)
     if not hist:
         raise EMError("gz: هیچ نامە")
     try:
@@ -3691,7 +3716,7 @@ def pi_chat(messages, model_id="pi-chat", timeout=50):  # #94U19: 110→50 (stre
     if _t.time() < PI_LIMIT["until"]:
         raise EMError("pi: cooldown")
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -3993,7 +4018,7 @@ def cb_chat(messages, model_id, timeout=110):
     else:
         max_att = min(len(CB_ST.get("accounts") or [1]) + 1, 8)
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -4915,7 +4940,7 @@ def ca_chat(messages, model_id, timeout=110):
         raise EMError("ca: مۆدێڵ نییە")
     mkey, mver = model_id, cat[model_id][0]
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -5297,7 +5322,7 @@ def ac_chat(messages, model_id, timeout=110):
         raise EMError("ac: مۆدێڵ نییە")
     mkey, mver = model_id, cat[model_id][0]
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -5648,7 +5673,7 @@ def nv_chat(messages, model_id, timeout=110):
     tier = meta.get("tier") or "f"
     max_att = 3 if tier == "p" else (1 if tier == "x" else 8)
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -5933,7 +5958,7 @@ def al_chat(messages, model_id, timeout=110):
     """چاتی AllChatBots — کوکی سێشن + /api/chat — 402 → فەیلئۆڤەر"""
     sess = _al_login()
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 11):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -6150,7 +6175,7 @@ def _aiml_ensure_key():
 def aiml_chat(messages, model_id, timeout=110):
     """چاتی AI/ML API — OpenAI-جۆر — 403 (فەندز) → فەیلئۆڤەر"""
     lines = []
-    for m in messages[-12:]:
+    for m in _sys_keep(messages, 19):
         role = m.get("role")
         c = (m.get("content") or "").strip()
         if not c:
@@ -6430,7 +6455,7 @@ class AIFreeChat:
         payload = {
             "model": self.model, "question": question, "tone": "friendly",
             "format": "paragraph", "file": None,
-            "conversationHistory": (history or [])[-20:],
+            "conversationHistory": _sys_keep(history or [], 19),  # #94U25
             "interactionProof": self._proof(),
             "aiRole": "assistant", "aiName": "", "language": "auto",
         }
@@ -6768,14 +6793,16 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 if m.get("role") == "user":
                     q = m.get("content", "")
                     break
-            history = [{"role": m.get("role", "user"), "content": m.get("content", "")}
-                       for m in msgs if m.get("role") in ("user", "assistant", "system")][-20:]
+            history = _sys_keep([{"role": m.get("role", "user"), "content": m.get("content", "")}
+                                   for m in msgs if m.get("role") in ("user", "assistant", "system")], 19)
+            full = history  # #94U25: q هەر لەناو history ـە — دووبارە مەکە
         else:
             ref = body.get("server") or body.get("model") or 1
             raw_q = body.get("message") or body.get("prompt") or ""
             q = _extract_content(raw_q).strip()
             history = body.get("history") or []
-            msgs = history + [{"role": "user", "content": q}]
+            msgs = full
+            full = _sys_keep(msgs, 19)  # #94U25
 
         if not q:
             return self._send(400, {"error": "پرسیار بەتاڵە"})
@@ -6839,69 +6866,69 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             try:
                 kind = cand.get("kind")
                 if kind == "em":
-                    content = em_chat(history, cand["model_id"])
+                    content = em_chat(full, cand["model_id"])
                 elif kind == "aff":
-                    content = AIFreeChat(model=cand["id"], endpoint=cand.get("endpoint")).chat(q, history=history)
+                    content = AIFreeChat(model=cand["id"], endpoint=cand.get("endpoint")).chat(q, history=full)
                 elif kind == "cbc":
-                    content = cbc_chat(history)
+                    content = cbc_chat(full)
                 elif kind == "rwd":
-                    content = rwd_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                    content = rwd_chat(cand["model_id"], full)
                 elif kind == "act":
-                    content = act_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                    content = act_chat(cand["model_id"], full)
                 elif kind == "fla":
-                    content = fla_chat(history + [{"role": "user", "content": q}])
+                    content = fla_chat(full)
                 elif kind == "z02":
-                    content = z02_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = z02_chat(full, cand["model_id"])
                 elif kind == "qb":
-                    content = qb_chat(history + [{"role": "user", "content": q}])
+                    content = qb_chat(full)
                 elif kind == "duck":
-                    content = duck_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                    content = duck_chat(cand["model_id"], full)
                 elif kind == "ak":
-                    content = ak_chat(cand["model_id"], history + [{"role": "user", "content": q}])
+                    content = ak_chat(cand["model_id"], full)
                 elif kind == "ng":
-                    content = ng_chat(history + [{"role": "user", "content": q}])
+                    content = ng_chat(full)
                 elif kind == "l7":
-                    content = l7_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = l7_chat(full, cand["model_id"])
                 elif kind == "g4f":
-                    content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"], timeout=50)  # #94U19
+                    content = g4f_chat(full, cand["model_id"], timeout=50)  # #94U19
                 elif kind == "ct":
-                    content = ct_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = ct_chat(full, cand["model_id"])
                 elif kind == "yl":
-                    content = yl_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = yl_chat(full, cand["model_id"])
                 elif kind == "hk":
-                    content = hk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = hk_chat(full, cand["model_id"])
                 elif kind == "hf":
-                    content = hf_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = hf_chat(full, cand["model_id"])
                 elif kind == "aka":
-                    content = aka_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = aka_chat(full, cand["model_id"])
                 elif kind == "hb":
-                    content = hb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = hb_chat(full, cand["model_id"])
                 elif kind == "gk":
-                    content = gk_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = gk_chat(full, cand["model_id"])
                 elif kind == "gz":
-                    content = gz_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = gz_chat(full, cand["model_id"])
                 elif kind == "pi":
-                    content = pi_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = pi_chat(full, cand["model_id"])
                 elif kind == "cb":
-                    content = cb_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = cb_chat(full, cand["model_id"])
                 elif kind == "ca":
-                    content = ca_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = ca_chat(full, cand["model_id"])
                 elif kind == "ac":
-                    content = ac_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = ac_chat(full, cand["model_id"])
                 elif kind == "nv":
-                    content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = nv_chat(full, cand["model_id"])
                 elif kind == "al":
-                    content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = al_chat(full, cand["model_id"])
                 elif kind == "pia":
-                    content = pia_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = pia_chat(full, cand["model_id"])
                 elif kind == "cbox":
-                    content = cbox_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = cbox_chat(full, cand["model_id"])
                 elif kind == "alle":
-                    content = alle_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = alle_chat(full, cand["model_id"])
                 elif kind == "aiml":
-                    content = aiml_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = aiml_chat(full, cand["model_id"])
                 else:
-                    content = pol_chat(cand["id"], history + [{"role": "user", "content": q}])
+                    content = pol_chat(cand["id"], full)
                 if content:
                     if cand is not srv:
                         print(f"[API] fallback → {kind}", flush=True)
@@ -6923,7 +6950,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     nsrv = next(x for x in API_BRAIN["servers"] if x["id"] == up)
                     print(f"[API] 🔄 دیلی نەوە: {srv['id']} → {up}", flush=True)
                     k = nsrv.get("kind")
-                    nmsgs = history + [{"role": "user", "content": q}]
+                    nmsgs = full
                     if k == "em":
                         content = em_chat(nmsgs, nsrv["model_id"])
                     elif k == "cbc":
@@ -9701,7 +9728,7 @@ def alle_chat(messages, model_id, timeout=110, depth=0):
         acc = _alle_pick(model_id)
     if not acc:
         raise EMError("alle: هیچ ئەکاونتێکی بەردەست نییە (لیمیت؟)")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1200]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     rest = [m for m in messages if m.get("role") != "system"][-9:]
     if rest and rest[-1].get("role") == "user":
         last = rest.pop()
@@ -9831,7 +9858,7 @@ def pia_chat(messages, agent_id, timeout=110, depth=0):
         acc = _pia_pick(agent_id)
     if not acc:
         raise EMError("piax: هیچ ئەکاونتێکی بەردەست نییە")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:
@@ -10106,7 +10133,7 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
     acc = _cbox_pick()
     if not acc:
         raise EMError("cx: ئەکاونت نەدروست بوو")
-    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:6000]
     rest = [m for m in messages if m.get("role") != "system"][-8:]
     q = ""
     for m in rest[:-1]:

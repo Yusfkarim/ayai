@@ -729,3 +729,8 @@
 - **بێ-ئەکاونت**: revive session += cbc (csrf/cookies نوێ)؛ pi/g4f پێشتر؛ duck/gz سیشنێ نوێ لە هەر داوایەک (by design)؛ cbox ئەکاونتی نوێی یەکسەر (by design).
 - **بەگی دۆزراوە**: CB-exhausted نایەکگرتوو بوو (mark float، rotate چاوەڕێی date) → rotate هەرگیز skip نەدەکرد! یەکخران بۆ cooldown-until (وەک NV) لە mark+rotate+reap+daemon+health.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (exhausted/gates/worker-skip) OK.
+
+## #94U25 PROMPT-FOLLOW (2026-09-21) — system prompt هەرگیز نافەوتێت + دووبارەبوونی پرسیار لابرا
+- **کێشەکان**: (1) دووبارەکردنی دوایین پرسیاری بەکارهێنەر لە dispatch (31 شوێن!)؛ (2) `[-12:]/[-20:]/[-24:]` ـەکان system ـیان دەفەوتاند کاتێک مێژوو درێژ بوو (13 شوێن)؛ (3) merge ـەکان system ـیان تەنها تا 1000/1200 پیت دەهێشت (7 شوێن)؛ (4) hk system ـی تەواو پشتگوێ دەخست؛ (5) fla تەنها ئەگەر system یەکەم بوایە دەیدۆزییەوە.
+- **پاچ**: `_sys_keep` (system ـەکان + دوایین N) لە do_POST + هەموو باسکەندەکان؛ `full` بەبێ دووبارە؛ cap ـەکان 6000؛ hk prepend؛ fla گەڕانی system لە هەر شوێنێک.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (_sys_keep ×4) OK.
