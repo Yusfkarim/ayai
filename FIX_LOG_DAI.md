@@ -713,3 +713,8 @@
   3. limit-mark لەسەر لیسی تڕێدەکە (نەک idx ی گشتی)؛ `_tok_drop` لە شوێنی tok=None ـەکان.
   4. تێلەگرام: سەقفی 50 هەندڵی هاوکات + وەڵامی «مشغول» (بێ خاڵبەندی).
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (20 تڕێد → 20 lease/tۆکنی جیاواز) OK.
+
+## #94U22 LOAD (2026-09-21) — کردنەوەی ڕێڕەوی هاوکات بۆ 20 کەس
+- **کێشە**: تاقی 20-هاوکات: تەنها 4 چوونە ژوورەوە، 16 × 429 (`server busy`) — `_API_CHAT_SEM(4)` + 429ی یەکسەر؛ تێلەگرام `_MSG_SEM(6)` (مردوو — نەدەهاتە بانگکردن!).
+- **پاچ**: API sem 4→24 + acquire لەناو تڕێد بە timeout ـی 25s (ڕیزبەندی لەبری 429ی یەکسەر — accept-loop ناوەستێت)؛ TG: `_throttled_handle` زیندووکرایەوە (guarded→throttled→safe) + sem 6→24.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK.

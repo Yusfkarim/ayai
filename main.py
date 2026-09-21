@@ -6953,7 +6953,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, {"answer": content, "server": srv["id"]})
 
 
-_API_CHAT_SEM = threading.Semaphore(4)  # #94U15 ANTI-CRASH: زۆرترین ٤ چاتی API لە هەمان کات — زیادە 429
+_API_CHAT_SEM = threading.Semaphore(24)  # #94U22 LOAD: زۆرترین 24 چاتی API لە هەمان کات + ڕیزبەندی 25s — بەرگەی 20 کەسی هاوکات
 
 
 def start_api():
@@ -6971,7 +6971,13 @@ def start_api():
                 _is_chat = _line.startswith("POST") and ("/chat" in _line)
             except Exception:
                 _is_chat = True
-            if _is_chat and not _API_CHAT_SEM.acquire(blocking=False):
+            if not _is_chat:
+                return super().process_request(request, client_address)
+            _t = threading.Thread(target=self._chat_thread, args=(request, client_address), daemon=True)
+            _t.start()
+
+        def _chat_thread(self, request, client_address):
+            if not _API_CHAT_SEM.acquire(timeout=25):  # #94U22: ڕیز دەبن 25s — تەنها لەباردنی ڕاستەقینە 429
                 try:
                     _b = b'{"error":"server busy - try again"}'
                     request.sendall(b"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: "
@@ -6983,12 +6989,6 @@ def start_api():
                 except Exception:
                     pass
                 return
-            if not _is_chat:
-                return super().process_request(request, client_address)
-            _t = threading.Thread(target=self._chat_thread, args=(request, client_address), daemon=True)
-            _t.start()
-
-        def _chat_thread(self, request, client_address):
             try:
                 self.finish_request(request, client_address)
             except Exception:
@@ -7056,7 +7056,7 @@ LEAK_RE = re.compile(r"\b(glm|gpt|claude|gemini|deepseek|qwen|llama|grok|kimi|mi
 def leaks(s):
     return bool(LEAK_RE.search(str(s).translate(_LEAK_NORM)))
 _lock = threading.Lock()
-_MSG_SEM = threading.Semaphore(6)  # #94U13 NEVER-STOP: زۆرترین ٦ هاندڵەری نامەی هاوکات — پاراستن لە لافاوی بەکارهێنەر
+_MSG_SEM = threading.Semaphore(24)  # #94U22 LOAD: زۆرترین 24 هاندڵەری نامەی هاوکات — بەرگەی 20 کەسی هاوکات لە تێلەگرام
 _POLL_FAILS = [0]  # #94U13 NEVER-STOP: ژمارەی شکستی لەسەریەکی getUpdates
 
 
@@ -10322,7 +10322,7 @@ def main():
 
     def _safe_handle_guarded(m):
         try:
-            _safe_handle(m)
+            _throttled_handle(m)
         finally:
             try:
                 _TG_SEM.release()
@@ -10341,7 +10341,7 @@ def main():
                 pass
 
     def _throttled_handle(m):
-        # #94U13 NEVER-STOP: لافاو-پارێز — ئەگەر ٦ هاندڵەر سەرقاڵ بن، ئەوانی تر ڕیز دەبن (نەک crash)
+        # #94U22 LOAD: ئەگەر 24 هاندڵەر سەرقاڵ بن، ئەوانی تر ڕیز دەبن (نەک crash)
         _MSG_SEM.acquire()
         try:
             _safe_handle(m)
