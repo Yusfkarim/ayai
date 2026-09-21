@@ -4968,57 +4968,100 @@ def _pool_reap():
         print(f"[POOL-NV] پاککردنەوە: {len(accs)} → {len(keep)}", flush=True)
 
 
+def _pool_fill_one(name, st, fn, tgt, alive_tgt, batch, jlo, jhi):
+    """#94U40: پڕکردنەوەی یەک حەوز — سەلامەت بۆ تڕێدی جیا (هەر حەوز ST/کلیلی خۆی هەیە)"""
+    import random as _r
+    import time as _t
+    try:
+        accs = st.get("accounts") or []
+        # #94U2: ژمارەی زیندوو — ئەگەر هەموو ئەکاونتەکان لیمیتن → زیاد بکە با بەردەوام بێت
+        today = _lim_today()
+        now = _t.time()
+        lim = st.get("limits") or {}
+        exh = st.get("exhausted") or {}
+        alive = [a for a in accs if _pool_acc_alive(a, lim, exh, today, now)]
+        if len(accs) >= tgt and len(alive) >= alive_tgt:
+            return 0
+        made = 0
+        miss = 0
+        for _ in range(batch):
+            accs_now = st.get("accounts") or []
+            lim_now = st.get("limits") or {}
+            exh_now = st.get("exhausted") or {}
+            alive_now = sum(1 for a in accs_now if _pool_acc_alive(a, lim_now, exh_now, today, now))
+            if len(accs_now) >= tgt or alive_now >= alive_tgt:
+                break
+            before = len(accs_now)
+            try:
+                fn()
+            except Exception:
+                pass
+            if len(st.get("accounts") or []) > before:
+                made += 1
+                miss = 0
+            else:
+                miss += 1
+                if miss >= 3:  # بودجە/ساینئەپ گیراوە — ئەم خولە بوەستە
+                    break
+            _t.sleep(_r.uniform(jlo, jhi))  # jitter دژە-بلۆک
+        if made:
+            print(f"[POOL-{name}] +{made} → {len(st.get('accounts') or [])}/{tgt} (ئامانجی زیندوو {alive_tgt})", flush=True)
+        return made
+    except Exception as e:
+        print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
+        return 0
+
+
 def _pool_daemon():
-    """#94U35: CA/CB/NV → 1000 زیندوو/بەچ 20 + AC 30/2 + پاککردنەوە"""
+    """#94U35: CA/CB/NV → 1000 زیندوو + AC 30؛ #94U40: catch-up — ئەگەر <ئامانج: 3 حەوز پێکەوە (threads) بەچ 40؛ ئەگەر گەیشت: مەینتەینەنس (1-بۆ-1)"""
     time.sleep(60)
     # لازەی — دوای load ی هەموو ST ەکان (CB/NV دوای ئەم بلۆکە پێناسە دەکرێن لە فایلدا)
     import sys as _s
     _m = _s.modules[__name__]
-    pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000, 20),
-             ("CB", _m.CB_ST, _m._cb_signup_new, 10000, 1000, 20),
-             ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000, 20),
-             ("AC", _m.AC_ST, _m._ac_signup_new, 300, 30, 2))
+    pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000),
+             ("CB", _m.CB_ST, _m._cb_signup_new, 10000, 1000),
+             ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000),
+             ("AC", _m.AC_ST, _m._ac_signup_new, 300, 30))
+    import concurrent.futures as _cf
+    _was_catch = None
     while True:
         try:
             _pool_reap()
         except Exception as e:
             print(f"[POOL] reap: {str(e)[:60]}", flush=True)
-        for name, st, fn, tgt, alive_tgt, batch in pools:
+        # دۆخی گەیشتن: ئایا هەر حەوزێکی گەورە لە ژێر ئامانجدایە؟
+        _catch = False
+        _today = _lim_today()
+        _now = time.time()
+        for _nm, _st, _fn, _tgt, _at in pools[:3]:
             try:
-                accs = st.get("accounts") or []
-                # #94U2: ژمارەی زیندوو — ئەگەر هەموو ئەکاونتەکان لیمیتن → زیاد بکە با بەردەوام بێت
-                today = _lim_today()
-                now = time.time()
-                lim = st.get("limits") or {}
-                exh = st.get("exhausted") or {}
-                alive = [a for a in accs if _pool_acc_alive(a, lim, exh, today, now)]
-                if len(accs) >= tgt and len(alive) >= alive_tgt:
-                    continue
-                made = 0
-                miss = 0
-                for _ in range(batch):  # #94U31: پڕکردنەوەی بەچ — CA تا 20/خول
-                    accs_now = st.get("accounts") or []
-                    lim_now = st.get("limits") or {}
-                    exh_now = st.get("exhausted") or {}
-                    alive_now = sum(1 for a in accs_now if _pool_acc_alive(a, lim_now, exh_now, today, now))
-                    if len(accs_now) >= tgt or alive_now >= alive_tgt:
-                        break
-                    before = len(accs_now)
-                    fn()
-                    if len(st.get("accounts") or []) > before:
-                        made += 1
-                        miss = 0
-                    else:
-                        miss += 1
-                        if miss >= 3:  # بودجە/ساینئەپ گیراوە — ئەم خولە بوەستە
-                            break
-                    time.sleep(random.uniform(3, 6))  # jitter دژە-بلۆک
-                if made:
-                    print(f"[POOL-{name}] +{made} → {len(st.get('accounts') or [])}/{tgt} (ئامانجی زیندوو {alive_tgt})", flush=True)
-                    time.sleep(45)  # #94U18: خێراتر (45s) — سنوورە ڕۆژانەکان هەر سنووردارن
-            except Exception as e:
-                print(f"[POOL-{name}] {str(e)[:50]}", flush=True)
-        time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
+                _accs = _st.get("accounts") or []
+                _lim = _st.get("limits") or {}
+                _exh = _st.get("exhausted") or {}
+                _al = sum(1 for _a in _accs if _pool_acc_alive(_a, _lim, _exh, _today, _now))
+                if _al < _at and len(_accs) < _tgt:
+                    _catch = True
+                    break
+            except Exception:
+                pass
+        if _catch != _was_catch:
+            print(f"[POOL] {'🚀 catch-up: CA+CB+NV پێکەوە بەچ 40' if _catch else '🛡 maintenance: 1-بۆ-1 پاراستنی 1000'}", flush=True)
+            _was_catch = _catch
+        try:
+            if _catch:
+                with _cf.ThreadPoolExecutor(max_workers=3) as _ex:
+                    _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, 40, 2, 4)
+                             for _nm, _st, _fn, _tgt, _at in pools[:3]]
+                    _cf.wait(_futs)
+                _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 300, 30, 2, 3, 6)
+                time.sleep(30)
+            else:
+                for _nm, _st, _fn, _tgt, _at in pools:
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, 20 if _nm != "AC" else 2, 3, 6)
+                time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
+        except Exception as e:
+            print(f"[POOL] daemon: {str(e)[:60]}", flush=True)
+            time.sleep(60)
 
 
 def _ca_token():
