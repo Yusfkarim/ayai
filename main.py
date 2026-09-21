@@ -8697,12 +8697,16 @@ _PIA_SEED = [{"email": "vemim87080@dreameg.com",
 
 
 def _pia_seed():
-    have = {a.get("email") for a in (PIA_ST.get("accounts") or [])}
+    accs = PIA_ST.get("accounts") or []
+    have = {a.get("email") for a in accs}
+    changed = False
     for a in _PIA_SEED:
         if a["email"] not in have:
             PIA_ST.setdefault("accounts", []).append(dict(a))
-    if len(PIA_ST.get("accounts") or []) != len(_json_load_safe(PIA_ACC_FILE) or {}).get("accounts", []):
+            changed = True
+    if changed:
         _pia_save_acc()
+        print(f"[PIA] ئەکاونتی سەرەتایی ✅", flush=True)
 
 
 _pia_load_acc()
