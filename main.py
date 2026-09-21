@@ -50,7 +50,7 @@ def _is_pool_file(path):
     fn = os.path.basename(path)
     return fn in ("ca_accounts.json", "cb_accounts.json", "nv_accounts.json",
                   "cbox_accounts.json", "pia_accounts.json", "aiml_key.json",
-                  "ac_accounts.json", "al_accounts.json") or fn.endswith("_accounts.json") or fn.endswith("_key.json")
+                  "ac_accounts.json", "al_accounts.json", "proxy_pool.json") or fn.endswith("_accounts.json") or fn.endswith("_key.json")
 
 def _json_save(path, obj):
     """#91A1 + #94U3: نووسینی ATOMIC + شێفرەکردنی خۆکار بۆ حەوزەکان"""
@@ -206,16 +206,24 @@ def _create_pool_backup_bundle():
             if fname.endswith(".json") and ("account" in fname or "key" in fname or "sync" in fname or "prox" in fname):
                 fpath = os.path.join(DATA_DIR, fname)
                 try:
-                    obj = _json_load_safe(fpath)
-                    if obj is not None:
-                        clean_data = json.dumps(obj, indent=2, ensure_ascii=False)
-                        z.writestr(fname, clean_data)
+                    # #94U12: RAW — فایلە شێفرەکراوەکان وەک خۆیان دەچنە ناو ZIP ەوە
+                    # (ئەگەر بۆت بخوێنێتەوە خۆکاری شی دەکاتەوە — بەبێ کلید هیچ ناخوێنرێتەوە)
+                    raw = open(fpath, "rb").read()
+                    if not raw:
+                        continue
+                    is_enc = raw.startswith(_ENC_MAGIC)
+                    z.writestr(fname, raw)
+                    try:
+                        obj = _json_load_safe(fpath)
                         count = len(obj.get("accounts", [])) if isinstance(obj, dict) and "accounts" in obj else (len(obj) if isinstance(obj, list) else 1)
-                        pool_stats[fname] = count
+                    except Exception:
+                        count = "?"
+                    pool_stats[fname] = f"{count}{' 🔒' if is_enc else ''}"
                 except Exception:
                     pass
-        manifest = {"created_at": today_str, "version": "#94U3", "stats": pool_stats}
-        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+        manifest = {"created_at": today_str, "version": "#94U12", "stats": pool_stats,
+                    "note": "هەموو فایلەکان بە ENC26+Fernet شێفرەکراون — تەنها بۆت خۆی شی دەکاتەوە"}
+        z.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
     buf.seek(0)
     return buf.getvalue(), today_str, pool_stats
 
@@ -240,6 +248,28 @@ def _perform_backup(chat_id=ADMIN_TG, manual=False):
         return False
 
 
+def _enc_migrate_all():
+    """#94U12: هەموو فایلەکانی /data ی پارێزراو — ئەگەر هێشتا پلەینن → شێفرەیان بکە"""
+    try:
+        for fn in os.listdir(DATA_DIR):
+            if not fn.endswith(".json"):
+                continue
+            p = os.path.join(DATA_DIR, fn)
+            try:
+                with open(p, "rb") as f:
+                    head = f.read(8)
+                if head.startswith(_ENC_MAGIC) or not _is_pool_file(p):
+                    continue
+                obj = _json_load_safe(p)
+                if obj is not None:
+                    _json_save(p, obj)
+                    print(f"[ENC26] 🔄 میگرەیشن: {fn} → شێفرەکرا", flush=True)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[ENC26] migrate: {str(e)[:60]}", flush=True)
+
+
 def _pool_backup_daemon():
     """دیمۆنی باکئەپی ٢٤ کاتژمێری بۆ چاتەکانی دیاریکراو"""
     time.sleep(300)
@@ -247,7 +277,9 @@ def _pool_backup_daemon():
         try:
             for cid in REPORT_CHAT_IDS:
                 try:
-                    _perform_backup(cid, manual=False)
+                    okb = _perform_backup(cid, manual=False)
+                    if okb:
+                        print(f"[BACKUP-DAEMON] ✅ ZIP → {cid}", flush=True)
                 except Exception as be:
                     print(f"[BACKUP-DAEMON] {cid}: {be}", flush=True)
         except Exception as e:
@@ -9751,6 +9783,7 @@ def _cbox_daemon():
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     _check_code_integrity(is_boot=True)
+    _enc_migrate_all()  # #94U12: شێفرەکردنی هەموو فایلە کۆنەکان
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_memwatch_daemon, daemon=True).start()
