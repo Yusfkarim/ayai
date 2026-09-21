@@ -5759,16 +5759,22 @@ def _nv_rotate():
     if not accs:
         return bool(_nv_signup_new())
     ex = NV_ST.get("exhausted") or {}
+    xc = NV_ST.get("exc") or {}
     now = _ts.time()
     chosen = None
     with _NV_LK:
-        for _ in range(len(accs)):
-            NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
-            acc = accs[NV_ST["idx"]]
-            if float(ex.get(acc["email"], 0)) > now:
-                continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
-            chosen = acc
-            break
+        for _pass in (0, 1):  # #94U36: یەکەم exc<3 (مردوو مەدەرەوە)؛ دووەم هەر ئازادێک
+            for _ in range(len(accs)):
+                NV_ST["idx"] = (NV_ST["idx"] + 1) % len(accs)
+                acc = accs[NV_ST["idx"]]
+                if float(ex.get(acc["email"], 0)) > now:
+                    continue  # هێشتا سارد نەبووەتەوە (کۆڵ ٦٠٠ چرکە)
+                if _pass == 0 and (xc.get(acc["email"], 0) or 0) >= 3:
+                    continue  # #94U36: ٣+ insufficient ئەمڕۆ — مەیدەرەوە ئەگەر ئاڵتەرناتیڤ هەیە
+                chosen = acc
+                break
+            if chosen is not None:
+                break
     if chosen is not None:
         _TLS.nv_acc = chosen
         NV_ST["tok"] = None
@@ -5828,7 +5834,7 @@ def nv_chat(messages, model_id, timeout=110):
         H = {"User-Agent": NV_UA, "Content-Type": "application/json", "accept": "text/event-stream",
              "X_Token": tok, "X_User_Id": uid, "X_Platform": "web", "X_Model": str(bot_id),
              "Origin": "https://chat.novaapp.ai", "Referer": "https://chat.novaapp.ai/"}
-        if tier in ("p", "x"):
+        if True:  # #94U36: ensure-credits بۆ هەموو tier (پێشتر تەنها p/x) — grant ئەگەر مابێت
             accs0 = NV_ST.get("accounts") or []
             em0 = accs0[NV_ST["idx"] % len(accs0)]["email"] if accs0 else ""
             en = NV_ST.setdefault("ensured", {})

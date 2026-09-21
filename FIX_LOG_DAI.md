@@ -817,3 +817,9 @@
 - **NV**: بودجە 1000→10000، حەوز 1000→10000، floor 100→1000.
 - daemon: CB/NV بەچ 20/خول؛ /health caps نوێکران.
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (10k gates) ✅.
+
+## #94U36 NV-ROTATE (2026-09-21) — کۆتایی بە ❌ی "Insufficient chat credit"
+- **هۆکار**: ئەکاونتی مردووی NV (کرێدیتی تەواو) هەر 10 خولەک جارێک دەدرایەوە چونکە `_nv_rotate` ژمارەی `exc` پشتگوێ دەخست → پشکنین 8 مردووی لەسەریەک گرت → ❌ (کاتێکی).
+- **پاچ**: rotate بوو بە 2-pass (یەکەم: تەنها exc<3؛ دووەم: هەر ئازادێک) + `ensure-credits` بۆ هەموو tier (پێشتر تەنها p/x).
+- لەژێر هەر دوو ئەگەر (quota ڕۆژانە یان lifetime) ڕاستە: ڕۆژانە→dawn ڕیسیت؛ lifetime→skip+drop.
+- **پشکنین**: ast OK، pyflakes 0ی نوێ، exec (skip-dead/last-resort/cooldown) ✅ + nv-auto زیندوو ✅.
