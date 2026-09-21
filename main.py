@@ -123,39 +123,49 @@ def _calc_code_hashes():
         sections["pool_daemon"] = hashlib.sha256(m_pool.group(0)).hexdigest()
     return sections
 
-def _check_code_integrity(notify=True):
-    """خۆ-پشکنینی هەیکەلی کۆد لە دەستپێک — دەستنیشانکردنی دەستکاری و دریفتی نەناسراو"""
+_BOOT_HASH = {}
+
+def _check_code_integrity(is_boot=True):
+    """#94U5: پشکنینی هەیکەلی کۆد —
+       لە دەستپێکدا تەنها لە لۆگ تۆمار دەکرێت بێ ناردنی نامەی TG.
+       تەنها ئەگەر لە کاتی کارکردنی پڕۆسەکەدا کۆدە لۆکاڵەکە دەستکاری کرابێت (Runtime Tampering)،
+       نامەی ئاگاداری ئەمنی خەتەرناک بۆ تێلەگرام دەنێردرێت."""
+    global _BOOT_HASH
     current_hashes = _calc_code_hashes()
     if not current_hashes:
         return True
-    stored = _json_load_safe(_INTEGRITY_FILE, {}) or {}
-    if not stored:
+        
+    if is_boot or not _BOOT_HASH:
+        _BOOT_HASH = current_hashes
+        stored = _json_load_safe(_INTEGRITY_FILE, {}) or {}
+        prev_hash = (stored.get("hashes") or {}).get("full", "")
+        curr_hash = current_hashes.get("full", "")
+        if prev_hash and prev_hash != curr_hash:
+            print(f"[INTEGRITY] ℹ️ نوێکردنەوەی کۆد / دیپلۆ — هاشی پێشوو: {prev_hash[:12]} → نوێ: {curr_hash[:12]}", flush=True)
+        else:
+            print(f"[INTEGRITY] ✅ بنکەی سەرەتایی تۆمارکرا: SHA={curr_hash[:12]}", flush=True)
         _json_save(_INTEGRITY_FILE, {"hashes": current_hashes, "t": time.time(), "drift": False})
-        print(f"[INTEGRITY] ✅ بنکەی سەرەتایی تۆمارکرا: SHA={current_hashes.get('full', '')[:12]}", flush=True)
         return True
-    stored_hashes = stored.get("hashes") or {}
-    drifts = [k for k, h in current_hashes.items() if k in stored_hashes and stored_hashes[k] != h]
+
+    # پشکنینی کاتی کارکردن (Runtime Integrity Check)
+    drifts = [k for k, h in current_hashes.items() if k in _BOOT_HASH and _BOOT_HASH[k] != h]
     if drifts:
-        msg = (f"🚨 <b>ئاگاداری ئەمنی — دریفتی کۆد (Code Drift) دۆزرایەوە!</b>\n\n"
+        # دەستکاری لە ناوەوەی پڕۆسەکەدا لە کاتی کارکردن ڕوویداوە — ئەمە حاڵەتە خەتەرناکەکەیە!
+        msg = (f"🚨 <b>ئاگاداری ئەمنی خەتەرناک — دەستکاری کۆد لە کاتی کارکردندا!</b>\n\n"
+               f"فایلی <code>main.py</code> بەبێ دیپلۆ یان ڕیستارت لە کاتی کاردا دەستکاری کراوە!\n"
                f"بەشە گۆڕاوەکان: <code>{', '.join(drifts)}</code>\n"
                f"کاتی دۆزینەوە: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}\n"
-               f"هاشی ئێستا: <code>{current_hashes.get('full', '')[:16]}…</code>\n"
-               f"هاشی پێشوو: <code>{stored_hashes.get('full', '')[:16]}…</code>\n\n"
-               f"<i>تێبینی: ئەگەر دیپلۆی نوێیە، بنکەکە خۆکار نوێ دەبێتەوە.</i>")
-        print(f"[INTEGRITY] ⚠️ دریفتی کۆد: {drifts}", flush=True)
-        stored["drift"] = True
-        stored["last_drift"] = {"sections": drifts, "t": time.time()}
-        stored["hashes"] = current_hashes
-        _json_save(_INTEGRITY_FILE, stored)
-        if notify:
-            try:
-                tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
-            except Exception as e:
-                print(f"[INTEGRITY] TG alert fail: {e}", flush=True)
+               f"هاشی بنەڕەتی بووت: <code>{_BOOT_HASH.get('full', '')[:16]}…</code>\n"
+               f"هاشی ئێستای دەستکاریکراو: <code>{current_hashes.get('full', '')[:16]}…</code>\n\n"
+               f"<i>تێبینی: ئەگەر هاک یان دەستکارییەکی نەناسراوە، تکایە ڕاستەوخۆ سێرڤەر بپشکنە.</i>")
+        print(f"[INTEGRITY] 🚨 دەستکاری خەتەرناک لە کاتی کارکردن: {drifts}", flush=True)
+        try:
+            tg("sendMessage", chat_id=ADMIN_TG, text=msg, parse_mode="HTML")
+        except Exception as e:
+            print(f"[INTEGRITY] TG alert fail: {e}", flush=True)
         return False
-    else:
-        print("[INTEGRITY] ✅ پشکنینی هاش تەواوە — هیچ درێفتێک نییە", flush=True)
-        return True
+        
+    return True
 
 
 # ═══ #94U3: چینی سێیەمی پاراستن — باکئەپی ٢٤-کاتژمێری بۆ ئەدمین ═══
@@ -8236,6 +8246,10 @@ def _api_rate_ok(key):
 def _self_check():
     """#91U: خۆپشکنین — نەک تەنها لۆگ — ڕاستەوخۆ تاقیکردنەوەی ناوەکی"""
     try:
+        try:
+            _check_code_integrity(is_boot=False)
+        except Exception:
+            pass
         br = len(BRAIN["servers"] or [])
         try:
             ap = len(API_BRAIN["servers"] or [])
@@ -9480,7 +9494,7 @@ def _cbox_daemon():
 
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
-    _check_code_integrity(notify=True)
+    _check_code_integrity(is_boot=True)
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_self_update_daemon, daemon=True).start()
     start_api()          # 🔌 API — بۆ بەکارهێنان وەک API
