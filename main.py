@@ -4184,7 +4184,7 @@ def _proxy_fetch_all():
 
 
 def _proxy_screen(batch, tmo=8):
-    """#91H: شەپۆلێک تاقیکردنەوەی خێرا — ئەوانەی 204 یان دەگەن + پێوانەی خێرایی"""
+    """#91H: شەپۆلێک تاقیکردنەوەی خێرا — سنوردارکردنی تڕێدەکان بە ThreadPoolExecutor بۆ پاراستنی یادگە لە OOM"""
     res = []
     _lk = threading.Lock()
 
@@ -4202,11 +4202,10 @@ def _proxy_screen(batch, tmo=8):
         except Exception:
             pass
 
-    ths = [threading.Thread(target=lambda p=px: _one(p), daemon=True) for px in batch]
-    for t in ths:
-        t.start()
-    for t in ths:
-        t.join(tmo + 3)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+        futs = [executor.submit(_one, px) for px in batch]
+        concurrent.futures.wait(futs, timeout=tmo + 4)
     return res
 
 
@@ -6153,42 +6152,96 @@ def _resolve_server(ref):
 
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
+    def _clean_path(self):
+        p = self.path.split("?")[0].rstrip("/")
+        return p if p else "/"
+
     def _send(self, code, obj):
         b = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Access-Control-Expose-Headers", "*")
         self.end_headers()
         self.wfile.write(b)
 
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, X-API-Key, Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Access-Control-Expose-Headers", "*")
+        self.send_header("Access-Control-Max-Age", "86400")
         self.end_headers()
 
     def log_message(self, *a):
         pass
 
+    def _extract_key(self):
+        h = self.headers.get("Authorization", "").strip()
+        if h:
+            parts = h.split(None, 1)
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                return parts[1].strip()
+            return h
+        for hk in ("X-API-Key", "api-key", "x-api-key"):
+            val = self.headers.get(hk, "").strip()
+            if val:
+                return val
+        if "?" in self.path:
+            try:
+                import urllib.parse as _up
+                qs = _up.parse_qs(self.path.split("?", 1)[1])
+                for qk in ("key", "api_key", "token"):
+                    if qk in qs and qs[qk]:
+                        return qs[qk][0].strip()
+            except Exception:
+                pass
+        return ""
+
     def _authed(self):
         if not API_KEY:
             return True
-        # #91A4: compare_digest — بەرگری دژی timing-attack (هاکەر ناتوانێت key بدۆزێتەوە بە کاتی وەڵام)
-        h = self.headers.get("Authorization", "")
-        k = self.headers.get("X-API-Key", "")
+        k = self._extract_key()
+        if not k:
+            return False
         import hmac as _hmac
-        return _hmac.compare_digest(h.encode(), f"Bearer {API_KEY}".encode()) or \
-            _hmac.compare_digest(k.encode(), API_KEY.encode())
+        return _hmac.compare_digest(k.encode(), API_KEY.encode()) or k in _API_KEYS
 
     def _body(self):
-        n = int(self.headers.get("Content-Length", 0))
-        return json.loads(self.rfile.read(n) or b"{}")
+        cl = self.headers.get("Content-Length")
+        if cl:
+            try:
+                n = int(cl)
+                return json.loads(self.rfile.read(n).decode("utf-8", errors="replace") or "{}")
+            except Exception:
+                return {}
+        te = self.headers.get("Transfer-Encoding", "").lower()
+        if "chunked" in te:
+            chunks = []
+            try:
+                while True:
+                    line = self.rfile.readline().strip()
+                    if not line:
+                        break
+                    chunk_len = int(line, 16)
+                    if chunk_len == 0:
+                        self.rfile.readline()
+                        break
+                    chunks.append(self.rfile.read(chunk_len))
+                    self.rfile.readline()
+                return json.loads(b"".join(chunks).decode("utf-8", errors="replace") or "{}")
+            except Exception:
+                return {}
+        return {}
 
     def do_GET(self):
         # #91: health endpoint — چاودێری خێرا
-        if self.path.split("?")[0] == "/health":
+        cp = self._clean_path()
+        if cp == "/health":
             st = _HEAL_STATE.get("status", {})
             def _n2(f):
                 try:
@@ -6214,44 +6267,63 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
             }
             return self._send(200, body)
-        if self.path in ("/", "/health"):
+        if cp in ("/", "/health"):
             api_brain_ensure()
             self._send(200, {"ok": True, "service": "smart-chatbot-api",
                              "mode": API_BRAIN["mode"], "servers": len(API_BRAIN["servers"])})
-        elif self.path in ("/models", "/v1/models"):
-            if not self._authed():
-                return self._send(401, {"error": "API_KEY هەڵەیە — Authorization: Bearer <key>"})
+        elif cp in ("/models", "/v1/models"):
             api_brain_ensure()
             data = [{"id": s["alias"], "object": "model", "owned_by": "smart-chatbot"}
                     for s in _api_servers()]
             self._send(200, {"object": "list", "data": data})
         else:
-            self._send(404, {"error": "not found — /v1/chat/completions و /v1/models"})
+            self._send(404, {"error": f"not found: {self.path} — /v1/chat/completions و /v1/models"})
 
     def do_POST(self):
-        if self.path not in ("/chat", "/v1/chat/completions"):
-            return self._send(404, {"error": "not found"})
-        if not self._authed():
-            return self._send(401, {"error": "API_KEY هەڵەیە — Authorization: Bearer <key>"})
+        cp = self._clean_path()
+        valid_paths = ("/chat", "/v1/chat/completions", "/chat/completions", "/v1/chat", "/api/chat")
+        if cp not in valid_paths:
+            return self._send(404, {"error": f"not found: {self.path} — بەردەستەکان: /v1/chat/completions, /chat"})
+
         _PERF["req"] += 1  # #91R2: داواکاری API ۀم بژمێرە
         t_api0 = time.time()
-        # #91U: rate limit per key — 60/خولەک
-        _k = (self.headers.get("Authorization") or "").replace("Bearer ", "").strip()
-        ok_rate, rate_err = _api_rate_ok(_k)
-        if not ok_rate:
-            return self._send(429, {"error": rate_err})
 
         try:
             body = self._body()
         except Exception:
             return self._send(400, {"error": "bad json"})
 
-        openai_style = self.path == "/v1/chat/completions"
+        # دۆزینەوەی کلیل لە هیدەر، کوێری یان بۆدی
+        key = self._extract_key() or (body.get("api_key") if isinstance(body, dict) else "") or (body.get("apiKey") if isinstance(body, dict) else "") or ""
+        client_ip = self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For") or (self.client_address[0] if self.client_address else "")
+        ok_rate, rate_err = _api_rate_ok(key, client_ip=client_ip)
+        if not ok_rate:
+            return self._send(429, {"error": rate_err})
+
+        openai_style = cp != "/chat"
         want_stream = bool(body.get("stream")) and openai_style
+
+        def _extract_content(c):
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                parts = []
+                for p in c:
+                    if isinstance(p, dict) and "text" in p:
+                        parts.append(str(p["text"]))
+                    elif isinstance(p, str):
+                        parts.append(p)
+                return " ".join(parts)
+            return str(c or "")
 
         if openai_style:
             ref = body.get("model") or "1"
-            msgs = body.get("messages") or []
+            raw_msgs = body.get("messages") or []
+            msgs = []
+            for m in raw_msgs:
+                role = m.get("role", "user")
+                c_text = _extract_content(m.get("content", ""))
+                msgs.append({"role": role, "content": c_text})
             q = ""
             for m in reversed(msgs):
                 if m.get("role") == "user":
@@ -6261,7 +6333,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                        for m in msgs if m.get("role") in ("user", "assistant", "system")][-20:]
         else:
             ref = body.get("server") or body.get("model") or 1
-            q = (body.get("message") or "").strip()
+            raw_q = body.get("message") or body.get("prompt") or ""
+            q = _extract_content(raw_q).strip()
             history = body.get("history") or []
             msgs = history + [{"role": "user", "content": q}]
 
@@ -6485,7 +6558,11 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Access-Control-Expose-Headers", "*")
             self.end_headers()
 
             def sse(obj):
@@ -8211,16 +8288,14 @@ _API_KEYS = {"sk-yf-31c00f02aa9221b336d7b4a274bb375c": {"name": "primary", "rpm"
 _STS = {"t": 0.0, "ok": True, "last": ""}
 
 
-_STRANGE_KEY_RPM = 5       # Max 5 req/min بۆ کلیدی نامۆ و نەناسراو
+_STRANGE_KEY_RPM = 20      # Max 20 req/min بۆ وێب و کلیدی نامۆ
 _STRANGE_KEYS_SEEN = {}    # key -> {"count": int, "blocked_until": float, "burst": []}
 
-def _api_rate_ok(key):
-    """#94U3: سەپاندنی ڕێژە — بەهێزکراو بە پاراستنی توند بۆ کلیدی نامۆ (چینی چوارەم)"""
+def _api_rate_ok(key, client_ip=""):
+    """#94U6: سەپاندنی ڕێژە — بەهێزکراو بۆ وێب و کلیلە سەرەکی و نامۆکان"""
     now = time.time()
-    if not key:
-        return False, "Authorization key is missing"
     # ١. ئەگەر کلیلی سەرەکییە یان فەرمی
-    if key in _API_KEYS or key == API_KEY:
+    if key and (key in _API_KEYS or key == API_KEY):
         cfg = _API_KEYS.get(key) or {"rpm": 60}
         win = [t for t in _API_RL.get(key, []) if now - t < 60]
         if len(win) >= cfg.get("rpm", 60):
@@ -8228,16 +8303,18 @@ def _api_rate_ok(key):
         win.append(now)
         _API_RL[key] = win
         return True, ""
-    # ٢. کلیلی نامۆ / نەناسراو — چینی چوارەمی پاراستن
-    st = _STRANGE_KEYS_SEEN.setdefault(key, {"count": 0, "blocked_until": 0.0, "burst": []})
+    # ٢. کلیلی نامۆ یان داواکاری بێ-کلیل لە وێبسایتەوە
+    track_id = key if key else f"guest_{client_ip or 'web'}"
+    st = _STRANGE_KEYS_SEEN.setdefault(track_id, {"count": 0, "blocked_until": 0.0, "burst": []})
     if now < st.get("blocked_until", 0.0):
         remain = int(st["blocked_until"] - now)
-        return False, f"unrecognized key throttled: {remain}s cooldown remaining"
+        return False, f"unrecognized/guest key throttled: {remain}s cooldown remaining"
     st["burst"] = [t for t in st["burst"] if now - t < 60]
-    if len(st["burst"]) >= _STRANGE_KEY_RPM:
-        st["blocked_until"] = now + 300  # بلۆکی ٥ خولەکی
-        print(f"[SECURITY] 🚨 Strange API key throttled & blocked: {key[:14]}...", flush=True)
-        return False, "rate limit — strange/unregistered key limited to 5 req/min (blocked for 5m)"
+    limit = _STRANGE_KEY_RPM
+    if len(st["burst"]) >= limit:
+        st["blocked_until"] = now + 120  # بلۆکی ٢ خولەکی کاتی بۆ پاراستن لە سپام
+        print(f"[SECURITY] 🚨 Strange/Guest key throttled: {track_id[:16]}...", flush=True)
+        return False, f"rate limit — guest/unregistered key limited to {limit} req/min"
     st["burst"].append(now)
     st["count"] += 1
     return True, ""
