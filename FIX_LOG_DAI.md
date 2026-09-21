@@ -718,3 +718,8 @@
 - **کێشە**: تاقی 20-هاوکات: تەنها 4 چوونە ژوورەوە، 16 × 429 (`server busy`) — `_API_CHAT_SEM(4)` + 429ی یەکسەر؛ تێلەگرام `_MSG_SEM(6)` (مردوو — نەدەهاتە بانگکردن!).
 - **پاچ**: API sem 4→24 + acquire لەناو تڕێد بە timeout ـی 25s (ڕیزبەندی لەبری 429ی یەکسەر — accept-loop ناوەستێت)؛ TG: `_throttled_handle` زیندووکرایەوە (guarded→throttled→safe) + sem 6→24.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK.
+
+## #94U23 LIMIT-100 (2026-09-21) — یەکلایی 100%: تازەکردنەوەی یەکسەری سنوور (بە-ئەکاونت و بێ-ئەکاونت)
+- **بە-ئەکاونت**: `_sg_reserve` — بودجەی ساینئەپ لەژێر لۆک (ca80/cb90/nv70/ac20/pia6 — کاپەکان وەک خۆیان، ڕەق)؛ `_limit_recharge` ئێستا ئەکاونتی نوێشی دروست دەکات (نەک تەنها reap).
+- **بێ-ئەکاونت** (`_cracked_req` — هەموو داوا HTTP یەکان): پرۆکسی لە یەکەم 429/403/418 (نەک سێیەم)؛ پرۆکسی شکستخواردوو دەسووتێنرێت + دووبارەی دووەم بە IP ی جیاواز؛ hammer-guard (hot≥6 → بێ دووبارە).
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (reserve-race 1/30 + rollover + crack-retry/burn/guard) OK.

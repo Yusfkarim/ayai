@@ -65,6 +65,23 @@ _AC_LK = threading.Lock()
 _TG_SEM = threading.Semaphore(50)  # #94U21: سەقفی 50 هەندڵی هاوکاتی تێلەگرام
 
 
+def _sg_reserve(ST, cap, today, lock):
+    """#94U23: بودجەی ساینئەپ — پشکنین+تۆمار لەژێر لۆک (ڕەیس-دژە؛ کاپ ڕەق؛ هەوڵی شکستخواردووش بودجە دەخوات)"""
+    try:
+        with lock:
+            sg = ST.get("signups") or {"date": "", "n": 0}
+            if sg.get("date") != today:
+                sg = {"date": today, "n": 0}
+            if sg.get("n", 0) >= cap:
+                ST["signups"] = sg
+                return False
+            sg["n"] = sg.get("n", 0) + 1
+            ST["signups"] = sg
+            return True
+    except Exception:
+        return False
+
+
 def _tok_drop(kind):
     """#94U21: سڕینەوەی تۆکنی کاشکراوی ئەکاونتی ئەم تڕێدە (وەک tok=None ی کۆن)"""
     try:
@@ -3796,8 +3813,6 @@ def _cb_signup_new():
     sg = CB_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 90:
-        return None
     _cb_n = len(CB_ST.get("accounts") or [])
     if _cb_n >= 70:
         # #94U16: تەنها لە حاڵەتی نائومێدی (٠ ئەکاونتی تەندرووست ئەمڕۆ) → تا 110؛ ڕۆژانە 90 وەک خۆی
@@ -3806,6 +3821,8 @@ def _cb_signup_new():
                        if str(_ex.get(_a.get("email"), 0))[:10] != today)
         if _healthy > 0 or _cb_n >= 110:
             return None
+    if not _sg_reserve(CB_ST, 90, today, _CB_LK):  # #94U23: بودجە لەژێر لۆک (90 وەک خۆی)
+        return None
     n = CB_ST["next_num"]
     for off in (0, 3, 13, 40, 100, 250):
         email = f"komex{n + off}@duidir.com"
@@ -3814,8 +3831,6 @@ def _cb_signup_new():
             CB_ST["accounts"] = (CB_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
             CB_ST["idx"] = len(CB_ST["accounts"]) - 1
             CB_ST["next_num"] = n + off + 1
-            sg["n"] = sg.get("n", 0) + 1
-            CB_ST["signups"] = sg
             _cb_save_acc()
             CB_ST["tok"] = None
             print(f"[CB] ئەکاونتی نوێ ✅ {email}", flush=True)
@@ -4154,9 +4169,9 @@ def _ca_signup_new(mkey=None):
     else:
         _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
                      if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
-    if sg.get("n", 0) >= 80:  # #91Z: 80 سنووری ڕۆژانە — بەبێ مۆڵەت ناگۆڕدرێت
-        return None
     if _accs_n >= 70 and (_alive >= 5 or _accs_n >= 160):
+        return None
+    if not _sg_reserve(CA_ST, 80, today, _CA_LK):  # #94U23: بودجە لەژێر لۆک (80 وەک خۆی — بەبێ مۆڵەت ناگۆڕدرێت)
         return None
     n = CA_ST["next_num"]
     # سکانی بازدان — شوێنی بەتاڵی زوو بدۆزەوە
@@ -4169,8 +4184,6 @@ def _ca_signup_new(mkey=None):
                 CA_ST["accounts"] = (CA_ST.get("accounts") or []) + [{"email": email, "password": email, "ua": _rand_ua()}]
                 CA_ST["idx"] = len(CA_ST["accounts"]) - 1
                 CA_ST["next_num"] = n + off + 1
-                sg["n"] = sg.get("n", 0) + 1
-                CA_ST["signups"] = sg
                 CA_ST["tok"] = None
                 _ca_save_acc()
                 print(f"[CA] ئەکاونتی نوێ ✅ {email}", flush=True)
@@ -5098,7 +5111,9 @@ def _ac_signup_new():
     sg = AC_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 20 or len(AC_ST.get("accounts") or []) >= 40:
+    if len(AC_ST.get("accounts") or []) >= 40:
+        return None
+    if not _sg_reserve(AC_ST, 20, today, _AC_LK):  # #94U23: بودجە لەژێر لۆک
         return None
     n = AC_ST["next_num"]
     for _ in range(6):
@@ -5113,8 +5128,6 @@ def _ac_signup_new():
             AC_ST["accounts"] = (AC_ST.get("accounts") or []) + [acc]
             AC_ST["idx"] = len(AC_ST["accounts"]) - 1
             AC_ST["next_num"] = n + 1
-            sg["n"] = sg.get("n", 0) + 1
-            AC_ST["signups"] = sg
             AC_ST["tok"] = None
             _ac_save_acc()
             print(f"[AC] ئەکاونتی نوێ ✅ {email}", flush=True)
@@ -5441,8 +5454,6 @@ def _nv_signup_new():
     sg = NV_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if sg.get("n", 0) >= 70:
-        return None
     _nv_n = len(NV_ST.get("accounts") or [])
     if _nv_n >= 70:
         # #94U18: وەک CB — تەنها ئەگەر ٠ ئەکاونتی ساردبووەوە مابێت → تا 110؛ ڕۆژانە 70 وەک خۆی
@@ -5458,6 +5469,8 @@ def _nv_signup_new():
                 _healthy += 1
         if _healthy > 0 or _nv_n >= 110:
             return None
+    if not _sg_reserve(NV_ST, 70, today, _NV_LK):  # #94U23: بودجە لەژێر لۆک (70 وەک خۆی)
+        return None
     import time as _ts
     n = NV_ST["next_num"]
     for off in (0, 3, 13, 40, 100, 250):
@@ -5467,8 +5480,6 @@ def _nv_signup_new():
             NV_ST["accounts"] = (NV_ST.get("accounts") or []) + [{"email": email, "password": email}]
             NV_ST["idx"] = len(NV_ST["accounts"]) - 1
             NV_ST["next_num"] = n + off + 1
-            sg["n"] = sg.get("n", 0) + 1
-            NV_ST["signups"] = sg
             NV_ST["tok"] = None
             _nv_save_acc()
             print(f"[NV] ئەکاونتی نوێ ✅ {email}", flush=True)
@@ -7510,7 +7521,9 @@ def _limit_recharge(kind, err):
         if kind in ("ca", "cb", "nv"):
             # #91P2: پاڵنان بە جیاتی سڕینەوە — ئەکاونت لە دەست ناچێت، تەنها دەگۆڕدرێت
             _pool_reap()
-            print(f"[LIMIT-RECHARGE] {kind}: ئەکاونتی limit پاڵدرا کۆتایی — ئەکاونتی تەندرووست کار دەکات", flush=True)
+            # #94U23: ئەکاونتی نوێی یەکسەر (پێش داواکاری داهاتوو — بودجە لەژێر لۆک)
+            threading.Thread(target={"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[kind], daemon=True).start()
+            print(f"[LIMIT-RECHARGE] {kind}: ئەکاونتی limit پاڵدرا کۆتایی + ئەکاونتی نوێ دروست دەکرێت...", flush=True)
         elif kind == "g4f":
             threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
             print(f"[LIMIT-RECHARGE] g4f: دروستکردنی کرێدی نوێ...", flush=True)
@@ -8699,13 +8712,16 @@ def _cracked_req(self, method, url, **kw):
             return r
         if r.status_code in (403, 418, 429, 502, 503):
             _CRACK["hot"][dom] = int(_CRACK["hot"].get(dom, 0)) + 1
+            if _CRACK["hot"][dom] >= 6:  # #94U23: دۆمەینی مردوو — دووبارە مەکە (revive+fallback بەڕێوەی دەبەن)
+                return r
             kw2 = dict(kw)
             h = dict(kw2.get("headers") or {})
             # #91ID: ئەگەر سێشنەکە ناسنامەی خۆی هەیە → پاراستنی (cookie+UA یەک دەمێنن)
             _sua = (getattr(self, "headers", None) or {}).get("User-Agent") if hasattr(self, "headers") else None
             h["User-Agent"] = _sua or _rand_ua()  # #91S+#91ID
             kw2["headers"] = h
-            if _CRACK["hot"].get(dom, 0) >= 2 and not kw2.get("proxies"):
+            _rl = r.status_code in (403, 418, 429)  # #94U23: خێزانی سنوور/ڕێژە → پرۆکسی لە یەکەم شکستەوە (نەک سێیەم)
+            if _CRACK["hot"].get(dom, 0) >= (1 if _rl else 2) and not kw2.get("proxies"):
                 try:
                     pl = _proxy_get(1)
                     if pl:
@@ -8735,6 +8751,20 @@ def _cracked_req(self, method, url, **kw):
                 r2 = None
             if r2 is None:
                 r2 = _orig_sess_req(self, method, url, **kw2)
+            if r2.status_code in (403, 418, 429, 502, 503):
+                # #94U23: پرۆکسییە شکستخواردووەکە بسووتێنە + دووبارەی دووەم بە IP ی جیاواز
+                try:
+                    _used = (kw2.get("proxies") or {}).get("https") or (kw.get("proxies") or {}).get("https")
+                    if _used:
+                        _proxy_mark_bad(_used)
+                    kw3 = dict(kw2)
+                    _pl3 = [p for p in (_proxy_get(3) or []) if p != _used]
+                    if _pl3:
+                        kw3["proxies"] = {"http": _pl3[0], "https": _pl3[0]}
+                        time.sleep(random.uniform(0.5, 1.2))
+                        r2 = _orig_sess_req(self, method, url, **kw3)
+                except Exception:
+                    pass
             if r2.status_code not in (403, 418, 429, 502, 503):
                 _CRACK["hot"][dom] = 0
             return r2
@@ -9793,7 +9823,9 @@ def _pia_signup_new():
         sg = PIA_ST.get("signups") or {"date": "", "n": 0}
         if sg.get("date") != today:
             sg = {"date": today, "n": 0}
-        if sg.get("n", 0) >= 6 or len(PIA_ST.get("accounts") or []) >= 12:
+        if len(PIA_ST.get("accounts") or []) >= 12:
+            return None
+        if not _sg_reserve(PIA_ST, 6, today, PIA_LOCK):  # #94U23: بودجە لەژێر لۆک
             return None
         s = requests.Session()
         s.headers.update({"User-Agent": _PIA_UA, "Accept": "application/json",
@@ -9845,8 +9877,6 @@ def _pia_signup_new():
             return None
         with PIA_LOCK:
             PIA_ST.setdefault("accounts", []).append({"email": email, "token": d5["token"]})
-            sg["n"] = sg.get("n", 0) + 1
-            PIA_ST["signups"] = sg
             _pia_save_acc()
         print(f"[PIA-SIGNUP] ئەکاونتی نوێ ✅ {email}", flush=True)
         return email
