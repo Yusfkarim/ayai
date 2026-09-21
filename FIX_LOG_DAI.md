@@ -734,3 +734,8 @@
 - **کێشەکان**: (1) دووبارەکردنی دوایین پرسیاری بەکارهێنەر لە dispatch (31 شوێن!)؛ (2) `[-12:]/[-20:]/[-24:]` ـەکان system ـیان دەفەوتاند کاتێک مێژوو درێژ بوو (13 شوێن)؛ (3) merge ـەکان system ـیان تەنها تا 1000/1200 پیت دەهێشت (7 شوێن)؛ (4) hk system ـی تەواو پشتگوێ دەخست؛ (5) fla تەنها ئەگەر system یەکەم بوایە دەیدۆزییەوە.
 - **پاچ**: `_sys_keep` (system ـەکان + دوایین N) لە do_POST + هەموو باسکەندەکان؛ `full` بەبێ دووبارە؛ cap ـەکان 6000؛ hk prepend؛ fla گەڕانی system لە هەر شوێنێک.
 - **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test (_sys_keep ×4) OK.
+
+## #94U25b PROMPT-FOLLOW-2 (2026-09-21) — aff/yl: system بخە ناو پرسیارەکە خۆی
+- **کێشە**: تاقی PINEAPPLE شکستی خوارد — aff (fallback ـی سەرەکی) history ڕۆڵەکان پشتگوێ دەخات و تەنها question دەخوێنێتەوە.
+- **پاچ**: aff.question و yl.message ئێستا `[Instructions: {system}]` ـیان لە سەرەتایە (کاتێک system هەیە)؛ yl history ـش `_sys_keep`.
+- **پشکنین**: ast OK، pyflakes ٠ undefined، exec-test OK.

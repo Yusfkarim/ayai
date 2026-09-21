@@ -2807,7 +2807,9 @@ def yl_chat(messages, model_id="yollo-chat", timeout=120):
         except Exception as e:
             lasterr = e
             continue
-        body = {"message": last, "sessionId": _YL["sid"], "conversationHistory": hist[-21:],
+        _sys = _sys_txt(messages)  # #94U25b
+        _q = f"[Instructions: {_sys}]\n\n{last}" if _sys else last
+        body = {"message": _q, "sessionId": _YL["sid"], "conversationHistory": _sys_keep(hist, 20),
                 "userToken": _YL["tok"], "userLocale": "en", "isRegenerate": False,
                 "isSafeMode": False, "generateType": 0}
         try:
@@ -6452,8 +6454,10 @@ class AIFreeChat:
                 "startTime": start, "submitTime": now}
 
     def chat(self, question, history=None):
+        _sys = _sys_txt(history)  # #94U25b: system بخە ناو پرسیار (باسکەندەکە history ڕۆڵەکان پشتگوێ دەخات)
+        _q = f"[Instructions: {_sys}]\n\n{question}" if _sys else question
         payload = {
-            "model": self.model, "question": question, "tone": "friendly",
+            "model": self.model, "question": _q, "tone": "friendly",
             "format": "paragraph", "file": None,
             "conversationHistory": _sys_keep(history or [], 19),  # #94U25
             "interactionProof": self._proof(),
