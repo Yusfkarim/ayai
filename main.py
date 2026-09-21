@@ -4553,6 +4553,9 @@ def _proxy_mark_bad(px):
     if _st[bk] < _lim:
         return False
     PROXY_ST["bad"].add(b)
+    if len(PROXY_ST["bad"]) > 5000:  # #94U44: بیرگەی bad سنووردارە
+        for _ in range(len(PROXY_ST["bad"]) - 5000):
+            PROXY_ST["bad"].pop()
     _st.pop(bk, None)
     try:
         _pool.pop(b, None)
@@ -4622,11 +4625,16 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
     now = time.time()
     raw = PROXY_ST.get("raw") or []
     if now - PROXY_ST["src_t"] > 900 or not raw:
-        raw = _proxy_fetch_all()
-        PROXY_ST["raw"] = raw
-        PROXY_ST["src_t"] = now
-        PROXY_ST["cur"] = 0
-        print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ٤٠+ سەرچاوە", flush=True)
+        _fresh = _proxy_fetch_all()
+        if _fresh:  # #94U44: تەنها ئەگەر ڕاو سەرکەوتوو بوو — لیستی کۆن نافەوتێت
+            raw = _fresh
+            PROXY_ST["raw"] = raw
+            PROXY_ST["src_t"] = now
+            PROXY_ST["cur"] = 0
+            print(f"[HARVESTER] 🕸 ڕاوی تازە: {len(raw)} پاڵێوراو لە ٤٠+ سەرچاوە", flush=True)
+        elif raw:
+            PROXY_ST["cur"] = 0
+            print(f"[HARVESTER] ⚠️ ڕاو شکستی هێنا — لیستی کۆن ({len(raw)}) دەمێنێتەوە", flush=True)
     if not raw:
         return
     bad, pool = PROXY_ST["bad"], PROXY_ST.setdefault("pool", {})
@@ -4647,19 +4655,40 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
     n_socks = sum(1 for _, px in res if px.startswith("socks"))
     for lat, px in res:
         pool[px] = {"t": now, "lat": round(lat, 2)}
-    # #91R: تاگی منزلی لە ip-api (hosting=false = منزلی/ISP)؛ #94U41: socks ـیش + 100/جار (سنووری batch — 200 یەکجار هەمووی دەفەوتاند)
+    # #91R: تاگی منزلی (hosting=false = منزلی/ISP)؛ #94U41: socks+100/جار؛ #94U44: بیرگەی IP + دووبارەی batch
     try:
-        _untagged = [k for k, v in pool.items() if "res" not in v][:100]
-        if _untagged:
-            _ips = [k.split("://", 1)[-1].split(":")[0] for k in _untagged]
-            _rj = requests.post("http://ip-api.com/batch?fields=query,hosting", json=_ips, timeout=(8, 20))
-            if _rj.status_code == 200:
-                _n_res = 0
-                for ip, info in zip(_untagged, _rj.json() or []):
+        _mem = PROXY_ST.setdefault("res_mem", {})
+        _untagged = [k for k, v in pool.items() if "res" not in v]
+        _n_res = 0
+        _need_api = []
+        for k in _untagged:  # یەکەم: بیرگە (بێ API، یەکسەر)
+            _ip = k.split("://", 1)[-1].split(":")[0]
+            if _ip in _mem:
+                pool[k]["res"] = _mem[_ip]
+                _n_res += 1 if _mem[_ip] else 0
+            elif len(_need_api) < 100:
+                _need_api.append(k)
+        if _need_api:
+            _ips = [k.split("://", 1)[-1].split(":")[0] for k in _need_api]
+            _rj = None
+            for _att in range(2):  # دووبارە ئەگەر batch شکستی هێنا
+                try:
+                    _rj = requests.post("http://ip-api.com/batch?fields=query,hosting", json=_ips, timeout=(8, 20))
+                    if _rj.status_code == 200:
+                        break
+                except Exception:
+                    _rj = None
+                time.sleep(5)
+            if _rj is not None and _rj.status_code == 200:
+                for ip, info in zip(_need_api, _rj.json() or []):
                     _is_res = not (info or {}).get("hosting", True)
                     pool[ip]["res"] = _is_res
+                    _mem[ip.split("://", 1)[-1].split(":")[0]] = _is_res
                     _n_res += 1 if _is_res else 0
-                print(f"[RES-TAG] {_n_res} منزلی لە {len(_untagged)}", flush=True)
+                while len(_mem) > 5000:
+                    _mem.pop(next(iter(_mem)))
+        if _untagged:
+            print(f"[RES-TAG] {_n_res} منزلی لە {len(_untagged)} (بیرگە+API)", flush=True)
     except Exception:
         pass
     _pruned_res = [k for k, v in pool.items() if (v or {}).get("res") and now - (v or {}).get("t", 0) >= 7200]
@@ -10449,6 +10478,11 @@ def _cbox_new_account():
         acc = {"fp": fp, "at": at, "rt": rt, "day": today, "n": 0, "dead": 0}
         with CBOX_LOCK:
             CBOX_ST.setdefault("accounts", []).append(acc)
+            _ca_all = CBOX_ST.get("accounts") or []
+            if len(_ca_all) > 120:  # #94U44: مردووەکان کۆنابنەوە — زیندوو 100 + مردوو 20
+                _ca_live = [a for a in _ca_all if not a.get("dead")][-100:]
+                _ca_dead = [a for a in _ca_all if a.get("dead")][-20:]
+                CBOX_ST["accounts"] = _ca_live + _ca_dead
             sg = CBOX_ST.get("signups") or {"date": "", "n": 0}
             if sg.get("date") != today:
                 sg = {"date": today, "n": 0}
