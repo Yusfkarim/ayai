@@ -639,3 +639,8 @@
 - **fly.toml**: پێشتر باشە (`auto_stop_machines=false`، `min_machines_running=1`، API سێرڤەر Threading) — گۆڕانکاری پێویست نەبوو.
 - **پشکنین**: pyflakes (٠ undefined، ٠ کێشەی نوێ)، ast.parse OK، exec-test (throttle peak=6، conflict-detect، fail-counter) OK.
 
+
+## #94U14 OOM-FIX (2026-09-21) — بیرگە 512MB→1024MB؛ چارەی crash-loop ی OOM
+- **نیشانە**: `Out of memory: Killed process (python3) anon-rss:~383MB` دوو جار لە ٤ خولەکدا (14:23:59 و 14:27:15) — API بێوەڵام دەبوو (health timeout) تا Fly ڕیستارتی دەکردەوە.
+- **چارە**: `fly scale memory 1024` + `fly.toml` هاوسەنگکرا — مەشینەکە بە 1GB ڕیستارت بووەوە.
+- **تێبینی**: memory-watchdog ی #94U10 (GC 450MB / restart 480MB) لەژێر 1GB ئێستا مەودای زیاتری هەیە؛ چاودێری دەکرێت ئەگەر OOM دووبارە بووەوە → کەمکردنەوەی harvester threads یان catalog cache.
