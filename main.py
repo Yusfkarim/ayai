@@ -1494,7 +1494,7 @@ def qb_servers():
              "model_id": "gpt-4.1-mini", "kind": "qb"}]
 
 
-def qb_chat(messages, timeout=110):
+def qb_chat(messages, timeout=60):  # #94U19: 110→60
     """چاتی quillbot — مێژووی وەک یەک نامەی یەکگیراو؛ NDJSON: type=content/usage"""
     import uuid as _uuid
     # مێژوو بۆ یەک پرسیار کۆبکەوە (سیستەم لە سەرەتا + دوا نامەی بەکارهێنەر)
@@ -1519,6 +1519,27 @@ def qb_chat(messages, timeout=110):
                                    "platform-type": "webapp"}, stream=True)
     except Exception as e:
         raise EMError(f"qb: {str(e)[:60]}")
+    if r.status_code == 403:
+        # #94U19 REVIVE: CF چەلەنج → دووبارە بە پرۆکسی (تا ٣)
+        try:
+            r.close()
+        except Exception:
+            pass
+        for _px in _proxy_get(3):
+            try:
+                _r2 = requests.post(QB_URL + str(_uuid.uuid4()), json=body, timeout=(15, 60),
+                                    headers={"User-Agent": _pick_ua(ACT_UAS),
+                                             "Origin": "https://quillbot.com",
+                                             "Referer": "https://quillbot.com/ai-chat",
+                                             "Accept": "text/event-stream",
+                                             "platform-type": "webapp"},
+                                    proxies={"http": _px, "https": _px}, stream=True)
+                if _r2.status_code == 200:
+                    r = _r2
+                    print("[QB] ✅ بە پرۆکسی تێپەڕی", flush=True)
+                    break
+            except Exception:
+                continue
     if r.status_code == 403:
         raise EMError("qb: چەلەنجەی Cloudflare (ڕێژە)")
     if r.status_code != 200:
@@ -3558,7 +3579,7 @@ def _pi_session():
     return s, did
 
 
-def pi_chat(messages, model_id="pi-chat", timeout=110):
+def pi_chat(messages, model_id="pi-chat", timeout=50):  # #94U19: 110→50 (stream-hang)
     """چاتی Pi — مێژوو فلێت دەکرێت بۆ یەک دەق؛ SSE partial → یەک وەڵام"""
     import time as _t, uuid as _u, json as _j
     if _t.time() < PI_LIMIT["until"]:
@@ -3602,7 +3623,10 @@ def pi_chat(messages, model_id="pi-chat", timeout=110):
                 raise EMError(f"pi: {r.status_code}")
             parts = []
             buf = ""
+            _dl = _t.time() + min(timeout, 60)
             for ch in r.iter_content(chunk_size=None):
+                if _t.time() > _dl:
+                    break  # #94U19: دێدلاینی stream — نەهێشتنی گیربوون
                 buf += ch.decode("utf-8", "replace")
                 while "\n" in buf:
                     ln, buf = buf.split("\n", 1)
@@ -6575,7 +6599,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 elif kind == "l7":
                     content = l7_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "g4f":
-                    content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                    content = g4f_chat(history + [{"role": "user", "content": q}], cand["model_id"], timeout=50)  # #94U19
                 elif kind == "ct":
                     content = ct_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "yl":
@@ -6618,11 +6642,15 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     if cand is not srv:
                         print(f"[API] fallback → {kind}", flush=True)
                     break
+                else:
+                    print(f"[API] {kind} بەتاڵ — revive + fallback", flush=True)
+                    threading.Thread(target=_revive_source, args=(kind, "empty"), daemon=True).start()
             except Exception as e:
                 last_err = e
                 _BREAKER[cand.get("kind")] = time.time() + (300 if _is_limit_err(e) else 90)
                 _limit_recharge(cand.get("kind"), e)
                 print(f"[API] {cand.get('kind')} هەڵە: {str(e)[:90]}", flush=True)
+                threading.Thread(target=_revive_source, args=(cand.get("kind"), e), daemon=True).start()
         if not content:
             # ═══ دیلی نەوە (API): مۆدێڵی داواکراو مردووە → نوێترین نەوەی هەمان خێزان ═══
             try:
@@ -7222,6 +7250,75 @@ def _is_limit_err(err):
     return any(x in s for x in ("402", "429", "credit", "quota", "limit", "depleted", "exceed", "rate", "no free", "usage cap", "monthly"))
 
 
+_REVIVE_T = {}  # #94U19: kind → دوایین کاتی revive (cooldown 180s)
+_REVIVE_SEM = threading.Semaphore(3)  # #94U19: زۆرترین ٣ revive لە هەمان کات
+
+
+def _revive_source(kind, err=None):
+    """#94U19 UNIVERSAL-REVIVE: هەر سەرچاوەیەک داخرا یەکسەر زیندووی بکەرەوە —
+       بڕێکەر + حەوز/ساینئەپ + جلسە + ڕیسینک + پرۆکسی — cooldown + async-سەیف"""
+    if not kind:
+        return
+    now = time.time()
+    if now - _REVIVE_T.get(kind, 0) < 180:
+        return
+    _REVIVE_T[kind] = now
+    if not _REVIVE_SEM.acquire(blocking=False):
+        return
+    try:
+        steps = []
+        low = str(err or "").lower()
+        if kind == "em" and any(w in low for w in ("today", "daily", "free tokens", "monthly")):
+            _BREAKER[kind] = now + 3 * 3600
+            steps.append("breaker-3h")
+        else:
+            _BREAKER.pop(kind, None)
+            steps.append("breaker-clear")
+        try:
+            if kind in ("ca", "cb", "nv"):
+                _pool_reap()
+                {"ca": _ca_signup_new, "cb": _cb_signup_new, "nv": _nv_signup_new}[kind]()
+                steps.append("pool+signup")
+            elif kind == "ac":
+                _ac_signup_new()
+                steps.append("signup")
+            elif kind == "cbox":
+                _cbox_new_account()
+                steps.append("account")
+            elif kind == "pia":
+                _pia_signup_new()
+                steps.append("signup")
+            elif kind == "g4f":
+                threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
+                steps.append("credits")
+        except Exception as e:
+            steps.append(f"pool-{str(e)[:24]}")
+        try:
+            if kind == "pi":
+                PI_STATE["s"] = None
+                steps.append("session")
+        except Exception:
+            pass
+        try:
+            f = globals().get(f"sync_{kind}_models")
+            if f:
+                try:
+                    f(force=True)
+                except TypeError:
+                    f([])
+                steps.append("resync")
+        except Exception as e:
+            steps.append(f"resync-{str(e)[:24]}")
+        try:
+            _proxy_get(1)
+            steps.append("proxy")
+        except Exception:
+            pass
+        print(f"[REVIVE] {kind}: {' + '.join(steps)}", flush=True)
+    finally:
+        _REVIVE_SEM.release()
+
+
 def _limit_recharge(kind, err):
     """#91: لیمیت تەواو بوو → یەکسان پڕکردنەوەی لیمیت:
        حەوز=ئەکاونتی نوێ | g4f=کرێدی نوێ | ac=سایناپ نوێ | ئەوانی تر=تۆکێن+پرۆکسی نوێ"""
@@ -7507,6 +7604,7 @@ def ask(session, question):
             _BREAKER[cand.get("kind")] = time.time() + (300 if _is_limit_err(e) else 90)
             _limit_recharge(cand.get("kind"), e)
             print(f"[BRAIN] {cand.get('kind', '?')} ({cand.get('id', '?')}) هەڵە: {str(e)[:80]}", flush=True)
+            threading.Thread(target=_revive_source, args=(cand.get("kind"), e), daemon=True).start()
     # ═══ دیلی نەوە: هەموو زنجیرەکە بۆ ئەم مۆدێڵە مردووە → نوێترین نەوە بپشکنە ═══
     if BRAIN["servers"] and question:
         try:
@@ -8110,7 +8208,15 @@ def self_heal_once():
     _ca_m = next((k for k in MS.get("ca_ok", {}) if "gemini" in k or "claude" in k), "gpt-5.4-nano")
     probes["ca"] = lambda: ca_chat([{"role": "user", "content": "hi"}], _ca_m, timeout=50)
     _cb_m = next(iter(MS["cb_ok"].keys()), "4o-mini") if MS.get("cb_ok") else "4o-mini"
-    probes["cb"] = lambda: cb_chat([{"role": "user", "content": "hi"}], _cb_m, timeout=50)
+    def _cb_probe(_m=_cb_m):
+        # #94U19: ئەگەر مۆدێلی یەکەم limit بوو → دووبارە بە 4o-mini
+        try:
+            return cb_chat([{"role": "user", "content": "hi"}], _m, timeout=50)
+        except Exception:
+            if _m != "4o-mini":
+                return cb_chat([{"role": "user", "content": "hi"}], "4o-mini", timeout=50)
+            raise
+    probes["cb"] = _cb_probe
     probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     fixed = []
@@ -8133,21 +8239,8 @@ def self_heal_once():
         _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err, "fails": (0 if ok else fprev + 1)}
         if not ok:
             try:
-                if kind == "hk":
-                    sync_hk_models(force=True)
-                elif kind == "ct":
-                    sync_ct_models(force=True)
-                elif kind == "hf":
-                    sync_hf_models(force=True)
-                elif kind == "ak":
-                    sync_ak_models([])
-                elif kind == "ca":
-                    sync_ca_models(force=True)
-                elif kind == "cb":
-                    sync_cb_models(force=True)
-                elif kind == "nv":
-                    sync_nv_models(force=True)
-                fixed.append(f"{kind}→sync")
+                _revive_source(kind, err)
+                fixed.append(f"{kind}→revive")
             except Exception:
                 pass
     if fixed:

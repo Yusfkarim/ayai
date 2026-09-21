@@ -681,3 +681,15 @@
   4. NV headroom وەک CB: ئەگەر ٠ ئەکاونتی ساردبووەوە مابێت → تا 110 ئەکاونت (ڕۆژانە 70 وەک خۆی).
   5. `_pool_daemon` خێراتر: پشووی نێوان سەرکەوتنەکان 75s→45s (کۆی ڕۆژانە هەر بە cap سنووردارە: CA 80 / CB 90 / NV 70).
 - **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (ranking + NV gate + proxy-first flow) OK.
+
+## #94U19 UNIVERSAL-REVIVE (2026-09-21) — هەر سەرچاوەیەک داخرا یەکسەر زیندوو دەکرێتەوە
+- **پشکنینی 36 بنەماڵەی مۆدێل (یەک-بە-یەک، هێمن)**: 34 OK + 2 TIMEOUT (g4f، pi). دەرکەوت: زۆر primary بەهۆی تەواوبوونی em/quota ـەوە fallback ـن بۆ aff؛ ca=quota؛ gz=login-wall؛ qb=Cloudflare؛ rwd=rate؛ nv=بەتاڵی بێدەنگ؛ pi/g4f=stall ی 110s.
+- **پاچ — `_revive_source(kind, err)` ی گشتی** (cooldown 180s + sem 3):
+  1. بڕێکەر: em-daily-quota → 3h؛ ئەگینا clear بۆ هەوڵی نوێ.
+  2. حەوز: reap + signup (ca/cb/nv/ac/cbox/pia/g4f-credits) — cap ـەکان وەک خۆیان.
+  3. جلسە: pi reset (ئەوانی تر خۆیان).
+  4. ڕیسینکی مۆدێلەکان (ئەگەر sync_fn هەبێت).
+  5. پرۆکسی نوێ.
+- **بەستنەکان**: do_POST except + بەتاڵ (پێشتر بێدەنگ بوو!) + ask except → revive ی async؛ heal → revive (لەبری sync-تەنها)؛ cb probe → backup بە 4o-mini.
+- **چارە تایبەتەکان**: pi stream-deadline + timeout 110→50؛ g4f call timeout 50؛ qb دووبارە بە پرۆکسی لەسەر CF-403 + timeout 110→60.
+- **پشکنین**: ast OK، pyflakes baseline (٠ undefined)، exec-test (cooldown/breaker + qb-flow + pi-deadline) OK.
