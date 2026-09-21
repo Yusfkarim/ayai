@@ -4682,23 +4682,38 @@ def _harvest_wave(wave=120):  # #94U15: 190→120 دژە-OOM
 
 
 def _proxy_harvester_daemon():
-    """#91H: بەردەوام — هەر 3 خولەک شەپۆلێکی 200 کراک → گەورەترین و تازەترین حەوز بەبێ وەستان؛ #94U39: ئەگەر حەوز <15 → تا 3 شەپۆل؛ #94U41: revive ی منزلی هەر کاتژمێرێک"""
+    """#91H: بەردەوام — شەپۆلی خۆگونجاو (adaptive)؛ #94U39: <15 → 3 شەپۆل؛ #94U41: revive کاتژمێرێک؛ #94U43: خێرایی بەپێی پڕی حەوز"""
     time.sleep(45)
     _last_rev = 0
+    _mode = None
+    _wv, _sl = 200, 180
     while True:
         try:
-            _harvest_wave(200)
+            _pool_now = PROXY_ST.get("pool") or {}
+            _np = len(_pool_now)
+            _nr = sum(1 for v in _pool_now.values() if (v or {}).get("res"))
+            if _np < 30 or _nr < 5:
+                _wv, _sl, _md = 300, 120, "🔥 هێرش"
+            elif _np < 100:
+                _wv, _sl, _md = 200, 180, "⚡ چالاک"
+            else:
+                _wv, _sl, _md = 150, 240, "🛡 پاسەوانی"
+            if _md != _mode:
+                print(f"[HARVESTER] دۆخ: {_md} (حەوز {_np} | منزلی {_nr})", flush=True)
+                _mode = _md
+            _harvest_wave(_wv)
             _extra = 0
             while len(PROXY_ST.get("pool") or {}) < 15 and _extra < 2:
                 _extra += 1
                 print(f"[HARVESTER] 🆘 حەوز کەمە — شەپۆلی فریاکەوتنی {_extra}", flush=True)
-                _harvest_wave(200)
+                _harvest_wave(_wv)
             if time.time() - _last_rev > 3600:
                 _last_rev = time.time()
                 _proxy_revive_res()
         except Exception as e:
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
-        time.sleep(180)
+            _sl = 180
+        time.sleep(_sl)
 
 
 def _proxy_get(n=4):
@@ -7905,6 +7920,16 @@ def _revive_source(kind, err=None):
             elif kind == "pia":
                 _pia_signup_new()
                 steps.append("signup")
+            elif kind == "alle":  # #94U43: سێشن مردوو → لۆگینی نوێ بۆ هەموو ئەکاونتەکان
+                _n_al = 0
+                for _a in (ALLE_ST.get("accounts") or []):
+                    try:
+                        _a.pop("token", None)
+                        _alle_login(_a, force=True)
+                        _n_al += 1
+                    except Exception:
+                        pass
+                steps.append(f"relogin-{_n_al}")
             elif kind == "g4f":
                 threading.Thread(target=_g4f_ensure_credits, args=(12, 3), daemon=True).start()
                 steps.append("credits")
@@ -8863,6 +8888,13 @@ def self_heal_once():
     probes["cb"] = _cb_probe
     probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
+    # #94U43: پشکنینی هەموو حەوزە ئەکاونتییەکان — ac/pia/alle ـیش
+    if MS.get("ac_ok"):
+        probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
+    probes["pia"] = lambda: pia_chat([{"role": "user", "content": "hi"}], PIA_AGENTS[0][0], timeout=45)
+    _alle_srv = next((s for s in (API_BRAIN.get("servers") or []) if s.get("kind") == "alle"), None)
+    if _alle_srv and _alle_srv.get("model_id"):
+        probes["alle"] = lambda _m=_alle_srv.get("model_id"): alle_chat([{"role": "user", "content": "hi"}], _m, timeout=45)
     fixed = []
     # #91Z: DARK-RECOVERY — سەرچاوەی بەتاڵ (مانگانە وەک hf) هەر خولی سێیەم هەوڵی زیندووکردنەوە
     if (_HEAL_STATE.get("cyc", 0) % 3) == 0:
@@ -8875,18 +8907,31 @@ def self_heal_once():
                         print(f"[SELF-HEAL] ✨ {dk} لە تاریکییەوە گەڕایەوە!", flush=True)
             except Exception:
                 pass
-    for kind, fn in probes.items():
+    # #94U43: پشکنینی هاوکات (parallel — خولەکە خێرا دەمێنێتەوە) + verify-heal (دوای revive دووبارە بپشکنە)
+    _todo = [k for k in probes
+             if not (int((_HEAL_STATE["status"].get(k) or {}).get("fails", 0)) >= 6
+                     and (_HEAL_STATE.get("cyc", 0) % 3) != 0)]  # #91++: پشووی بەرزکراو
+    import concurrent.futures as _cfh
+    _out = {}
+    if _todo:
+        with _cfh.ThreadPoolExecutor(max_workers=6) as _ex:
+            for _k, _r in zip(_todo, _ex.map(lambda _kk: _heal_probe(_kk, probes[_kk]), _todo)):
+                _out[_k] = _r
+    for kind in _todo:
+        ok, err = _out[kind]
         fprev = int((_HEAL_STATE["status"].get(kind) or {}).get("fails", 0))
-        if fprev >= 6 and (_HEAL_STATE.get("cyc", 0) % 3) != 0:
-            continue  # #91++: پشووی بەرزکراو — هەر خولی سێیەم دووبارە هەوڵ
-        ok, err = _heal_probe(kind, fn)
-        _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err, "fails": (0 if ok else fprev + 1)}
         if not ok:
             try:
                 _revive_source(kind, err)
                 fixed.append(f"{kind}→revive")
+                time.sleep(8)  # مۆڵەت revive تەواو بێت (ئەکاونت/سێشن/ڕیسینک)
+                ok2, err2 = _heal_probe(kind, probes[kind])
+                if ok2:
+                    ok, err = True, ""
+                    fixed.append(f"{kind}→auto-fixed✅")
             except Exception:
                 pass
+        _HEAL_STATE["status"][kind] = {"ok": ok, "t": time.time(), "err": err, "fails": (0 if ok else fprev + 1)}
     if fixed:
         print(f"[SELF-HEAL] 🔧 چاککردنەوە: {', '.join(fixed)}", flush=True)
     st = _HEAL_STATE["status"]
