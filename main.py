@@ -6156,6 +6156,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     content = nv_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "al":
                     content = al_chat(history + [{"role": "user", "content": q}], cand["model_id"])
+                elif kind == "pia":
+                    content = pia_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "alle":
                     content = alle_chat(history + [{"role": "user", "content": q}], cand["model_id"])
                 elif kind == "aiml":
@@ -6232,6 +6234,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = nv_chat(nmsgs, nsrv["model_id"])
                     elif k == "al":
                         content = al_chat(nmsgs, nsrv["model_id"])
+                    elif k == "pia":
+                        content = pia_chat(nmsgs, nsrv["model_id"])
                     elif k == "alle":
                         content = alle_chat(nmsgs, nsrv["model_id"])
                     elif k == "aiml":
@@ -6400,6 +6404,10 @@ def detect_brain(allow_fallback=True):
         servers += alle_servers()
     except Exception as e:
         print(f"[BRAIN] alle fail: {e}", flush=True)
+    try:
+        servers += pia_servers()
+    except Exception as e:
+        print(f"[BRAIN] pia fail: {e}", flush=True)
     try:
         servers += ak_servers()
     except Exception as e:
@@ -6948,6 +6956,12 @@ def ask(session, question):
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "al"
+            if k == "pia":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = pia_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "pia"
             if k == "alle":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = alle_chat(msgs, cand["model_id"])
@@ -7101,6 +7115,11 @@ def ask(session, question):
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "al"
+                if k == "pia":
+                    a = pia_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "pia"
                 if k == "alle":
                     a = alle_chat(nmsgs, nsrv["model_id"])
                     if leaks(a):
@@ -8641,6 +8660,247 @@ def alle_chat(messages, model_id, timeout=110, depth=0):
                 return alle_chat(messages, model_id, timeout, depth=1)
         raise EMError(f"alle: {s[:80]}")
 
+
+# ══════════ Piax (piax.org) — §2.35 — openrouter-پشتگیر + ئۆتۆ-ساینئەپ ══════════
+PIA_API = "https://piax-api.piax.org"
+PIA_ACC_FILE = os.path.join(DATA_DIR, "pia_accounts.json")
+PIA_ST = {"accounts": [], "idx": 0, "limits": {}, "signups": {"date": "", "n": 0}, "next_num": 0}
+PIA_LOCK = threading.Lock()
+_PIA_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
+# مۆدێلە فرییەکان — سکانکرا لایڤ (کۆدی لایڤ ٢٠٢٦-٠٩)
+PIA_AGENTS = [("32", "gpt-4.1-nano", "GPT 4.1 Nano"),
+              ("33", "o3-mini", "o3 Mini"),
+              ("167", "deepseek-v3.2", "DeepSeek V3.2"),
+              ("136", "glm-4.7", "GLM 4.7"),
+              ("163", "kimi-k2.5", "Kimi K2.5"),
+              ("175", "minimax-m3", "MiniMax M3")]
+
+
+def _pia_load_acc():
+    d = _json_load_safe(PIA_ACC_FILE) or {}
+    PIA_ST["accounts"] = d.get("accounts") or []
+    PIA_ST["idx"] = int(d.get("idx") or 0)
+    PIA_ST["limits"] = d.get("limits") or {}
+    PIA_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+    PIA_ST["next_num"] = int(d.get("next_num") or 0)
+
+
+def _pia_save_acc():
+    _json_save(PIA_ACC_FILE, {"accounts": PIA_ST.get("accounts") or [], "idx": PIA_ST.get("idx") or 0,
+                              "limits": PIA_ST.get("limits") or {},
+                              "signups": PIA_ST.get("signups") or {"date": "", "n": 0},
+                              "next_num": PIA_ST.get("next_num") or 0})
+
+
+_PIA_SEED = [{"email": "vemim87080@dreameg.com",
+              "token": "eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiIyMjU5NjIzNS1iZWFmLTQwYTQtYjlmOS05YjU0OTNiOGUzOWEiLCJpYXQiOjE3ODk5NTg0NDEsImFjY291bnRJZCI6IjExNzc2ODA3MzMxMTI2MzMzNDQiLCJ0IjoxNzg5OTU4NDQxLCJjaGFubmVsIjoiZW1haWwiLCJ1c2VySWQiOiIxMTc3NjgwNzI4NDY1MzQ0NTEyIn0.vzExTVJAWIkr2W53hRT_Ue_yPSPwq3-6obGRHUI9WL0"}]
+
+
+def _pia_seed():
+    have = {a.get("email") for a in (PIA_ST.get("accounts") or [])}
+    for a in _PIA_SEED:
+        if a["email"] not in have:
+            PIA_ST.setdefault("accounts", []).append(dict(a))
+    if len(PIA_ST.get("accounts") or []) != len(_json_load_safe(PIA_ACC_FILE) or {}).get("accounts", []):
+        _pia_save_acc()
+
+
+_pia_load_acc()
+_pia_seed()
+
+
+def pia_servers():
+    out = []
+    for aid, model, nm in PIA_AGENTS:
+        out.append({"id": f"pia-{model}", "name": f"{nm} (Piax)",
+                    "model_id": aid, "kind": "pia"})
+    return out
+
+
+def _pia_pick(agent_id):
+    accs = PIA_ST.get("accounts") or []
+    if not accs:
+        return None
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    lim = PIA_ST.get("limits") or {}
+    n = len(accs)
+    for i in range(n):
+        a = accs[(PIA_ST.get("idx", 0) + i) % n]
+        L = lim.get(a.get("email") or "?") or {}
+        if L.get("*") == today or L.get(agent_id) == today:
+            continue
+        PIA_ST["idx"] = (PIA_ST.get("idx", 0) + i + 1) % n
+        return a
+    return None
+
+
+def _pia_mark(acc, agent_id, err):
+    lm = PIA_ST.setdefault("limits", {}).setdefault(acc.get("email") or "?", {})
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    lm[agent_id] = today
+    low = str(err).lower()
+    if any(w in low for w in ("subscription", "upgrade", "quota", "limit", "frequent", "credit", "balance", "exceed")):
+        lm["*"] = today
+    _pia_save_acc()
+
+
+class _PiaLimit(Exception):
+    pass
+
+
+def pia_chat(messages, agent_id, timeout=110, depth=0):
+    """چاتی piax — SSE (openrouter-chunks)؛ sys دەفڕێتە ناو پرۆمپت؛ ئەکاونت-ڕۆتەیشن + لیمیت"""
+    with PIA_LOCK:
+        acc = _pia_pick(agent_id)
+    if not acc:
+        raise EMError("piax: هیچ ئەکاونتێکی بەردەست نییە")
+    sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:1000]
+    rest = [m for m in messages if m.get("role") != "system"][-8:]
+    q = ""
+    for m in rest[:-1]:
+        who = "بەکارهێنەر" if m.get("role") == "user" else "وەڵام"
+        q += f"{who}: {str(m.get('content'))[:600]}\n"
+    last = rest[-1] if rest else {"role": "user", "content": "سلام"}
+    if sys_txt:
+        q = f"[ئاراستەی سیستەم: {sys_txt}]\n{q}"
+    q += f"بەکارهێنەر: {last.get('content')}"
+    try:
+        r = requests.post(PIA_API + "/ai-api/ai/agent/chatStream",
+                          json={"device": {"deviceType": "pc", "osPlatform": "web"},
+                                "agentId": str(agent_id), "query": q[:8000],
+                                "conversationId": "", "parentMessageId": "", "files": []},
+                          headers={"Accept-Language": "en", "User-Agent": _PIA_UA,
+                                   "Authorization": acc.get("token") or "",
+                                   "Content-Type": "application/json",
+                                   "Origin": "https://www.piax.org",
+                                   "Referer": "https://www.piax.org/chat"},
+                          timeout=(12, timeout), stream=True)
+        if r.status_code == 401:
+            _pia_mark(acc, agent_id, "auth")
+            raise EMError("piax: توکن مردووە")
+        parts = []
+        for raw in r.iter_lines(chunk_size=None):
+            if not raw:
+                continue
+            ln = raw.decode("utf-8", "ignore").strip() if isinstance(raw, bytes) else str(raw).strip()
+            if not ln.startswith("data:"):
+                continue
+            payload = ln[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                d = json.loads(payload)
+            except Exception:
+                continue
+            if d.get("event") == "error":
+                msg = str(d.get("answer") or d.get("message") or "error")[:90]
+                if any(x in msg.lower() for x in ("subscription", "upgrade", "quota", "limit", "frequent", "credit")):
+                    raise _PiaLimit(msg)
+                raise EMError(f"piax: {msg}")
+            ch = (d.get("choices") or [{}])[0]
+            delta = (ch.get("delta") or {}).get("content") or ch.get("text") or ""
+            if delta:
+                parts.append(delta)
+        ans = "".join(parts).strip()
+        if not ans:
+            raise EMError("piax: وەڵام بەتاڵ")
+        return ans
+    except _PiaLimit as e:
+        _pia_mark(acc, agent_id, str(e))
+        raise EMError(f"piax: {e}")
+    except EMError:
+        raise
+    except Exception as e:
+        s = str(e)
+        if any(x in s.lower() for x in ("limit", "quota", "frequent", "subscription")) and depth == 0:
+            _pia_mark(acc, agent_id, s)
+            raise EMError(f"piax: {s[:80]}")
+        raise EMError(f"piax: {s[:80]}")
+
+
+def _pia_signup_new():
+    """#91PIA-AUTO: ئەکاونتی نوێی piax — temp-mail.org + کۆد + لۆگین (هەموو خۆکارانە لە VM)"""
+    try:
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        sg = PIA_ST.get("signups") or {"date": "", "n": 0}
+        if sg.get("date") != today:
+            sg = {"date": today, "n": 0}
+        if sg.get("n", 0) >= 6 or len(PIA_ST.get("accounts") or []) >= 12:
+            return None
+        s = requests.Session()
+        s.headers.update({"User-Agent": _PIA_UA, "Accept": "application/json",
+                          "Origin": "https://temp-mail.org", "Referer": "https://temp-mail.org/"})
+        r = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30))
+        mb = r.json() or {}
+        email, jwt = mb.get("mailbox"), mb.get("token")
+        if not email or not jwt:
+            print(f"[PIA-SIGNUP] mailbox fail: {r.status_code}", flush=True)
+            return None
+        s2 = requests.Session()
+        s2.headers.update({"User-Agent": _PIA_UA, "Accept-Language": "en",
+                           "Origin": "https://www.piax.org", "Referer": "https://www.piax.org/"})
+        r2 = s2.post(PIA_API + "/user-api/user/sendEmailVerifyCode",
+                     json={"channel": "pia", "email": email, "device": {"deviceType": "pc", "osPlatform": "web"}},
+                     timeout=(10, 40))
+        if (r2.json() or {}).get("code") != 1:
+            print(f"[PIA-SIGNUP] sendCode fail: {r2.text[:80]}", flush=True)
+            return None
+        code = None
+        mh = {"Authorization": "Bearer " + jwt, "Accept": "application/json"}
+        for _ in range(16):
+            time.sleep(6)
+            try:
+                r3 = s.get("https://web2.temp-mail.org/messages", headers=mh, timeout=(10, 25))
+                msgs = (r3.json() or {}).get("messages") or []
+            except Exception:
+                continue
+            if msgs:
+                mid = msgs[0].get("_id")
+                if not mid:
+                    continue
+                try:
+                    r4 = s.get(f"https://web2.temp-mail.org/messages/{mid}", headers=mh, timeout=(10, 25))
+                    nums = re.findall(r"\b(\d{4,8})\b", r4.text or "")
+                except Exception:
+                    continue
+                if nums:
+                    code = nums[0]
+                    break
+        if not code:
+            print(f"[PIA-SIGNUP] کۆد نەگەیشت {email}", flush=True)
+            return None
+        r5 = s2.post(PIA_API + "/user-api/user/emailLogin",
+                     json={"email": email, "code": code, "channel": "pia"}, timeout=(10, 40))
+        d5 = r5.json() or {}
+        if not d5.get("token"):
+            print(f"[PIA-SIGNUP] login fail: {r5.text[:100]}", flush=True)
+            return None
+        with PIA_LOCK:
+            PIA_ST.setdefault("accounts", []).append({"email": email, "token": d5["token"]})
+            sg["n"] = sg.get("n", 0) + 1
+            PIA_ST["signups"] = sg
+            _pia_save_acc()
+        print(f"[PIA-SIGNUP] ئەکاونتی نوێ ✅ {email}", flush=True)
+        return email
+    except Exception as e:
+        print(f"[PIA-SIGNUP] {str(e)[:80]}", flush=True)
+        return None
+
+
+def _pia_signup_daemon():
+    """هەر ٦ کاتژمێر — ئەگەر هەموو ئەکاونتەکان لیمیت بوون یان کەم بوون → نوێ دروست دەکات"""
+    while True:
+        try:
+            time.sleep(3600 * 2)
+            accs = PIA_ST.get("accounts") or []
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            lim = PIA_ST.get("limits") or {}
+            alive = [a for a in accs if (lim.get(a.get("email") or "?") or {}).get("*") != today]
+            if len(alive) < 2:
+                _pia_signup_new()
+        except Exception:
+            time.sleep(300)
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     threading.Thread(target=_self_update_daemon, daemon=True).start()
@@ -8716,6 +8976,7 @@ def main():
     setup_commands()
     # 🔄 چاودێری لیستی مۆدەڵەکان — هەر ٥ خولەک
     threading.Thread(target=auto_refresh, daemon=True).start()
+    threading.Thread(target=_pia_signup_daemon, daemon=True).start()
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
     def _safe_handle(m):
