@@ -656,3 +656,10 @@
 - **fly.toml**: `[[http_service.checks]]` بۆ /health (grace 120s، interval 30s، timeout 15s) — Fly خۆکارانە مەشینی وەستاو ڕیستارت دەکاتەوە.
 - **پشکنین**: ast OK، pyflakes 35 (baseline، ٠ undefined، ٠ redefinition)، exec-test سۆکێتی ڕاستەقینە: 8 هاوکات → 4×200 + 4×429، health bypass، sem release — ALL OK.
 - **وانە**: edit_file ـی هاوکات لەسەر هەمان فایل ڕەیس دەکات (٨/١٣ edit ونبوون + پاشماوە لە EOF) — پاککرایەوە و بە سکریپتێکی ئەتۆمی دووبارە دانران؛ لەمەودوا edit ـەکان یەک-بە-یەک.
+
+## #94U16 POOL-UNSTICK (2026-09-21) — چارەی ca❌/cb❌ (هەموو ئەکاونتەکان limit)
+- **نیشانە**: `[API] server=ca-claude → ca هەڵە: سنووری هەموو ئەکاونتەکان → fallback → nv`؛ SELF-HEAL: ca❌ cb❌. هۆکار: هەموو 100 ئەکاونتی CA لەسەر مۆدێلە داواکراوەکان limit بوون، بەڵام signup ـی نوێ بەهۆی گەیتی `_alive>=5` ـی گشتییەوە بلۆک ببوو (deadlock). CB ـیش لە سەقفی 70 گیری خواردبوو (هیچ گەشەیەک).
+- **پاچ**:
+  1. `_ca_signup_new(mkey)` — ژمارەکردنی زیندوو تەنها بۆ ئەو مۆدێڵە؛ `_ca_rotate` ـەکە mkey دەنێرێت. سنووری 80/ڕۆژ وەک خۆی.
+  2. CB: ئەگەر ٠ ئەکاونتی تەندرووست مابێت → headroom ی فریاکەوتن تا 110 ئەکاونت؛ سنووری 90/ڕۆژ وەک خۆی.
+- **پشکنین**: ast OK، pyflakes baseline، exec-test (model-aware alive + CB gate) OK.

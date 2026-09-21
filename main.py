@@ -3743,8 +3743,14 @@ def _cb_signup_new():
         sg = {"date": today, "n": 0}
     if sg.get("n", 0) >= 90:
         return None
-    if len(CB_ST.get("accounts") or []) >= 70:
-        return None
+    _cb_n = len(CB_ST.get("accounts") or [])
+    if _cb_n >= 70:
+        # #94U16: تەنها لە حاڵەتی نائومێدی (٠ ئەکاونتی تەندرووست ئەمڕۆ) → تا 110؛ ڕۆژانە 90 وەک خۆی
+        _ex = CB_ST.get("exhausted", {}) or {}
+        _healthy = sum(1 for _a in (CB_ST.get("accounts") or [])
+                       if str(_ex.get(_a.get("email"), 0))[:10] != today)
+        if _healthy > 0 or _cb_n >= 110:
+            return None
     n = CB_ST["next_num"]
     for off in (0, 3, 13, 40, 100, 250):
         email = f"komex{n + off}@duidir.com"
@@ -4052,7 +4058,8 @@ def _ca_firebase(ep, email, pw):
     return (tok, "") if tok else None
 
 
-def _ca_signup_new():
+def _ca_signup_new(mkey=None):
+    # #94U16: mkey → ژمارەکردنی زیندوو تەنها بۆ ئەو مۆدێڵە (چارەی deadlock ی «هەموو ئەکاونتەکان limit»)
     import datetime as _dt
     today = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     sg = CA_ST.get("signups") or {"date": "", "n": 0}
@@ -4062,8 +4069,12 @@ def _ca_signup_new():
     _accs_n = len(CA_ST.get("accounts") or [])
     _today_s = _dt.datetime.utcnow().strftime("%Y-%m-%d")
     _lim = CA_ST.get("limits") or {}
-    _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
-                 if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
+    if mkey:
+        _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
+                     if not _lim_hit((_lim.get(_a.get("email") or "?") or {}), mkey))
+    else:
+        _alive = sum(1 for _a in (CA_ST.get("accounts") or [])
+                     if _today_s not in (_lim.get(_a.get("email") or "?") or {}).values())
     if sg.get("n", 0) >= 80:  # #91Z: 80 سنووری ڕۆژانە — بەبێ مۆڵەت ناگۆڕدرێت
         return None
     if _accs_n >= 70 and (_alive >= 5 or _accs_n >= 160):
@@ -4627,7 +4638,7 @@ def _ca_rotate(model_key):
             CA_ST["tok"] = None
             _ca_save_acc()
             return True
-    return bool(_ca_signup_new())
+    return bool(_ca_signup_new(model_key))
 
 
 def _ca_models_catalog():
