@@ -947,6 +947,7 @@ EASEMATE_MODELS = [
 
 EM_MODELS_CACHE = {"models": None, "t": 0.0}
 _EM_BURNED = {}  # #94U58: proxy → ڕۆژی 6101 (تا reset ی سبەی باز بدرێت)
+_EM_GOOD = {}  # #94U59: proxy → دوایین سەرکەوتن (GOOD-first <6 کاتژمێر)
 
 
 class EMError(Exception):
@@ -979,6 +980,60 @@ def em_servers():
              "tier": m.get("tier", "basic"), "kind": "em"} for m in live]
 
 
+def _em_try_once(payload, px, timeout):
+    """#94U59: یەک هەوڵی easemate-node (thread-safe) — answer یان raise؛ ROTATE=3 (کوانتا بە-IP ـە)"""
+    _env = dict(os.environ, EM_PROXY=px, EM_ROTATE="3", EM_FRESH_ID="1") if px else None
+    _to = timeout if not px else min(timeout, 45)  # پرۆکسی: زۆرترین 45چرکە
+    try:
+        p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
+                           capture_output=True, timeout=_to, env=_env)
+    except subprocess.TimeoutExpired:
+        if px:
+            try:
+                _proxy_mark_bad(px)
+            except Exception:
+                pass
+        raise EMError("easemate timeout")
+    lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+    if not lines:
+        if px:
+            try:
+                _proxy_mark_bad(px)
+            except Exception:
+                pass
+        raise EMError("easemate no output")
+    try:
+        obj = json.loads(lines[-1])
+    except Exception:
+        raise EMError("easemate bad output")
+    if obj.get("ok") and obj.get("answer"):
+        if px:
+            try:
+                _EM_GOOD[px] = time.time()
+                if len(_EM_GOOD) > 3000:
+                    _cut = time.time() - 86400
+                    for _k in [_k for _k, _v in _EM_GOOD.items() if _v < _cut][:1000]:
+                        _EM_GOOD.pop(_k, None)
+            except Exception:
+                pass
+            print(f"[EM] 6101 → پرۆکسی ✅ {px[:24]}", flush=True)
+        return obj["answer"]
+    code = str(obj.get("code") or "")
+    if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
+        if px:
+            try:
+                _EM_BURNED[px] = time.strftime("%Y-%m-%d", time.gmtime())
+            except Exception:
+                pass
+        raise EMError(obj.get("error") or "easemate 6101", obj.get("code"))
+    if px:
+        try:
+            _proxy_mark_bad(px)
+        except Exception:
+            pass
+    raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
+
+
 def em_chat(messages, model_id, timeout=90, depth=0):
     """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی جیاوازەکان + ناسنامەی نوێ
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
@@ -990,68 +1045,40 @@ def em_chat(messages, model_id, timeout=90, depth=0):
         _today = time.strftime("%Y-%m-%d", time.gmtime())
         _er = _empx[1:]
         random.shuffle(_er)
-        _fresh = [None] + [_p for _p in _er if _EM_BURNED.get(_p) != _today]
-        _empx = _fresh if len(_fresh) >= 3 else [None] + _er[:2]
+        _fresh = [_p for _p in _er if _EM_BURNED.get(_p) != _today]
+        try:  # #94U59: GOOD-first (سەرکەوتووی <6 کاتژمێر) — stable-sort شەفڵ دەپارێزێت
+            _now59 = time.time()
+            _fresh.sort(key=lambda _p: 0 if _now59 - _EM_GOOD.get(_p, 0) < 21600 else 1)
+        except Exception:
+            pass
+        _empx = [None] + _fresh if len(_fresh) >= 2 else [None] + _er[:2]
     except Exception:
         pass
-    for _i, _px in enumerate(_empx):
-        _env = dict(os.environ, EM_PROXY=_px, EM_ROTATE=str(_i + 1), EM_FRESH_ID="1") if _px else None
+    import concurrent.futures as _cfw  # #94U59: race
+    _waves = [_empx[_i:_i + 3] for _i in range(0, len(_empx), 3)]  # شەپۆلی 3-یاڵە — یەکەم سەرکەوتن دەیباتەوە
+    _nattempt = 0
+    for _w in _waves:
+        _ex59 = _cfw.ThreadPoolExecutor(max_workers=len(_w))
         try:
-            p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
-                               capture_output=True, timeout=timeout, env=_env)
-        except subprocess.TimeoutExpired:
-            # #91F4: کوشتنی هەموو node ەکەی کۆن (زۆرترین 3)
+            _futs = {_ex59.submit(_em_try_once, payload, _px, timeout): _px for _px in _w}
             try:
-                subprocess.run(["pkill", "-f", EM_CLIENT.split("/")[-1]], capture_output=True, timeout=5)
+                for _f in _cfw.as_completed(_futs, timeout=timeout + 15):
+                    _nattempt += 1
+                    try:
+                        _ans59 = _f.result()
+                    except Exception as _e59:
+                        _last = _e59 if isinstance(_e59, EMError) else EMError(str(_e59)[:80])
+                        continue
+                    _ex59.shutdown(wait=False, cancel_futures=True)
+                    return _ans59
+            except _cfw.TimeoutError:
+                _last = EMError("easemate wave-timeout")
+        finally:
+            try:
+                _ex59.shutdown(wait=False, cancel_futures=True)
             except Exception:
                 pass
-            if _px:  # #94U53: پرۆکسی هێواش → خراپ + داهاتوو
-                try:
-                    _proxy_mark_bad(_px)
-                except Exception:
-                    pass
-                _last = EMError("easemate timeout")
-                continue
-            raise EMError("easemate timeout")
-        lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
-        if not lines:
-            if _px:  # #94U53
-                try:
-                    _proxy_mark_bad(_px)
-                except Exception:
-                    pass
-            _last = EMError("easemate no output")
-            continue
-        try:
-            obj = json.loads(lines[-1])
-        except Exception:
-            _last = EMError("easemate bad output")
-            continue
-        if obj.get("ok") and obj.get("answer"):
-            if _px:
-                print(f"[EM] 6101 → پرۆکسی ✅ {_px[:24]}", flush=True)
-            return obj["answer"]
-        code = str(obj.get("code") or "")
-        if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
-            _last = EMError(obj.get("error") or "easemate 6101", obj.get("code"))
-            if _px:  # #94U58: ئەم IP ـە ئەمڕۆ سوتا — تا سبەی بازی بدە
-                try:
-                    _EM_BURNED[_px] = _today
-                    if len(_EM_BURNED) > 3000:
-                        for _k in [_k for _k, _v in _EM_BURNED.items() if _v != _today][:1000]:
-                            _EM_BURNED.pop(_k, None)
-                except Exception:
-                    pass
-            continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو (mark-bad نا — سبەی دەگەڕێتەوە)
-        if _px:  # #94U55: هەڵەی پرۆکسی (CF-403 و...) → خراپ + داهاتوو (raise تەنها دایرێکت)
-            try:
-                _proxy_mark_bad(_px)
-            except Exception:
-                pass
-            _last = EMError(obj.get("error") or "easemate failed", obj.get("code"))
-            continue
-        raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
-    print(f"[EM] هەموو IP ـەکان 6101 ({_i + 1} هەوڵ؛ سوتاوی ئەمڕۆ {len(_EM_BURNED)})", flush=True)
+    print(f"[EM] هەموو IP ـەکان 6101 ({_nattempt} هەوڵ؛ سوتاوی ئەمڕۆ {len(_EM_BURNED)})", flush=True)
     raise _last
 
 
@@ -10393,7 +10420,7 @@ def _admin_test_model(chat_id, model_ref):
                                    "Content-Type": "application/json"},
                           json={"model": model_ref,
                                 "messages": [{"role": "user", "content": "تەنها بە یەک وشە وەڵام بدەوە: باشم"}]},
-                          timeout=(10, 120))
+                          timeout=(10, 300))  # #94U59: 120→300 (شەپۆلەکانی em کاتیان دەوێت)
         dt = time.time() - t0
         try:
             j = r.json()

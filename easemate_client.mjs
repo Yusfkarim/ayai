@@ -261,7 +261,7 @@ async function main() {
   h['Cache-Control'] = 'no-cache';
 
   const ctrl = new AbortController();
-  const kill = setTimeout(() => ctrl.abort(), 150000);
+  const kill = setTimeout(() => ctrl.abort(), 60000); // #94U59: 150→60s
   let full = '';
   let lastErr = null;
   try {
