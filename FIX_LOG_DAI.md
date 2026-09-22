@@ -1000,3 +1000,20 @@
 ## #94U66 (2026-09-22)
 - success-log: tok-flag (anon vs email/quota) — داتا بۆ تاقی یەکلاکەرەوە: ئایا token-chat لەسەر fresh-IP لە IP-bucket تێدەپەڕێت؟
 - مۆدێڵی ئێستا: IP-bucket ڕۆژانە بچووک (~1-2 چات) + identity 50K; ئەگەر ئەکاونت bypass بکات → pool=زێڕ، ئەگەر نا → تەنها anon-IP-hunting
+
+## #95U1 (2026-09-22) — honest deadlines 🔧
+- /test fable-5: em_chat 420s + gz_chat 1400s (blocking — دێدلاینی 100s ناتوانێت بیانبڕێت!) → loopback timeout
+- API: candidate future-guard (کاندید لە بودجەی ماوە زیاتر ناخوات) + em/gz timeout=75
+- em_chat: دێدلاینی گشتی + شەپۆل-بودجە 40s + fail-fast (سوتاو≥150 → 2 شەپۆل)
+- gz_chat: 110→90 + دێدلاینی گشتی + infer-cap 45s؛ /test: کات + کۆتایی هەڵە
+- سەلمێنرا: fable-5 لە 14.1s وەڵام دایەوە (پێشتر >300s timeout!)
+
+## #95U2 (2026-09-22) — EM دایمۆنی تایبەت 🚀
+- _em_daemon: 8-parallel signup، ئامانج 1000 زیندوو، قەت ناوەستێت (1000 لە ~10-13 کاتژمێر)
+- EM لە دایمۆنی گشتی لابرا (بەچ-زنجیرە بلۆکی maintenance بوو)؛ worker: via=res/dc tag (داتای keep-rate)
+
+## #95U3 (2026-09-22) — gz بەهەر نرخێ 🛡️
+- کاشی پرۆمپتی کورت (≤40پیت، TTL 5خولەک، کۆنتێکست-تەواو؛ پرۆمپتی /test قەت کاش نابێت)
+- probe: cheap=True (دایرێکت+باشترین1 — ~5× هەرزانتر لە 3×11)
+- GOOD/BURNED/WALL persist (gz_mem.json + em_mem.json — deploy بیرگەوری ناسڕێتەوە)
+- gz حەوز 8→10؛ v6 بۆ giz: نییە (no AAAA — تاقیکراوە لە Fly)

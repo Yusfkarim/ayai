@@ -1032,6 +1032,10 @@ def _em_try_once(payload, px, timeout, acc=None):
             except Exception:
                 _tokflag = "?"
             print(f"[EM] 6101 → پرۆکسی ✅ {px[:24]} {_tokflag}", flush=True)
+            try:
+                _em_mem_save()
+            except Exception:
+                pass
         if acc is not None:  # #94U65: سەرکەوتن → ژمارەی 6101 سفر + used+1
             try:
                 acc["f6101"] = 0
@@ -1047,6 +1051,10 @@ def _em_try_once(payload, px, timeout, acc=None):
                 _EM_BURNED[px] = time.strftime("%Y-%m-%d", time.gmtime())
             except Exception:
                 pass
+        try:
+            _em_mem_save()
+        except Exception:
+            pass
         if acc and acc.get("email"):  # #94U65: 6101 زۆرینە IP-ە نەک ئەکاونت — تەنها دوای 5× لەسەریەک بسوتێنە
             try:
                 acc["f6101"] = int(acc.get("f6101") or 0) + 1
@@ -1076,6 +1084,10 @@ def em_chat(messages, model_id, timeout=90, depth=0):
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
+    try:
+        _em_mem_load()
+    except Exception:
+        pass
     _empx = _px_list(8)  # #94U54؛ #94U56: دایرێکت+8 + شەفڵ (هەر خولێک IP ی جیاواز → کوانتا دەدۆزرێتەوە)
     _today = ""
     try:  # #94U58: شەفڵی ڕاستەقینە + بازدانی IP سوتاوەکانی ئەمڕۆ (پۆششی سیستماتیکی حەوز)
@@ -1148,6 +1160,41 @@ def em_chat(messages, model_id, timeout=90, depth=0):
 # ══════════ EM POOL — §2.6b — ئەکاونتی easemate (signup سەلمێنراو #94U63) ══════════
 EM_ACC_FILE = os.path.join(DATA_DIR, "em_accounts.json")
 EM_ST = {"accounts": [], "idx": 0, "limits": {}, "signups": {}}
+_EM_MEM_LD = [False]
+_EM_MEM_SV = [0.0]
+
+
+def _em_mem_load():
+    """#95U3: _EM_BURNED/_EM_GOOD لە دیسک"""
+    if _EM_MEM_LD[0]:
+        return
+    _EM_MEM_LD[0] = True
+    _EM_MEM_SV[0] = time.time()
+    try:
+        d = _json_load_safe(os.path.join(DATA_DIR, "em_mem.json")) or {}
+        for _k, _v in (d.get("good") or {}).items():
+            _EM_GOOD[_k] = float(_v)
+        for _k, _v in (d.get("burned") or {}).items():
+            _EM_BURNED[_k] = str(_v)
+        print(f"[EM] 🧠 بیرگەوری بارکرا (GOOD {len(_EM_GOOD)} BURN {len(_EM_BURNED)})", flush=True)
+    except Exception:
+        pass
+
+
+def _em_mem_save():
+    """#95U3: پاشەکەوت (throttle 60s)"""
+    try:
+        _now = time.time()
+        if _now - _EM_MEM_SV[0] < 60:
+            return
+        _EM_MEM_SV[0] = _now
+        _json_save(os.path.join(DATA_DIR, "em_mem.json"),
+                   {"good": dict(_EM_GOOD), "burned": dict(_EM_BURNED)})
+    except Exception:
+        pass
+
+
+
 EM_LOCK = threading.Lock()
 _EM_SEC = "e84yr70o0a5n08f5"  # SHA-1 key (لە chunk ی easemate دەرهێنراوە)
 _EM_AESK = b"08C%?0-aHhd!9Gvk"  # AES-128 key (crypto-util.js)
@@ -1281,6 +1328,7 @@ def _em_signup_new():
             _rx = [p for p in (_px_list_res(4) or []) if p]
         except Exception:
             _rx = []
+        _pt95 = "res" if _rx else "dc"  # #95U2: جۆری پرۆکسی (داتا: keep-rate)
         if _rx:
             _px = _r.choice(_rx)  # res یەکەم — کەمکردنەوەی risk-flag
         else:
@@ -1323,13 +1371,13 @@ def _em_signup_new():
         except Exception:
             pass
         if _qt <= 0:
-            print(f"[EM-POOL] risk/0-quota ⏭️ {email} (فڕێدرا)", flush=True)
+            print(f"[EM-POOL] risk/0-quota ⏭️ {email} via={_pt95} (فڕێدرا)", flush=True)
             return None
         with EM_LOCK:
             EM_ST["accounts"].append({"email": email, "password": _apw, "token": _tok,
                                       "uid": ((j.get("data") or {}).get("user") or {}).get("id"), "t": _t.time(), "quota": _qt})
             _em_save_acc()
-        print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} quota={_qt} → {len(EM_ST['accounts'])}", flush=True)
+        print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} quota={_qt} via={_pt95} → {len(EM_ST['accounts'])}", flush=True)
         return _tok
     except Exception as e:
         print(f"[EM-POOL] signup: {str(e)[:70]}", flush=True)
@@ -4235,6 +4283,46 @@ _GZ_WALL = {}  # #94U60: px → کاتی 401/403 (واڵ 30خولەک)
 _GZ_GOOD = {}  # #94U60: px → دوایین سەرکەوتن (GOOD-first)
 _GZ_PXOK = {}  # #94U61: px → کاتی qualification (cookie-forward سەلمێنرا)
 _GZ_SEEDS = ["http://103.237.102.191:11111", "http://38.194.246.34:999", "http://190.97.241.106:999"]  # #94U61: سەلمێنراو 201/429 (reach+cookie ✅)
+_GZ_CACHE = {}  # #95U3: (model,ctx-hash) → (ans, t) — پرۆمپتی کورت ≤40پیت، TTL 5خولەک
+_GZ_MEM_LD = [False]
+_GZ_MEM_SV = [0.0]
+
+
+def _gz_mem_load():
+    """#95U3: GOOD/BURNED/WALL لە دیسک (deploy بیرگەوری ناسڕێتەوە)"""
+    if _GZ_MEM_LD[0]:
+        return
+    _GZ_MEM_LD[0] = True
+    _GZ_MEM_SV[0] = time.time()
+    try:
+        d = _json_load_safe(os.path.join(DATA_DIR, "gz_mem.json")) or {}
+        for _k, _v in (d.get("good") or {}).items():
+            _GZ_GOOD[_k] = float(_v)
+        for _k, _v in (d.get("wall") or {}).items():
+            _GZ_WALL[_k] = float(_v)
+        for _k, _v in (d.get("burned") or {}).items():
+            _p = _k.split("\x00")
+            if len(_p) == 2:
+                _GZ_BURNED[(_p[0], _p[1])] = float(_v)
+        print(f"[GZ] 🧠 بیرگەوری بارکرا (GOOD {len(_GZ_GOOD)} WALL {len(_GZ_WALL)} BURN {len(_GZ_BURNED)})", flush=True)
+    except Exception:
+        pass
+
+
+def _gz_mem_save():
+    """#95U3: پاشەکەوت (throttle 60s)"""
+    try:
+        _now = time.time()
+        if _now - _GZ_MEM_SV[0] < 60:
+            return
+        _GZ_MEM_SV[0] = _now
+        _json_save(os.path.join(DATA_DIR, "gz_mem.json"),
+                   {"good": dict(_GZ_GOOD), "wall": dict(_GZ_WALL),
+                    "burned": {f"{_k[0]}\x00{_k[1]}": _v for _k, _v in _GZ_BURNED.items()}})
+    except Exception:
+        pass
+
+
 _GZ_SYNC = {"t": 0.0, "thread": None, "labels": {}}
 
 
@@ -4243,17 +4331,33 @@ def _gz_rid(n):
     return "".join(_sc.choice(_st.ascii_letters + _st.digits + "-_") for _ in range(n))
 
 
-def gz_chat(messages, model_id, timeout=90):  # #95U1: 110→90 + دێدلاینی گشتی
+def gz_chat(messages, model_id, timeout=90, cheap=False):  # #95U1؛ #95U3: cheap=probe هەرزان
     """چاتی GizAI — session ی نەناسراو ← infer → {"status":"completed","output":…}؛ #94U50: 429/401 → سێشن+پرۆکسی نوێ"""
     import time as _t
     if _t.time() < _GZ_BADC.get(model_id, 0):
         raise EMError("gz: cooldown")
+    try:
+        _gz_mem_load()
+    except Exception:
+        pass
+    _ck95 = None
+    try:  # #95U3: کاشی پرۆمپتی کورت (کۆنتێکست-تەواو، نەک تەنها دوا-نامە)
+        _lu95 = next((m.get("content") or "" for m in reversed(messages) if m.get("role") != "system" and m.get("content")), "")
+        if _lu95 and len(_lu95) <= 40 and _lu95 != "تەنها بە یەک وشە وەڵام بدەوە: باشم":
+            import hashlib as _h95
+            _ctx95 = _h95.md5(repr([(m.get("role"), (m.get("content") or "")[:200]) for m in messages]).encode()).hexdigest()[:12]
+            _ck95 = (model_id, _ctx95)
+            _hit95 = _GZ_CACHE.get(_ck95)
+            if _hit95 and _t.time() - _hit95[1] < 300 and not cheap:
+                return _hit95[0]
+    except Exception:
+        pass
     hist = _sys_keep([{"type": (m.get("role") or "user"), "content": m.get("content") or ""}
                         for m in messages if m.get("content")], 11)
     if not hist:
         raise EMError("gz: هیچ نامە")
     _last = EMError("gz: شکست")
-    _allpx = _gz_qualify(_GZ_SEEDS + _px_list(8)[1:])  # #94U60+61: seeds + حەوز → تەنها cookie-forward
+    _allpx = _gz_qualify(_GZ_SEEDS + _px_list(10)[1:])  # #95U3: 8→10  # #94U60+61: seeds + حەوز → تەنها cookie-forward
     try:
         random.shuffle(_allpx)  # #94U54: هەر خولێک IP ی جیاواز
     except Exception:
@@ -4264,7 +4368,10 @@ def gz_chat(messages, model_id, timeout=90):  # #95U1: 110→90 + دێدلاین
         _use.sort(key=lambda _p: 0 if _now60 - _GZ_GOOD.get(_p, 0) < 21600 else 1)
     except Exception:
         pass
-    _loop = [None] + (_use if len(_use) >= 2 else _allpx[:2])  # دایرێکت یەکەم + proxy ـەکان
+    if cheap:  # #95U3: probe هەرزان — دایرێکت + باشترین 1
+        _loop = [None] + (_use[:1] if _use else _allpx[:1])
+    else:
+        _loop = [None] + (_use if len(_use) >= 2 else _allpx[:2])  # دایرێکت یەکەم + proxy ـەکان
     _dead95 = _t.time() + min(timeout, 90)  # #95U1
     for _px in _loop:
         _rem95 = _dead95 - _t.time()  # #95U1
@@ -4355,6 +4462,19 @@ def gz_chat(messages, model_id, timeout=90):  # #95U1: 110→90 + دێدلاین
                 _GZ_GOOD[_px] = _t.time()
             except Exception:
                 pass
+        if _ck95:
+            try:  # #95U3: کاش + بیرگەوری
+                _GZ_CACHE[_ck95] = (ans, _t.time())
+                if len(_GZ_CACHE) > 500:
+                    _cut95 = _t.time() - 300
+                    for _k95 in [_k for _k, _v in _GZ_CACHE.items() if _v[1] < _cut95][:200]:
+                        _GZ_CACHE.pop(_k95, None)
+            except Exception:
+                pass
+        try:
+            _gz_mem_save()
+        except Exception:
+            pass
         return ans
     if "429" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["quota"]
@@ -4362,6 +4482,10 @@ def gz_chat(messages, model_id, timeout=90):  # #95U1: 110→90 + دێدلاین
     if "401" in str(_last) or "403" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["login"]
         raise EMError("gz: لۆگین-واڵ")
+    try:
+        _gz_mem_save()
+    except Exception:
+        pass
     print(f"[GZ] هەموو IP ـەکان شکستیان هێنا ({len(_loop)} هەوڵ): {_last}", flush=True)
     raise _last
 
@@ -4433,7 +4557,7 @@ def _gz_probe():
     _e = EMError("gz: probe")
     for _mid in ids:
         try:
-            return gz_chat([{"role": "user", "content": "hi"}], _mid, timeout=45)
+            return gz_chat([{"role": "user", "content": "hi"}], _mid, timeout=45, cheap=True)  # #95U3
         except Exception as e:
             _e = e
     raise _e
@@ -5978,6 +6102,39 @@ def _pool_fill_one(name, st, fn, tgt, alive_tgt, batch, jlo, jhi):
         return 0
 
 
+def _em_daemon():
+    """#95U2: دایمۆنی تایبەتی EM — 8-parallel signup، ئامانج 1000 زیندوو، قەت ناوەستێت"""
+    import concurrent.futures as _cfe
+    print("[EM-POOL] 🚀 دایمۆنی تایبەت (8-parallel → 1000)", flush=True)
+    while True:
+        try:
+            _today = _lim_today()
+            _accs = EM_ST.get("accounts") or []
+            _lim = EM_ST.get("limits") or {}
+            _exh = EM_ST.get("exhausted") or {}
+            _al = sum(1 for _a in _accs if _pool_acc_alive(_a, _lim, _exh, _today, time.time()))
+            _sg = EM_ST.get("signups") or {}
+            _sgn = _sg.get("n", 0) if _sg.get("date") == _today else 0
+            if _al < 1000 and len(_accs) < 10000 and _sgn < 10000:
+                _need = min(8, max(2, 1000 - _al))
+                with _cfe.ThreadPoolExecutor(max_workers=8) as _ex:
+                    _futs = [_ex.submit(_em_signup_new) for _i in range(_need)]
+                    try:
+                        for _f in _cfe.as_completed(_futs, timeout=400):
+                            try:
+                                _f.result()
+                            except Exception:
+                                pass
+                    except _cfe.TimeoutError:
+                        pass
+                time.sleep(10)
+            else:
+                time.sleep(60)
+        except Exception as e:
+            print(f"[EM-POOL] daemon: {str(e)[:60]}", flush=True)
+            time.sleep(60)
+
+
 def _pool_daemon():
     """#94U35: CA/CB/NV → 1000 زیندوو + AC 30؛ #94U40: catch-up — ئەگەر <ئامانج: 3 حەوز پێکەوە (threads) بەچ 40؛ ئەگەر گەیشت: مەینتەینەنس (1-بۆ-1)"""
     time.sleep(60)
@@ -5989,8 +6146,7 @@ def _pool_daemon():
              ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000),
              ("ALLE", _m.ALLE_ST, _m._alle_signup_new, 10000, 1000),
              ("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000),
-             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000),  # #94U47؛ #94U48: ALLE+AL
-             ("EM", _m.EM_ST, _m._em_signup_new, 10000, 1000))  # #94U63: EM POOL v1 (25 → 1000 دوای سەلماندن)
+             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000))  # #94U47؛ #94U48: ALLE+AL؛ #95U2: EM→دایمۆنی تایبەت
     import concurrent.futures as _cf
     _was_catch = None
     while True:
@@ -6024,7 +6180,6 @@ def _pool_daemon():
                     _cf.wait(_futs)
                 _pool_fill_one("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000, 15, 2, 4)  # #94U48: Supabase خێرا
                 _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000, 20, 2, 4)  # #94U47: catch-up بەچ 20
-                _pool_fill_one("EM", _m.EM_ST, _m._em_signup_new, 10000, 1000, 8, 2, 4)  # #94U63b: EM لە catch-up ـیش (چاوەڕوانی ALLE مەکە)
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
@@ -11862,6 +12017,7 @@ def main():
     # کەیک-بەیکەری G4F — پاشبنەما
     threading.Thread(target=_g4f_baker_daemon, daemon=True).start()
     threading.Thread(target=_pool_daemon, daemon=True).start()
+    threading.Thread(target=_em_daemon, daemon=True).start()  # #95U2
     threading.Thread(target=self_heal_daemon, daemon=True).start()
     threading.Thread(target=proxy_keeper_daemon, daemon=True).start()
     threading.Thread(target=_proxy_harvester_daemon, daemon=True).start()
