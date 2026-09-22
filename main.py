@@ -1027,6 +1027,13 @@ def _em_try_once(payload, px, timeout, acc=None):
             except Exception:
                 pass
             print(f"[EM] 6101 → پرۆکسی ✅ {px[:24]}", flush=True)
+        if acc is not None:  # #94U65: سەرکەوتن → ژمارەی 6101 سفر + used+1
+            try:
+                acc["f6101"] = 0
+                acc["used"] = int(acc.get("used") or 0) + 1
+                _em_save_acc()
+            except Exception:
+                pass
         return obj["answer"]
     code = str(obj.get("code") or "")
     if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
@@ -1035,13 +1042,22 @@ def _em_try_once(payload, px, timeout, acc=None):
                 _EM_BURNED[px] = time.strftime("%Y-%m-%d", time.gmtime())
             except Exception:
                 pass
-        if acc and acc.get("email"):  # #94U63: ئەکاونتەکەش ئەمڕۆ سوتا
+        if acc and acc.get("email"):  # #94U65: 6101 زۆرینە IP-ە نەک ئەکاونت — تەنها دوای 5× لەسەریەک بسوتێنە
             try:
-                EM_ST.setdefault("limits", {})[acc["email"]] = {"burn": time.strftime("%Y-%m-%d", time.gmtime())}
+                acc["f6101"] = int(acc.get("f6101") or 0) + 1
+                if acc["f6101"] >= 5:
+                    EM_ST.setdefault("limits", {})[acc["email"]] = {"burn": time.strftime("%Y-%m-%d", time.gmtime())}
                 _em_save_acc()
             except Exception:
                 pass
         raise EMError(obj.get("error") or "easemate 6101", obj.get("code"))
+    _errl = str(obj.get("error") or "").lower()
+    if acc and acc.get("email") and (code == "401" or any(k in _errl for k in ("unauthorized", "invalid token", "token expired", "need login", "please login"))):
+        try:  # #94U65: کێشەی ڕاستەقینەی ئەکاونت → یەکسەر بسوتێنە
+            EM_ST.setdefault("limits", {})[acc["email"]] = {"auth": time.strftime("%Y-%m-%d", time.gmtime())}
+            _em_save_acc()
+        except Exception:
+            pass
     if px:
         try:
             if px != "V6": _proxy_mark_bad(px)  # #94U63
