@@ -3976,6 +3976,8 @@ _GZ_BADC = {}  # model → cooldown تا
 _GZ_BURNED = {}  # #94U60: (px,model) → کاتی 429 (کوانتای کاتژمێر)
 _GZ_WALL = {}  # #94U60: px → کاتی 401/403 (واڵ 30خولەک)
 _GZ_GOOD = {}  # #94U60: px → دوایین سەرکەوتن (GOOD-first)
+_GZ_PXOK = {}  # #94U61: px → کاتی qualification (cookie-forward سەلمێنرا)
+_GZ_SEEDS = ["http://103.237.102.191:11111", "http://38.194.246.34:999", "http://190.97.241.106:999"]  # #94U61: سەلمێنراو 201/429 (reach+cookie ✅)
 _GZ_SYNC = {"t": 0.0, "thread": None, "labels": {}}
 
 
@@ -3994,7 +3996,7 @@ def gz_chat(messages, model_id, timeout=110):
     if not hist:
         raise EMError("gz: هیچ نامە")
     _last = EMError("gz: شکست")
-    _allpx = _px_list(8)[1:]  # #94U60: حەوزی تەواو 8 (سەلمێنرا: proxy واڵی دایرێکت تێدەپەڕێنێت ✅)
+    _allpx = _gz_qualify(_GZ_SEEDS + _px_list(8)[1:])  # #94U60+61: seeds + حەوز → تەنها cookie-forward
     try:
         random.shuffle(_allpx)  # #94U54: هەر خولێک IP ی جیاواز
     except Exception:
@@ -4100,6 +4102,47 @@ def gz_chat(messages, model_id, timeout=110):
         raise EMError("gz: لۆگین-واڵ")
     print(f"[GZ] هەموو IP ـەکان شکستیان هێنا ({len(_loop)} هەوڵ): {_last}", flush=True)
     raise _last
+
+
+def _gz_qualify(pxs):
+    """#94U61: تەنها proxy ـی cookie-forward (httpbin echo) — stripکەرەکان = 400-identity (fail-open)"""
+    import concurrent.futures as _cfq
+    _now = time.time()
+    _fresh = [p for p in pxs if _now - _GZ_PXOK.get(p, 0) < 3600]
+    _todo = [p for p in pxs if p not in _fresh]
+    if _todo:
+        try:  # httpbin خۆی زیندووە؟ (دایرێکت)
+            _r0 = requests.get("https://httpbin.org/headers", headers={"User-Agent": GZ_UA}, timeout=(5, 8))
+            if _r0.status_code != 200:
+                return pxs
+        except Exception:
+            return pxs
+        _tok = _gz_rid(10)
+        def _one(px):
+            try:
+                _r = requests.get("https://httpbin.org/headers", headers={"User-Agent": GZ_UA, "Cookie": f"gzx={_tok}"},
+                                  proxies={"http": px, "https": px}, timeout=(5, 8))
+                if _r.status_code == 200 and _tok in _r.text:
+                    _GZ_PXOK[px] = time.time()
+                    return px
+            except Exception:
+                pass
+            return None
+        try:
+            _exq = _cfq.ThreadPoolExecutor(max_workers=min(len(_todo), 8))
+            try:
+                _futs = [_exq.submit(_one, p) for p in _todo]
+                for _f in _cfq.as_completed(_futs, timeout=30):
+                    try:
+                        if _f.result():
+                            _fresh.append(_f.result())
+                    except Exception:
+                        pass
+            finally:
+                _exq.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+    return _fresh if _fresh else pxs
 
 
 def _gz_slug(v):
