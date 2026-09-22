@@ -12455,6 +12455,7 @@ ACH_MODELS = [("consensus", "GPT-5 Consensus", ""),  # SmartRoute — کۆنسێ
               ("code", "GPT-5 Code", ""),             # CODE wrap → GPT-5-mini + Gemini-2.5-Flash (سەلمێنراو)
               ("math", "GPT-5 Math", ""),             # MATH wrap → GPT-5-mini + DeepSeek-v3 (سەلمێنراو)
               ("deep", "Deep Analysis", ""),          # ANALYSIS wrap → GPT-5-mini / Gemini-3-Flash (سەلمێنراو)
+              ("web", "Live Web Search", ""),         # forceWebSearch → perplexity/sonar + sources (سەلمێنراو)
               ("gemini", "Gemini Flash-Lite", "google/gemini-2.5-flash-lite"),
               ("gpt4o", "GPT-4o Mini", "openai/gpt-4o-mini"),
               ("llama", "Llama 3.1 8B", "meta-llama/llama-3.1-8b-instruct")]
@@ -12462,12 +12463,13 @@ ACH_REAL = {k: m for k, _, m in ACH_MODELS if m}
 ACH_BUDGET = 3      # نامە/ئەکاونت (٣ کۆنسێنسۆسی فرە-مۆدێل/ڕۆژ + ستاندەرد)
 ACH_DAY_CAP = 250   # ساینئەپ/ڕۆژ — خۆپاراستنی mail.tm
 # #97f: پێچانەوەی کاتێگۆری — ڕاوتەری SmartRoute مۆدێلی پریمیۆمی تایبەت بەو جۆرە دادەنێت (سەلمێنراو):
-ACH_SMART = ("consensus", "code", "math", "deep")
+ACH_SMART = ("consensus", "code", "math", "deep", "web")
 ACH_WRAPS = {
     "consensus": "\n\n(تکایە بە شیکردنەوەیەکی قووڵ، بەراوردی فرە-ڕوانگە، و هەنگاوە بیرکارییەکان وەڵام بدەوە)",
     "code": "\n\n(تکایە بە کۆدی تەواو و ڕوونکردنەوەی تەکنیکی قووڵ وەڵام بدەوە)",
     "math": "\n\n(تکایە بە هاوکێشەی ماتماتیکی و سەلماندنی هەنگاو بە هەنگاو وەڵام بدەوە)",
     "deep": "\n\n(تکایە بە بەراوردی فرە-ڕوانگەی قووڵ و شیکردنەوەی ڕەخنەگرانە وەڵام بدەوە)",
+    "web": "\n\n(تکایە بە دوایین زانیاری و سەرچاوەی تازە لە ئینتەرنێت وەڵام بدەوە)",
 }
 
 
@@ -12644,6 +12646,8 @@ def _ach_call(acc, model_key, user_msg, history, timeout):
     if model_key in ACH_SMART:
         ep = "allChatSmartRoute"
         body["mode"] = "smart"
+        if model_key == "web":
+            body["forceWebSearch"] = True  # #97g: NEWS_RESEARCH → perplexity/sonar + sources
     else:
         ep = "streamGeneralChat"
         body["model"] = ACH_REAL.get(model_key, "google/gemini-2.5-flash-lite")
@@ -12680,10 +12684,12 @@ def _ach_call(acc, model_key, user_msg, history, timeout):
         elif t == "done":
             cm = d.get("consensus_meta") or {}
             md = d.get("metadata") or {}
-            if cm or md:
+            srcs = d.get("sources") or []
+            if cm or md or srcs:
                 cmeta = {"confidence": cm.get("confidence"), "points": (cm.get("consensus_points") or [])[:4],
                          "models": [x for x in (md.get("primaryModel"), md.get("secondaryModel")) if x],
-                         "multi": bool(md.get("isMultiModelResponse"))}
+                         "multi": bool(md.get("isMultiModelResponse")),
+                         "sources": [(str(s.get("title") or ""), str(s.get("url") or "")) for s in srcs[:4] if s.get("url")]}
             break
     ans = "".join(parts).strip()
     if not ans:
@@ -12720,6 +12726,11 @@ def ach_chat(messages, model_key="consensus", timeout=110, depth=0):
                 _ach_save()
             if cm and cm.get("models"):
                 print(f"[ACH] کۆنسێنسۆس: {' + '.join(cm['models'])} | multi={cm.get('multi')} | conf={cm.get('confidence')}", flush=True)
+            # #97g: سەرچاوەکانی وێب → بەستەرەوە بە وەڵام
+            if model_key == "web" and cm.get("sources"):
+                _ln = "\n".join(f"🔗 {(t or 'سەرچاوە')[:48]}: {u}" for t, u in cm["sources"] if u)
+                if _ln:
+                    ans = ans.rstrip() + "\n\n" + _ln
             return ans
         except _AchLimit as e:
             s = str(e)
