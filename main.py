@@ -1410,6 +1410,7 @@ def _em_signup_new():
         j = {}
         _first95 = True
         _sess95 = _sess
+        _pt95 = "inbox"
         for _px, _pt95 in _cands95:  # #95U4: دووبارە بە پرۆکسی جیاواز (هەمان inbox — بودجە بەفیڕۆ ناچێت)
             if _px == "V6":  # #95U6
                 _sess95 = _em_v6_sess()
@@ -1493,7 +1494,8 @@ def _em_signup_new():
         print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} quota={_qt} via={_pt95} → {len(EM_ST['accounts'])}", flush=True)
         return _tok
     except Exception as e:
-        print(f"[EM-POOL] signup: {str(e)[:70]}", flush=True)
+        _pt0 = _pt95 if "_pt95" in locals() else "?"
+        print(f"[EM-POOL] signup: {str(e)[:70]} (via={_pt0})", flush=True)
         return None
 
 
@@ -6252,19 +6254,19 @@ def _em_daemon():
                 _rk = [a for a in (EM_ST.get("accounts") or []) if not (a.get("quota") or 0)]
                 _rk.sort(key=lambda a: (a.get("rk") or 0))
                 _dirty = False
-                for _a in _rk[:10]:
+                for _a in _rk[:3]:  # #95U8: 10→3 (daemon نەگیرێت)
                     if _a.get("rk") and time.time() - _a["rk"] < 72000:
                         continue
                     _a["rk"] = time.time()
                     _dirty = True
                     try:  # #95U7: check-in ڕۆژانە (trust-building)
-                        subprocess.run([NODE_BIN, EM_CLIENT, "signin"], capture_output=True, timeout=45,
+                        subprocess.run([NODE_BIN, EM_CLIENT, "signin"], capture_output=True, timeout=30,  # #95U8
                                        env=dict(os.environ, EM_TOKEN=_a.get("token") or ""))
                     except Exception:
                         pass
                     try:
                         _env = dict(os.environ, EM_TOKEN=_a.get("token") or "")
-                        _pp = subprocess.run([NODE_BIN, EM_CLIENT, "perm"], capture_output=True, timeout=60, env=_env)
+                        _pp = subprocess.run([NODE_BIN, EM_CLIENT, "perm"], capture_output=True, timeout=30, env=_env)  # #95U8
                         _pl = [l for l in (_pp.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
                         if _pl:
                             _q = int((((json.loads(_pl[-1])).get("perm") or {}).get("token_total")) or 0)
@@ -6282,6 +6284,7 @@ def _em_daemon():
                         pass
             except Exception:
                 pass
+            print(f"[EM-POOL] ♻️ alive={_al} n={len(_accs)} budget={_sgn} dry={_dry95}", flush=True)
             if _al < 1000 and len(_accs) < 10000 and _sgn < 10000:
                 _need = min(8, max(2, 1000 - _al))
                 _kept95 = 0
