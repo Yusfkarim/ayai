@@ -3949,11 +3949,12 @@ def gz_chat(messages, model_id, timeout=110):
         raise EMError("gz: هیچ نامە")
     _last = EMError("gz: شکست")
     _gpx = _px_list_res(3)  # #94U52: residential یەکەم (datacenter VPN-block ـە)
-    _loop = _gpx if _gpx else _px_list(2)
+    _rest = _gpx if _gpx else _px_list(2)
     try:
-        random.shuffle(_loop)  # #94U54: هەر خولێک IP ی جیاواز
+        random.shuffle(_rest)  # #94U54: هەر خولێک IP ی جیاواز
     except Exception:
         pass
+    _loop = [None] + _rest  # #94U57: دایرێکت هەمیشە یەکەم (لە Fly سەلمێنرا 201 ✅)
     for _px in _loop:
         try:
             s = requests.Session()
@@ -4012,7 +4013,8 @@ def gz_chat(messages, model_id, timeout=110):
                 _m2 = " " + str((r.json() or {}).get("message") or "")[:50]
             except Exception:
                 pass
-            raise EMError(f"gz: {r.status_code}{_m2}")  # #94U56: پەیامی سێرڤەر
+            _last = EMError(f"gz: {r.status_code}{_m2}")  # #94U56؛ #94U57: 400 → IP ی دواتر (loop بەردەوام)
+            continue
         try:
             j = r.json()
         except Exception:
@@ -4047,6 +4049,18 @@ def gz_servers():
     for v, lbl in sorted(_GZ_SYNC.get("catalog", {}).items()):
         out.append({"id": f"gz-{_gz_slug(v)}", "name": f"{lbl} (Giz)", "model_id": v, "kind": "gz"})
     return out
+
+
+def _gz_probe():
+    """#94U57: probe — 3 مۆدێڵی یەکەمی کاتالۆگ failover (flaky ی تاک-مۆدێل نەبێتە ❌)"""
+    ids = list(_GZ_SYNC.get("catalog", {}).keys())[:3] or ["gpt-5-4-nano"]
+    _e = EMError("gz: probe")
+    for _mid in ids:
+        try:
+            return gz_chat([{"role": "user", "content": "hi"}], _mid, timeout=45)
+        except Exception as e:
+            _e = e
+    raise _e
 
 
 def _gz_parse_catalog__raw(raw):
@@ -9426,7 +9440,7 @@ def self_heal_once():
     probes["act"] = lambda: act_chat(ACT_MODELS[0], [{"role": "user", "content": "hi"}], timeout=45)
     probes["em"] = lambda: em_chat([{"role": "user", "content": "hi"}], EASEMATE_MODELS[0]["model_id"], timeout=45)
     if _GZ_SYNC.get("catalog"):
-        probes["gz"] = lambda: gz_chat([{"role": "user", "content": "hi"}], list(_GZ_SYNC["catalog"].keys())[0], timeout=45)
+        probes["gz"] = _gz_probe  # #94U57: 3-مۆدێڵ failover
     # #94U43: پشکنینی هەموو حەوزە ئەکاونتییەکان — ac/pia/alle ـیش
     if MS.get("ac_ok"):
         probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
