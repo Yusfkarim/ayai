@@ -983,7 +983,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
-    _empx = _px_list(5)  # #94U54: دایرێکت+5 + شەفڵ (هەر خولێک IP ی جیاواز → کوانتا دەدۆزرێتەوە)
+    _empx = _px_list(8)  # #94U54؛ #94U56: دایرێکت+8 + شەفڵ (هەر خولێک IP ی جیاواز → کوانتا دەدۆزرێتەوە)
     try:
         random.shuffle(_empx[1:])
     except Exception:
@@ -3969,7 +3969,12 @@ def gz_chat(messages, model_id, timeout=110):
                               "reference": "auto", "showChoices": False}}}, timeout=(10, 25))
             sid = (r0.json() or {}).get("sessionId") if r0.status_code in (200, 201) else None
             if not sid:
-                _last = EMError(f"gz: session {r0.status_code}")
+                _sm = ""
+                try:
+                    _sm = " " + str((r0.json() or {}).get("message") or "")[:50]
+                except Exception:
+                    pass
+                _last = EMError(f"gz: session {r0.status_code}{_sm}")
                 continue
             inst = _gz_rid(21)
             inf = {"model": model_id,
@@ -4002,7 +4007,12 @@ def gz_chat(messages, model_id, timeout=110):
             _last = EMError(f"gz: {r.status_code} {_msg[:40]}")
             continue
         if r.status_code != 201 and r.status_code != 200:
-            raise EMError(f"gz: {r.status_code}")
+            _m2 = ""
+            try:
+                _m2 = " " + str((r.json() or {}).get("message") or "")[:50]
+            except Exception:
+                pass
+            raise EMError(f"gz: {r.status_code}{_m2}")  # #94U56: پەیامی سێرڤەر
         try:
             j = r.json()
         except Exception:
