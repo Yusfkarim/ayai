@@ -966,13 +966,22 @@ def _em_proxies_load():
 
 
 def _em_px_probe(px, timeout=24):
-    """#96U5: ئایا ئەم پرۆکسیە دەگاتەوە easemate؟ (node client models — هەرزان)"""
+    """#96U6: تاقیکردنەوەی زێڕین — چاتی تەواو؛ تەنها ئەگەر وەڵامی ڕاستەقینە گەڕایەوە = زێڕین (پەیوەندی+کوانتا)"""
     try:
         env = dict(os.environ, EM_PROXY=px if str(px).startswith("http") else "http://" + str(px), EM_ROTATE="1")
-        p = subprocess.run([NODE_BIN, EM_CLIENT, "models"], capture_output=True, timeout=timeout, env=env)
+        payload = json.dumps({"model_id": 3, "messages": [{"role": "user", "content": "hi"}]}, ensure_ascii=False).encode()
+        p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload, capture_output=True, timeout=timeout, env=env)
         out = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
         if out:
-            return bool(json.loads(out[-1]).get("ok"))
+            o = json.loads(out[-1])
+            if o.get("ok") and o.get("answer"):
+                return True
+            if str(o.get("code")) == "6101":
+                try:  # سوتاو — ڕۆژی بپارێزە با دووبارە تەی نەکاتەوە
+                    _EM_BURNED[px] = time.strftime("%Y-%m-%d", time.gmtime())
+                except Exception:
+                    pass
+            return False
     except Exception:
         return False
     return False
@@ -982,8 +991,9 @@ def _em_candidate_proxies(limit=14):
     """#96U5: پرۆکسی تازەی گشتی + ئەوانی پاڵی بۆت — ئەمانەی ئەمڕۆ نەسوتاون"""
     out = []
     today = time.strftime("%Y-%m-%d", time.gmtime())
-    for url in ("https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
-                "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"):
+    for url in ("https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=6000",
+                "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
+                "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"):  # #96U6: +proxyscrape
         try:
             txt = requests.get(url, timeout=15).text
             for ln in txt.split():
@@ -1004,6 +1014,57 @@ def _em_candidate_proxies(limit=14):
     return out[:limit]
 
 
+def _em_gold_daemon():
+    """#96U6: ڕاوی زێڕین — هەر 8 خولەک ئەگەر <3 زێڕین ماوە → ڕاوی نوێ؛ لە dawn (UTC) هەموو سوتاوەکان دەسڕێتەوە"""
+    time.sleep(120)
+    _last_dawn = ""
+    while True:
+        try:
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            # dawn reset — کوانتای هەموو ئایپییەکان نوێ دەبنەوە
+            if _last_dawn and today != _last_dawn:
+                _EM_BURNED.clear()
+                _EM_PROXIES["t"] = 0.0
+                print("[EM-GOLD] 🌅 dawn — سوتاوەکان پاککرانەوە — ڕاوی نوێ", flush=True)
+                try:
+                    _em_mem_save()
+                except Exception:
+                    pass
+            _last_dawn = today
+            alive = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != today]
+            if len(alive) < 3:
+                cands = _em_candidate_proxies(24)
+                try:
+                    _resc = [p for p in _px_list_res(6) if p in cands]
+                    cands = _resc + [p for p in cands if p not in _resc]
+                except Exception:
+                    pass
+                if cands:
+                    import concurrent.futures as _cfx7
+                    found = []
+                    with _cfx7.ThreadPoolExecutor(3) as ex7:  # OOM-پارێز
+                        for px, okp in zip(cands[:18], ex7.map(_em_px_probe, cands[:18])):
+                            if okp:
+                                found.append(px)
+                                if len(found) >= 4:
+                                    break
+                    if found:
+                        _EM_PROXIES["list"] = (found + alive)[:8]
+                        _EM_PROXIES["t"] = time.time()
+                        try:
+                            _json_save(_EM_PXFILE, {"proxies": _EM_PROXIES["list"], "t": _EM_PROXIES["t"], "gold": True})
+                        except Exception:
+                            pass
+                        print(f"[EM-GOLD] ✅ {len(found)} زێڕین — کۆی گشتی {len(_EM_PROXIES['list'])}", flush=True)
+                        try:
+                            _em_mem_save()
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[EM-GOLD] {str(e)[:60]}", flush=True)
+        time.sleep(480)
+
+
 def _em_proxy_reap_daemon():
     """#96U5: هەر ١٥ خولەک — دڵنیابە ≥٤ پرۆکسی کاردەر بۆ easemate هەن (چارەسەری CF-403 ی فلای)"""
     _em_proxies_load()
@@ -1015,6 +1076,7 @@ def _em_proxy_reap_daemon():
             aged = (not _EM_PROXIES["list"]) or (time.time() - _EM_PROXIES["t"] > 3600)
             if len(_EM_PROXIES["list"]) < 4 or aged:
                 cands = _em_candidate_proxies(30)  # #96U5b: فراوانتر
+                # #96U6: OOM-پارێز — node هەرکامیان ~50MB — زۆتر لە 3 مەکە
                 try:  # #96U5b: منزلی سەرەتا — ئەگەر ماندوو نەبن
                     _resc = [p for p in _px_list_res(8) if p in cands]
                     cands = _resc + [p for p in cands if p not in _resc]
@@ -1023,11 +1085,11 @@ def _em_proxy_reap_daemon():
                 good = []
                 if cands:
                     import concurrent.futures as _cfx5
-                    with _cfx5.ThreadPoolExecutor(8) as ex5:
+                    with _cfx5.ThreadPoolExecutor(3) as ex5:  # #96U6: 8→3 (OOM دۆزرایەوە لە 1GB)
                         for px, okp in zip(cands, ex5.map(_em_px_probe, cands)):
                             if okp:
                                 good.append(px)
-                                if len(good) >= 8:
+                                if len(good) >= 6:
                                     break
                 if good:
                     _EM_PROXIES["list"] = good[:8]
@@ -10406,6 +10468,26 @@ def self_heal_once():
         probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
     probes["pia"] = lambda: pia_chat([{"role": "user", "content": "hi"}], PIA_AGENTS[0][0], timeout=45)
     probes["lr"] = lambda: lr_chat([{"role": "user", "content": "hi"}], timeout=45)  # #96U3
+    # #96U6: probe ی em — تەنها لە ڕێگەی زێڕینەکان + خێرا (direct/V6 ی CF-403 فڕێ دەدرێت)
+    def _em_probe96():
+        try:
+            _g = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != time.strftime("%Y-%m-%d", time.gmtime())][:4]
+        except Exception:
+            _g = []
+        if not _g:
+            raise EMError("em: هیچ زێڕینێک نییە — دیمۆنی زێڕین دەیگەڕێت")
+        import concurrent.futures as _cfx6
+        _win = []
+        with _cfx6.ThreadPoolExecutor(3) as ex6:
+            for px, okp in zip(_g, ex6.map(_em_px_probe, _g)):
+                if okp:
+                    _win.append(px)
+                    break
+        if _win:
+            _EM_PROXIES["list"] = [p for p in _EM_PROXIES["list"] if p in _win] + [p for p in _EM_PROXIES["list"] if p not in _win]
+            return "ok"
+        raise EMError("em: زێڕینەکان کوانتایان سووتاوە — دیمۆن نوێ دەگەڕێت")
+    probes["em"] = _em_probe96
     _alle_srv = next((s for s in (API_BRAIN.get("servers") or []) if s.get("kind") == "alle"), None)
     if _alle_srv and _alle_srv.get("model_id"):
         probes["alle"] = lambda _m=_alle_srv.get("model_id"): alle_chat([{"role": "user", "content": "hi"}], _m, timeout=45)
@@ -12470,6 +12552,7 @@ def main():
     _enc_migrate_all()  # #94U12: شێفرەکردنی هەموو فایلە کۆنەکان
     threading.Thread(target=_pool_stats_daemon, daemon=True).start()  # #96U4b
     threading.Thread(target=_em_proxy_reap_daemon, daemon=True).start()  # #96U5
+    threading.Thread(target=_em_gold_daemon, daemon=True).start()  # #96U6
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_memwatch_daemon, daemon=True).start()
