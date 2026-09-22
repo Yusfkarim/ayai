@@ -1191,6 +1191,159 @@ _RWD_UAS = [
     "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
 ]
 _RWD_STATE = {"i": 0}
+# #94U46 RWD-POOL: 1000 ناسنامەی زیندووی بەردەوام (بودجە بە UA دەناسرێت — سەلمێنرا: fresh-UA=same→INSUFF، UA نوێ→OK) + سەقف 10000
+RWD_ABSMAX = 10000
+RWD_BUDGET = 2300  # سنووری پارێزراو لە 2500
+RWD_ST = {"day": "", "used": {}, "dead": {}, "total": 0}
+_RWD_LK = threading.Lock()
+
+
+def _rwd_file():
+    return os.path.join(DATA_DIR, "rwd_pool.json")
+
+
+def _rwd_gen_ua(existing=None):
+    """#94U46: UA ی ڕاستەقینە و ناوازە — Chrome/Edge/Firefox/Safari."""
+    import random as _r
+    ex = existing or set()
+    for _ in range(50):
+        _k = _r.random()
+        if _k < 0.55:
+            _m, _b, _pp = _r.randint(120, 136), _r.randint(1000, 6999), _r.randint(0, 220)
+            _pl = _r.choice(["(Windows NT 10.0; Win64; x64)", "(Macintosh; Intel Mac OS X 10_15_7)", "(X11; Linux x86_64)"])
+            ua = f"Mozilla/5.0 {_pl} AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_m}.0.{_b}.{_pp} Safari/537.36"
+        elif _k < 0.70:
+            _m, _b, _pp = _r.randint(120, 136), _r.randint(1000, 6999), _r.randint(0, 220)
+            ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{_m}.0.{_b}.{_pp} Safari/537.36 Edg/{_m}.0.{_b}.{_pp}"
+        elif _k < 0.85:
+            _v = _r.randint(120, 133)
+            _pl = _r.choice(["Windows NT 10.0; Win64; x64", "X11; Linux x86_64", "Macintosh; Intel Mac OS X 10.15"])
+            ua = f"Mozilla/5.0 ({_pl}; rv:{_v}.0) Gecko/20100101 Firefox/{_v}.0"
+        else:
+            _v = _r.choice(["17.4", "17.5", "17.6", "18.0", "18.1"])
+            ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{_v} Safari/605.1.15"
+        if ua not in ex and ua not in _RWD_UAS:
+            return ua
+    return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.{_r.randint(1000, 9999)}.{_r.randint(0, 99)} Safari/537.36"
+
+
+def _rwd_save(force=False):
+    try:
+        _now = time.time()
+        if not force and _now - RWD_ST.get("sv_t", 0) < 60:
+            return
+        RWD_ST["sv_t"] = _now
+        _json_save(_rwd_file(), {"idents": _RWD_UAS, "used": RWD_ST.get("used") or {},
+                                 "dead": RWD_ST.get("dead") or {}, "day": RWD_ST.get("day") or "",
+                                 "total": RWD_ST.get("total") or 0})
+    except Exception:
+        pass
+
+
+def _rwd_ensure():
+    """#94U46: حەوزی 1000 — load یان دروستکردن + ڕیسیتی ڕۆژانە + جێگۆڕکێی مردووەکان (lazy)."""
+    global _RWD_UAS
+    try:
+        with _RWD_LK:
+            today = _lim_today()
+            if not _RWD_UAS or len(_RWD_UAS) < 1000:
+                d = _json_load_safe(_rwd_file()) or {}
+                _li = d.get("idents") or []
+                RWD_ST["used"] = d.get("used") or {}
+                RWD_ST["dead"] = d.get("dead") or {}
+                RWD_ST["day"] = d.get("day") or ""
+                RWD_ST["total"] = d.get("total") or 0
+                _ex = set(_li)
+                while len(_li) < 1000:
+                    _li.append(_rwd_gen_ua(_ex))
+                    _ex.add(_li[-1])
+                _RWD_UAS = _li
+            if RWD_ST.get("day") != today:  # بەیانی نوێ → هەموو بودجەکان دەگەڕێنەوە
+                RWD_ST["day"] = today
+                RWD_ST["used"] = {}
+                RWD_ST["dead"] = {}
+                RWD_ST["total"] = 0
+                _rwd_save(force=True)
+                return
+            _dead = RWD_ST.get("dead") or {}
+            if len(_dead) > 50 and (RWD_ST.get("total") or 0) < RWD_ABSMAX:  # جێگۆڕکێی کۆمەڵ (تا 200/جار)
+                _ex = set(_RWD_UAS)
+                _n_rep = 0
+                for _j in range(len(_RWD_UAS)):
+                    if _RWD_UAS[_j] in _dead and (RWD_ST.get("total") or 0) < RWD_ABSMAX:
+                        _nu = _rwd_gen_ua(_ex)
+                        _ex.add(_nu)
+                        _dead.pop(_RWD_UAS[_j], None)
+                        (RWD_ST.get("used") or {}).pop(_RWD_UAS[_j], None)
+                        _RWD_UAS[_j] = _nu
+                        RWD_ST["total"] = (RWD_ST.get("total") or 0) + 1
+                        _n_rep += 1
+                        if _n_rep >= 200:
+                            break
+                if _n_rep:
+                    _rwd_save()
+    except Exception:
+        pass
+
+
+def _rwd_cur():
+    _rwd_ensure()
+    try:
+        return _RWD_UAS[_RWD_STATE["i"] % len(_RWD_UAS)]
+    except Exception:
+        return _RWD_UAS[0] if _RWD_UAS else ""
+
+
+def _rwd_skip_dead():
+    """#94U46: ئەگەر ناسنامەی ئێستا مردووە → بچۆ سەر زیندوو."""
+    try:
+        with _RWD_LK:
+            _dead = RWD_ST.get("dead") or {}
+            _used = RWD_ST.get("used") or {}
+            for _k in range(min(len(_RWD_UAS), 60)):
+                _j = (_RWD_STATE["i"] + _k) % len(_RWD_UAS)
+                if _RWD_UAS[_j] not in _dead and (_used.get(_RWD_UAS[_j]) or 0) < RWD_BUDGET:
+                    _RWD_STATE["i"] = _j
+                    return
+        _rwd_next_identity()
+    except Exception:
+        pass
+
+
+def _rwd_mark_dead(ua=None):
+    try:
+        ua = ua or _rwd_cur()
+        with _RWD_LK:
+            RWD_ST.setdefault("dead", {})[ua] = 1
+        _rwd_save()
+    except Exception:
+        pass
+
+
+def _rwd_charge(pin_chars, pout_chars, ua=None):
+    """#94U46: خەرجکردنی بودجە (~پیت/3 تۆکن)؛ ئەگەر ≥2300 → مردوو."""
+    try:
+        ua = ua or _rwd_cur()
+        est = int(pin_chars / 3) + int(pout_chars / 3) + 20
+        with _RWD_LK:
+            _u = RWD_ST.setdefault("used", {})
+            _u[ua] = (_u.get(ua) or 0) + est
+            if _u[ua] >= RWD_BUDGET:
+                RWD_ST.setdefault("dead", {})[ua] = 1
+        _rwd_save()
+    except Exception:
+        pass
+
+
+def _rwd_stat():
+    """#94U46: ئاماری خێرا بۆ /health — لە فایل (وەک _pstat)."""
+    try:
+        d = _json_load_safe(_rwd_file()) or {}
+        _ri = d.get("idents") or []
+        _dd = d.get("dead") or {}
+        return {"n": len(_ri), "alive": sum(1 for u in _ri if u not in _dd), "signups": f"{d.get('total', 0)}/{RWD_ABSMAX}"}
+    except Exception:
+        return {"n": 0, "alive": 0, "signups": f"0/{RWD_ABSMAX}"}
 # پشتڕاستکراو — فلاشەکان + بەقوەتەکان (هەموویان تاقیکرانەوە)
 _RWD_VERIFIED = [
     # بەقوەتەکان (تاقیکرانەوەی ڕاستەقینە — لە بودجەی ٢٥٠٠ ێکن)
@@ -1254,6 +1407,8 @@ def rwd_servers(timeout=15):
 
 def _rwd_session(timeout=15):
     """سێشن بە UA ی ئێستا — GET ی سەرەتا کوکییەی anon_token دەگرێت"""
+    _rwd_ensure()
+    _rwd_skip_dead()
     s = requests.Session()
     ua = _RWD_UAS[_RWD_STATE["i"] % len(_RWD_UAS)]
     s.headers["User-Agent"] = ua
@@ -1265,8 +1420,32 @@ def _rwd_session(timeout=15):
 
 
 def _rwd_next_identity():
-    """گۆڕینی ناسنامە — UA ی داهاتوو = بودجەی تازەی ٢٥٠٠ تۆکن"""
-    _RWD_STATE["i"] = (_RWD_STATE["i"] + 1) % len(_RWD_UAS)
+    """گۆڕینی ناسنامە — UA ی داهاتوو = بودجەی تازەی ٢٥٠٠ تۆکن؛ #94U46: مردوو → جێگۆڕکێی 1-بۆ-1 (1000 زیندووی بەردەوام)"""
+    try:
+        _rwd_ensure()
+        with _RWD_LK:
+            _RWD_STATE["i"] = (_RWD_STATE["i"] + 1) % len(_RWD_UAS)
+            _i = _RWD_STATE["i"]
+            _cur = _RWD_UAS[_i]
+            _dead = RWD_ST.get("dead") or {}
+            _used = RWD_ST.get("used") or {}
+            if _cur in _dead or (_used.get(_cur) or 0) >= RWD_BUDGET:
+                if (RWD_ST.get("total") or 0) < RWD_ABSMAX:
+                    _nu = _rwd_gen_ua(set(_RWD_UAS))
+                    _RWD_UAS[_i] = _nu
+                    RWD_ST["total"] = (RWD_ST.get("total") or 0) + 1
+                else:
+                    for _k in range(len(_RWD_UAS)):
+                        _j = (_i + _k) % len(_RWD_UAS)
+                        if _RWD_UAS[_j] not in _dead and (_used.get(_RWD_UAS[_j]) or 0) < RWD_BUDGET:
+                            _RWD_STATE["i"] = _j
+                            break
+        _rwd_save()
+    except Exception:
+        try:
+            _RWD_STATE["i"] = (_RWD_STATE["i"] + 1) % len(_RWD_UAS)
+        except Exception:
+            pass
 
 
 def rwd_chat(model_id, messages, timeout=110):
@@ -1285,6 +1464,7 @@ def rwd_chat(model_id, messages, timeout=110):
             raise EMError(f"rwd: {str(e)[:60]}")
         if r.status_code == 400:
             # ناسنامەی ئەم UA یە بەکارهاتووە — گۆڕی بدەر بۆ ئەوی تر
+            _rwd_mark_dead()  # #94U46
             _rwd_next_identity()
             continue
         if r.status_code == 429:
@@ -1299,6 +1479,7 @@ def rwd_chat(model_id, messages, timeout=110):
             code = str(err.get("code") or "")
             if code == "INSUFFICIENT_TOKENS":
                 # تۆکنەکانی ئەم ناسنامەیە تەواو بوون — UA ی نوێ = ٢٥٠٠ی نوێ
+                _rwd_mark_dead()  # #94U46: ئەمە مردووە — جێگۆڕکێی 1-بۆ-1
                 if attempt == 0:
                     _rwd_next_identity()
                     continue
@@ -1307,6 +1488,10 @@ def rwd_chat(model_id, messages, timeout=110):
         ch = (j.get("choices") or [{}])[0]
         ans = ((ch.get("message") or {}).get("content") or "").strip()
         if ans:
+            try:
+                _rwd_charge(sum(len(str(m.get("content") or "")) for m in messages), len(ans))
+            except Exception:
+                pass
             if (ch.get("finish_reason") or "") == "length" or ans[-1].isalnum():  # #94U45: بڕانی سێرڤەر (~1600 تۆکن) یان کۆتایی نیوە-وشە → بەردەوامی خۆکار
                 ans = _rwd_continue(model_id, ans, timeout)
             return ans
@@ -1337,6 +1522,10 @@ def _rwd_continue(model_id, ans, timeout=110):
             if not chunk:
                 break
             out = out + "\n" + chunk
+            try:
+                _rwd_charge(len(tail) + 300, len(chunk))
+            except Exception:
+                pass
             print(f"[RWD] 📜 بەردەوامی #{_cn + 1}: +{len(chunk)} پیت", flush=True)
             if (ch.get("finish_reason") or "") != "length" and not chunk[-1].isalnum():
                 break
@@ -7084,7 +7273,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 200)},  # #94U32b
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 200), "rwd": _rwd_stat()},  # #94U32b؛ #94U46
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
@@ -7980,6 +8169,9 @@ def _revive_source(kind, err=None):
             elif kind == "cbox":
                 _cbox_new_account()
                 steps.append("account")
+            elif kind == "rwd":  # #94U46: ناسنامەی داهاتوو (1000 زیندوو)
+                _rwd_next_identity()
+                steps.append("next-ident")
             elif kind == "pia":
                 _pia_signup_new()
                 steps.append("signup")
@@ -8576,11 +8768,18 @@ def handle_message(msg):
                 except Exception:
                     return 0
             ca, cb, nv, ac = _a("ca_accounts.json"), _a("cb_accounts.json"), _a("nv_accounts.json"), _a("ac_accounts.json")
+            try:  # #94U46: ناسنامە زیندووەکانی rewind
+                _rd = _json_load_safe(os.path.join(DATA_DIR, "rwd_pool.json")) or {}
+                _ri = _rd.get("idents") or []
+                _dd = _rd.get("dead") or {}
+                rwd = sum(1 for u in _ri if u not in _dd)
+            except Exception:
+                rwd = 0
             nmodels = len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/30\n",  # #94U38
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/30 · RWD {rwd}/1000\n",  # #94U38؛ #94U46
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):
@@ -8951,6 +9150,7 @@ def self_heal_once():
     probes["cb"] = _cb_probe
     probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
+    probes["rwd"] = lambda: rwd_chat(_RWD_VERIFIED[0], [{"role": "user", "content": "hi"}], timeout=45)  # #94U46
     # #94U43: پشکنینی هەموو حەوزە ئەکاونتییەکان — ac/pia/alle ـیش
     if MS.get("ac_ok"):
         probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
