@@ -983,7 +983,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
-    for _i, _px in enumerate(_px_list(3)):  # #94U50: هەر هەوڵێک IP ی جیاواز
+    for _i, _px in enumerate(_px_list_http(3)):  # #94U50؛ #94U51: http تەنها
         _env = dict(os.environ, EM_PROXY=_px, EM_ROTATE=str(_i + 1), EM_FRESH_ID="1") if _px else None
         try:
             p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
@@ -1013,6 +1013,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
             _last = EMError(obj.get("error") or "easemate 6101", obj.get("code"))
             continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو
         raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
+    print(f"[EM] هەموو IP ـەکان 6101 ({_i + 1} هەوڵ)", flush=True)
     raise _last
 
 
@@ -2484,7 +2485,7 @@ def ak_chat(model_id, messages, timeout=110):
         rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
     payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
     _last = EMError("ak: failed")
-    for _px in _px_list(2):  # #94U49: دایرێکت + ٢ پرۆکسی
+    for _px in _px_list_http(2):  # #94U49؛ #94U51: http تەنها
         _env = dict(os.environ, AK_PROXY=_px) if _px else None
         try:
             p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
@@ -3939,7 +3940,19 @@ def gz_chat(messages, model_id, timeout=110):
             _last = EMError(f"gz: {str(e)[:60]}")
             continue
         if r.status_code in (429, 401, 403):
-            _last = EMError(f"gz: {r.status_code}")
+            _msg = ""
+            try:
+                _msg = (r.json() or {}).get("message") or ""
+            except Exception:
+                pass
+            if "pay-as-you-go" in _msg:  # #94U51: مۆدێل پارەدارە — لە کاتالۆگ لابەرە
+                try:
+                    if _GZ_SYNC.get("catalog", {}).pop(model_id, None) is not None:
+                        print(f"[GZ] پارەدار لابرا: {model_id}", flush=True)
+                except Exception:
+                    pass
+                raise EMError(f"gz: {model_id} paywalled")
+            _last = EMError(f"gz: {r.status_code} {_msg[:40]}")
             continue
         if r.status_code != 201 and r.status_code != 200:
             raise EMError(f"gz: {r.status_code}")
@@ -5112,6 +5125,15 @@ def _px_list(n=3):
     """#94U49: [None, px1, ...] — یەکەم ڕاستەوخۆ، دواتر پرۆکسی تازە بۆ هەر لیمێتی IP"""
     try:
         pxs = [p for p in (_proxy_get(n) or []) if p][:n]
+        return [None] + pxs
+    except Exception:
+        return [None]
+
+
+def _px_list_http(n=3):
+    """#94U51: [None, http1, ...] — تەنها http/https (node ProxyAgent socks ناکات)"""
+    try:
+        pxs = [p for p in (_proxy_get(n + 2) or []) if p and p.startswith("http")][:n]
         return [None] + pxs
     except Exception:
         return [None]

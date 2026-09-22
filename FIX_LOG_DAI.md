@@ -925,3 +925,8 @@
 - em ❌: تەنها 1 پرۆکسی تاقی دەکرایەوە → لوپی دایرێکت+3-جیاواز + لابردنی breaker-3h
 - gz ❌ (login-wall 401): پرۆکسی نەبوو → سێشن+IP ی نوێ بۆ هەر هەوڵێک
 - سەلمێنرا: mail.tm fallback ✅ + em/gz لۆجیک ✅ + ALLE E2E زیندوو uid=33909 لە 18چرکە ✅
+
+## #94U51 (2026-09-22)
+- em هێشتا ❌: node ProxyAgent socks ناکات → socks = بێدەنگ direct → هەموو 6101؛ چاککرا: `_px_list_http` بۆ em/ak + پرێنتی کۆتایی
+- gz هێشتا ❌: دوو دەرگای جیاواز — 429 VPN/proxy (IP) و 401 pay-as-you-go (مۆدێل)؛ چاککرا: message-aware (VPN→پرۆکسی داهاتوو، paywall→لە کاتالۆگ لابەرە + raise)
+- سەلمێنرا: http-only ✅ + prune ✅ (کاتالۆگی زیندوو 520 → 13 فری)
