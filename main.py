@@ -1160,6 +1160,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
 # ══════════ EM POOL — §2.6b — ئەکاونتی easemate (signup سەلمێنراو #94U63) ══════════
 EM_ACC_FILE = os.path.join(DATA_DIR, "em_accounts.json")
 EM_ST = {"accounts": [], "idx": 0, "limits": {}, "signups": {}}
+_EM_SG_GOOD = {}  # #95U5: px → signup-send سەلمێنراو
 _EM_MEM_LD = [False]
 _EM_MEM_SV = [0.0]
 
@@ -1176,6 +1177,8 @@ def _em_mem_load():
             _EM_GOOD[_k] = float(_v)
         for _k, _v in (d.get("burned") or {}).items():
             _EM_BURNED[_k] = str(_v)
+        for _k, _v in (d.get("sg") or {}).items():
+            _EM_SG_GOOD[_k] = float(_v)
         print(f"[EM] 🧠 بیرگەوری بارکرا (GOOD {len(_EM_GOOD)} BURN {len(_EM_BURNED)})", flush=True)
     except Exception:
         pass
@@ -1189,7 +1192,7 @@ def _em_mem_save():
             return
         _EM_MEM_SV[0] = _now
         _json_save(os.path.join(DATA_DIR, "em_mem.json"),
-                   {"good": dict(_EM_GOOD), "burned": dict(_EM_BURNED)})
+                   {"good": dict(_EM_GOOD), "burned": dict(_EM_BURNED), "sg": dict(_EM_SG_GOOD)})
     except Exception:
         pass
 
@@ -1326,16 +1329,21 @@ def _em_signup_new():
         _t.sleep(_r.uniform(2, 6))
         _res95 = []
         try:
-            _res95 = [p for p in (_px_list_res(6) or []) if p][:2]
+            _res95 = [p for p in (_px_list_res(8) or []) if p][:3]  # #95U5
         except Exception:
             pass
         _dc95 = []
         try:
             _pl = _px_list(6)
-            _dc95 = [p for p in _pl[1:] if p and p not in _res95][:2]
+            _dc95 = [p for p in _pl[1:] if p and p not in _res95][:5]  # #95U5
         except Exception:
             pass
-        _cands95 = [(_p, "res") for _p in _res95] + [(_p, "dc") for _p in _dc95] + [(None, "direct")]  # #95U4: 2res+2dc+direct
+        try:  # #95U5: SG-GOOD یەکەم (پرۆکسی سەلمێنراو بۆ signup)
+            _res95.sort(key=lambda _p: -_EM_SG_GOOD.get(_p, 0))
+            _dc95.sort(key=lambda _p: -_EM_SG_GOOD.get(_p, 0))
+        except Exception:
+            pass
+        _cands95 = [(_p, "res") for _p in _res95] + [(_p, "dc") for _p in _dc95] + [(None, "direct")]  # #95U4؛ #95U5: 3res+5dc+direct
         _sess = requests.Session()
         _sess.headers.update(_em_headers())
         _apw = "Em" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=6)) + "!1"
@@ -1357,6 +1365,12 @@ def _em_signup_new():
                 continue
             if '"code":0' not in r.text:
                 continue
+            if _px:
+                try:  # #95U5: ئەم پرۆکسییە دەگاتە easemate
+                    _EM_SG_GOOD[_px] = _t.time()
+                    _em_mem_save()
+                except Exception:
+                    pass
             _mail = _poll(14 if _first95 else 6, 5) or ""
             _first95 = False
             _code = None
@@ -1391,7 +1405,7 @@ def _em_signup_new():
         except Exception:
             pass
         if _qt <= 0:
-            print(f"[EM-POOL] risk/0-quota ⏭️ {email} via={_pt95} (فڕێدرا)", flush=True)
+            print(f"[EM-POOL] risk/0-quota ⏭️ {email} via={_pt95} tried=res{len(_res95)}/dc{len(_dc95)} (فڕێدرا)", flush=True)
             return None
         with EM_LOCK:
             EM_ST["accounts"].append({"email": email, "password": _apw, "token": _tok,
@@ -4464,6 +4478,18 @@ def gz_chat(messages, model_id, timeout=90, cheap=False):  # #95U1؛ #95U3: chea
             except Exception:
                 pass
             _last = EMError(f"gz: {r.status_code}{_m2}")  # #94U56؛ #94U57: 400 → IP ی دواتر (loop بەردەوام)
+            if r.status_code == 400 and "identity" in _m2.lower():  # #95U5: gated-model (direct) / strip-proxy
+                if not _px:
+                    try:
+                        if _GZ_SYNC.get("catalog", {}).pop(model_id, None) is not None:
+                            print(f"[GZ] 🚫 gated لابرا: {model_id} (direct-400 identity)", flush=True)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        _GZ_WALL[_px] = _t.time() + 1800.0
+                    except Exception:
+                        pass
             continue
         try:
             j = r.json()
@@ -6131,6 +6157,7 @@ def _em_daemon():
     """#95U2: دایمۆنی تایبەتی EM — 8-parallel signup، ئامانج 1000 زیندوو، قەت ناوەستێت"""
     import concurrent.futures as _cfe
     print("[EM-POOL] 🚀 دایمۆنی تایبەت (8-parallel → 1000)", flush=True)
+    _dry95 = 0  # #95U5: بەچە وشکە لەسەریەکەکان
     while True:
         try:
             _today = _lim_today()
@@ -6154,7 +6181,12 @@ def _em_daemon():
                                 pass
                     except _cfe.TimeoutError:
                         pass
-                time.sleep(10 if _kept95 else 60)  # #95U4: 0-keep → پشوو (بودجە مەسوتێنە)
+                if _kept95:  # #95U5
+                    _dry95 = 0
+                    time.sleep(10)
+                else:
+                    _dry95 += 1
+                    time.sleep(min(60 * _dry95, 300))
             else:
                 time.sleep(60)
         except Exception as e:

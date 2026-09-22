@@ -1022,3 +1022,7 @@
 - EM: 96 signup لە 5 خولەک هەموو Max-retries (پرۆکسی ناگاتە easemate) → بودجە دەسوتا!
 - worker: 2res+2dc+direct retry (هەمان inbox — 1 بودجە) + daemon backoff (0-keep → 60s پشوو)
 - gz: cheap-probe false-❌ (full 29.1s ✅ سەلمێنرا زیندووە!) → cheap هەموو شکست → یەک جار full
+
+## #95U5 (2026-09-22) — gz gated-pop + EM 8-candidate 🛡️
+- gz 400-identity: direct → مۆدێلەکە gated ـە → لە کاتالۆگ لابەرە؛ proxy → cookie-strip → WALL 30خولەک
+- EM signup: 3res+5dc+direct (8 کاندید) + SG-GOOD memory (پرۆکسی سەلمێنراو یەکەم، persist) + drought-sleep (60→300s) + tried-counts
