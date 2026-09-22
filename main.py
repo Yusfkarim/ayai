@@ -1324,42 +1324,62 @@ def _em_signup_new():
         if not email or not _poll:
             return None
         _t.sleep(_r.uniform(2, 6))
+        _res95 = []
         try:
-            _rx = [p for p in (_px_list_res(4) or []) if p]
+            _res95 = [p for p in (_px_list_res(6) or []) if p][:2]
         except Exception:
-            _rx = []
-        _pt95 = "res" if _rx else "dc"  # #95U2: جۆری پرۆکسی (داتا: keep-rate)
-        if _rx:
-            _px = _r.choice(_rx)  # res یەکەم — کەمکردنەوەی risk-flag
-        else:
+            pass
+        _dc95 = []
+        try:
             _pl = _px_list(6)
-            _cds = [p for p in _pl[1:] if p]
-            _px = _r.choice(_cds) if _cds else None
+            _dc95 = [p for p in _pl[1:] if p and p not in _res95][:2]
+        except Exception:
+            pass
+        _cands95 = [(_p, "res") for _p in _res95] + [(_p, "dc") for _p in _dc95] + [(None, "direct")]  # #95U4: 2res+2dc+direct
         _sess = requests.Session()
         _sess.headers.update(_em_headers())
-        if _px:
-            _sess.proxies.update({"http": _px, "https": _px})
-        r = _sess.post(_EM_API + "/auth/send-email-code",
-                       json={"email": email, "type": "user_register", **_em_shasign()}, timeout=(10, 25))
-        if '"code":0' not in r.text:
-            return None
-        _mail = _poll(14, 5) or ""
-        _code = None
-        for _pat in (r"verification code is:\s*(\d{4})", r">([0-9]{4})</span>"):
-            _m = _re.search(_pat, _mail, _re.S | _re.I)
-            if _m:
-                _code = _m.group(1)
-                break
-        if not _code:
-            return None
         _apw = "Em" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=6)) + "!1"
-        _g = {"email": email, "password": _apw, "email_code": _code, "register_url": ""}
-        r2 = _sess.post(_EM_API + "/auth/register", json={**_em_shasign()},
-                        headers={"O-E": _em_aes_oe(_g)}, timeout=(10, 25))
-        j = r2.json() or {}
-        if j.get("code") != 0 or not (j.get("data") or {}).get("token"):
+        _tok = None
+        j = {}
+        _first95 = True
+        for _px, _pt95 in _cands95:  # #95U4: دووبارە بە پرۆکسی جیاواز (هەمان inbox — بودجە بەفیڕۆ ناچێت)
+            try:
+                if _px:
+                    _sess.proxies.update({"http": _px, "https": _px})
+                else:
+                    try:
+                        _sess.proxies.clear()
+                    except Exception:
+                        pass
+                r = _sess.post(_EM_API + "/auth/send-email-code",
+                               json={"email": email, "type": "user_register", **_em_shasign()}, timeout=(10, 25))
+            except Exception:
+                continue
+            if '"code":0' not in r.text:
+                continue
+            _mail = _poll(14 if _first95 else 6, 5) or ""
+            _first95 = False
+            _code = None
+            for _pat in (r"verification code is:\s*(\d{4})", r">([0-9]{4})</span>"):
+                _m = _re.search(_pat, _mail, _re.S | _re.I)
+                if _m:
+                    _code = _m.group(1)
+                    break
+            if not _code:
+                continue
+            _g = {"email": email, "password": _apw, "email_code": _code, "register_url": ""}
+            try:
+                r2 = _sess.post(_EM_API + "/auth/register", json={**_em_shasign()},
+                                headers={"O-E": _em_aes_oe(_g)}, timeout=(10, 25))
+            except Exception:
+                continue
+            j = r2.json() or {}
+            if j.get("code") != 0 or not (j.get("data") or {}).get("token"):
+                return None
+            _tok = j["data"]["token"]
+            break
+        if not _tok:
             return None
-        _tok = j["data"]["token"]
         _qt = 0  # پشکنینی کۆتا (risk-filter): تەنها token_total>0 دەمێنێتەوە
         try:
             _env = dict(os.environ, EM_TOKEN=_tok)
@@ -4560,6 +4580,11 @@ def _gz_probe():
             return gz_chat([{"role": "user", "content": "hi"}], _mid, timeout=45, cheap=True)  # #95U3
         except Exception as e:
             _e = e
+    for _mid in ids:  # #95U4: cheap شکستی هێنا → یەک جار full (false-❌ نەبێت)
+        try:
+            return gz_chat([{"role": "user", "content": "hi"}], _mid, timeout=60)
+        except Exception as e:
+            _e = e
     raise _e
 
 
@@ -6117,17 +6142,19 @@ def _em_daemon():
             _sgn = _sg.get("n", 0) if _sg.get("date") == _today else 0
             if _al < 1000 and len(_accs) < 10000 and _sgn < 10000:
                 _need = min(8, max(2, 1000 - _al))
+                _kept95 = 0
                 with _cfe.ThreadPoolExecutor(max_workers=8) as _ex:
                     _futs = [_ex.submit(_em_signup_new) for _i in range(_need)]
                     try:
                         for _f in _cfe.as_completed(_futs, timeout=400):
                             try:
-                                _f.result()
+                                if _f.result():
+                                    _kept95 += 1
                             except Exception:
                                 pass
                     except _cfe.TimeoutError:
                         pass
-                time.sleep(10)
+                time.sleep(10 if _kept95 else 60)  # #95U4: 0-keep → پشوو (بودجە مەسوتێنە)
             else:
                 time.sleep(60)
         except Exception as e:

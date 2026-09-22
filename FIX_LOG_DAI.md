@@ -1017,3 +1017,8 @@
 - probe: cheap=True (دایرێکت+باشترین1 — ~5× هەرزانتر لە 3×11)
 - GOOD/BURNED/WALL persist (gz_mem.json + em_mem.json — deploy بیرگەوری ناسڕێتەوە)
 - gz حەوز 8→10؛ v6 بۆ giz: نییە (no AAAA — تاقیکراوە لە Fly)
+
+## #95U4 (2026-09-22) — EM retry + gz probe-fallback 🚨
+- EM: 96 signup لە 5 خولەک هەموو Max-retries (پرۆکسی ناگاتە easemate) → بودجە دەسوتا!
+- worker: 2res+2dc+direct retry (هەمان inbox — 1 بودجە) + daemon backoff (0-keep → 60s پشوو)
+- gz: cheap-probe false-❌ (full 29.1s ✅ سەلمێنرا زیندووە!) → cheap هەموو شکست → یەک جار full
