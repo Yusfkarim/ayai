@@ -8195,6 +8195,26 @@ def _api_call95(kind, cand, full, q):
         return pol_chat(cand["id"], full)
 
 
+def _audit_dispatch95():
+    """#96U2: پشکنینی boot — هەموو برانچەکانی dispatch فەنکشنی زیندوویان هەیە (هەتاهەتایی)"""
+    try:
+        _need = ["em_chat", "cbc_chat", "rwd_chat", "act_chat", "fla_chat", "z02_chat", "qb_chat",
+                 "duck_chat", "ak_chat", "ng_chat", "l7_chat", "g4f_chat", "ct_chat", "yl_chat",
+                 "hk_chat", "hf_chat", "aka_chat", "hb_chat", "gk_chat", "gz_chat", "pi_chat",
+                 "cb_chat", "ca_chat", "ac_chat", "nv_chat", "al_chat", "pia_chat", "cbox_chat",
+                 "alle_chat", "aiml_chat", "pol_chat", "AIFreeChat"]
+        _miss = [f for f in _need if not callable(globals().get(f))]
+        if _miss:
+            print(f"[AUDIT] ❌ dispatch شکاو: {_miss}", flush=True)
+        else:
+            print(f"[AUDIT] ✅ dispatch {len(_need)}/{len(_need)} زیندووە", flush=True)
+    except Exception as e:
+        print(f"[AUDIT] {str(e)[:60]}", flush=True)
+
+
+_audit_dispatch95()
+
+
 class APIHandler(http.server.BaseHTTPRequestHandler):
     def _clean_path(self):
         p = self.path.split("?")[0].rstrip("/")

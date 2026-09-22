@@ -1046,3 +1046,7 @@
 - audit: network-timeouts پاک ✅، loops ✅، threads ✅، persist-atomic ✅، revive ✅، /health ✅، node ✅
 - em-sleep: probe em❌ (<5خولەک) → چاتەکان em ناکەن (fallback خێرا)؛ probe خۆی bypass (5/5 test ✅)
 - node signin → post() (timeout+pfetch)؛ /status += EM alive
+
+## #96U2 (2026-09-22) — boot audit 🛡️
+- _audit_dispatch95: لە boot هەموو 32 فەنکشنی dispatch دەپشکنێت (ئەگەر rename/break → ❌ لە لۆگ)
+- test: هەموو هەن → 32/32 ✅، gz_chat لابرا → ❌ شکاو ✅
