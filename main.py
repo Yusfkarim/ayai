@@ -946,6 +946,7 @@ EASEMATE_MODELS = [
 ]
 
 EM_MODELS_CACHE = {"models": None, "t": 0.0}
+_EM_BURNED = {}  # #94U58: proxy → ڕۆژی 6101 (تا reset ی سبەی باز بدرێت)
 
 
 class EMError(Exception):
@@ -984,8 +985,13 @@ def em_chat(messages, model_id, timeout=90, depth=0):
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
     _empx = _px_list(8)  # #94U54؛ #94U56: دایرێکت+8 + شەفڵ (هەر خولێک IP ی جیاواز → کوانتا دەدۆزرێتەوە)
-    try:
-        random.shuffle(_empx[1:])
+    _today = ""
+    try:  # #94U58: شەفڵی ڕاستەقینە + بازدانی IP سوتاوەکانی ئەمڕۆ (پۆششی سیستماتیکی حەوز)
+        _today = time.strftime("%Y-%m-%d", time.gmtime())
+        _er = _empx[1:]
+        random.shuffle(_er)
+        _fresh = [None] + [_p for _p in _er if _EM_BURNED.get(_p) != _today]
+        _empx = _fresh if len(_fresh) >= 3 else [None] + _er[:2]
     except Exception:
         pass
     for _i, _px in enumerate(_empx):
@@ -1028,6 +1034,14 @@ def em_chat(messages, model_id, timeout=90, depth=0):
         code = str(obj.get("code") or "")
         if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
             _last = EMError(obj.get("error") or "easemate 6101", obj.get("code"))
+            if _px:  # #94U58: ئەم IP ـە ئەمڕۆ سوتا — تا سبەی بازی بدە
+                try:
+                    _EM_BURNED[_px] = _today
+                    if len(_EM_BURNED) > 3000:
+                        for _k in [_k for _k, _v in _EM_BURNED.items() if _v != _today][:1000]:
+                            _EM_BURNED.pop(_k, None)
+                except Exception:
+                    pass
             continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو (mark-bad نا — سبەی دەگەڕێتەوە)
         if _px:  # #94U55: هەڵەی پرۆکسی (CF-403 و...) → خراپ + داهاتوو (raise تەنها دایرێکت)
             try:
@@ -1037,7 +1051,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
             _last = EMError(obj.get("error") or "easemate failed", obj.get("code"))
             continue
         raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
-    print(f"[EM] هەموو IP ـەکان 6101 ({_i + 1} هەوڵ)", flush=True)
+    print(f"[EM] هەموو IP ـەکان 6101 ({_i + 1} هەوڵ؛ سوتاوی ئەمڕۆ {len(_EM_BURNED)})", flush=True)
     raise _last
 
 
@@ -2510,8 +2524,10 @@ def ak_chat(model_id, messages, timeout=110):
     payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
     _last = EMError("ak: failed")
     _akpx = _px_list(3)
-    try:
-        random.shuffle(_akpx[1:])  # #94U54
+    try:  # #94U54؛ #94U58: شەفڵی ڕاستەقینە (slice-copy شەفڵ نابێت!)
+        _ar = _akpx[1:]
+        random.shuffle(_ar)
+        _akpx = _akpx[:1] + _ar
     except Exception:
         pass
     for _px in _akpx:
