@@ -19,5 +19,5 @@ primary_region = "fra"
   destination = "/data"
 
 [vm]
-  memory = "512mb"
+  memory = "1gb"
   size = "shared-cpu-1x"
