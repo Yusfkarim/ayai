@@ -12451,13 +12451,15 @@ ACH_ACC_FILE = os.path.join(DATA_DIR, "ach_accounts.json")
 ACH_ST = {"accounts": [], "idx": 0, "signups": {"date": "", "n": 0}, "probe": {"t": 0.0, "ans": ""}}
 ACH_LOCK = threading.Lock()
 # (کلیلی ناوخۆیی، ناوی بۆت، مۆدێلی ڕاستەقینەی AllChat)
-ACH_MODELS = [("consensus", "AllChat Consensus", ""),  # SmartRoute — کۆنسێنسۆسی فرە-مۆدێل
+ACH_MODELS = [("consensus", "GPT-5 Consensus", ""),  # SmartRoute — کۆنسێنسۆسی پریمیۆم: GPT-5-mini + Gemini-3/2.5 + DeepSeek
               ("gemini", "Gemini Flash-Lite", "google/gemini-2.5-flash-lite"),
               ("gpt4o", "GPT-4o Mini", "openai/gpt-4o-mini"),
               ("llama", "Llama 3.1 8B", "meta-llama/llama-3.1-8b-instruct")]
 ACH_REAL = {k: m for k, _, m in ACH_MODELS if m}
-ACH_BUDGET = 2      # نامە/ئەکاونت (بەخۆڕایی ≈٢-٣ — بە ٢ خۆپاراستنە)
+ACH_BUDGET = 3      # نامە/ئەکاونت (٣ کۆنسێنسۆسی فرە-مۆدێل/ڕۆژ + ستاندەرد)
 ACH_DAY_CAP = 250   # ساینئەپ/ڕۆژ — خۆپاراستنی mail.tm
+# پێچانەوەی ئاڵۆزی — ڕاوتەری SmartRoute ناچار دەکات بۆ COMPLEX = مۆدێلی پریمیۆم (GPT-5-mini + هاوکار)
+ACH_COMPLEX_WRAP = "\n\n(تکایە بە شیکردنەوەیەکی قووڵ، بەراوردی فرە-ڕوانگە، و هەنگاوە بیرکارییەکان وەڵام بدەوە)"
 
 
 def _ach_load():
@@ -12668,8 +12670,11 @@ def _ach_call(acc, model_key, user_msg, history, timeout):
             raise _AchLimit(str(d.get("error") or d.get("message") or "err")[:90])
         elif t == "done":
             cm = d.get("consensus_meta") or {}
-            if cm:
-                cmeta = {"confidence": cm.get("confidence"), "points": (cm.get("consensus_points") or [])[:4]}
+            md = d.get("metadata") or {}
+            if cm or md:
+                cmeta = {"confidence": cm.get("confidence"), "points": (cm.get("consensus_points") or [])[:4],
+                         "models": [x for x in (md.get("primaryModel"), md.get("secondaryModel")) if x],
+                         "multi": bool(md.get("isMultiModelResponse"))}
             break
     ans = "".join(parts).strip()
     if not ans:
@@ -12689,6 +12694,10 @@ def ach_chat(messages, model_key="consensus", timeout=110, depth=0):
     umsg = str(last.get("content"))[:6000]
     if sys_txt:
         umsg = f"[رێنمایی کەسایەتی: {sys_txt}]\n\n{umsg}"
+    # #97d: کۆنسێنسۆس → ناچارکردنی COMPLEX — ڕاوتەر مۆدێلی پریمیۆم دادەنێت (GPT-5-mini + Gemini/DeepSeek)
+    if model_key == "consensus":
+        umsg += ACH_COMPLEX_WRAP
+        timeout = max(int(timeout or 0), 170)
     for _ in range(2):
         acc = _ach_pick()
         if not acc:
@@ -12700,6 +12709,8 @@ def ach_chat(messages, model_key="consensus", timeout=110, depth=0):
                 acc["dead"] = 1
             with ACH_LOCK:
                 _ach_save()
+            if cm and cm.get("models"):
+                print(f"[ACH] کۆنسێنسۆس: {' + '.join(cm['models'])} | multi={cm.get('multi')} | conf={cm.get('confidence')}", flush=True)
             return ans
         except _AchLimit as e:
             s = str(e)
