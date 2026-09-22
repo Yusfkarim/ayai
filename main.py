@@ -8532,8 +8532,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 api_brain_ensure()  # #94U2: /health ەش دڵنیابێت لە API-BRAIN
             except Exception:
                 pass
-            try:
-                _self_check()
+            try:  # #96U7: self-check لە پاشبنەما — هەرگیز /health مەبەستە (پرۆبە قورسەکان خنکاندنیان)
+                if time.time() - float(_HEAL_STATE.get("t") or 0) > 600:
+                    threading.Thread(target=_self_check, daemon=True).start()
             except Exception:
                 pass
             body = {
