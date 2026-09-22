@@ -1307,9 +1307,43 @@ def rwd_chat(model_id, messages, timeout=110):
         ch = (j.get("choices") or [{}])[0]
         ans = ((ch.get("message") or {}).get("content") or "").strip()
         if ans:
+            if (ch.get("finish_reason") or "") == "length" or ans[-1].isalnum():  # #94U45: بڕانی سێرڤەر (~1600 تۆکن) یان کۆتایی نیوە-وشە → بەردەوامی خۆکار
+                ans = _rwd_continue(model_id, ans, timeout)
             return ans
         _rwd_next_identity()
     raise EMError("rwd: نەگەڕایەوە")
+
+
+def _rwd_continue(model_id, ans, timeout=110):
+    """#94U45: بەردەوامی خۆکار — هەر پارچە ناسنامەی تازەی 2500 تۆکن؛ تا 3 پارچە (~6400 تۆکن ≈ 20k پیت)"""
+    out = ans
+    for _cn in range(3):
+        try:
+            _rwd_next_identity()
+            s = _rwd_session()
+            ua = s.headers["User-Agent"]
+            tail = out[-1500:]
+            r = s.post(RWD_BASE + "/v1/chat/completions/",
+                       headers={"User-Agent": ua, "Content-Type": "application/json"},
+                       json={"model": model_id, "messages": [
+                           {"role": "system", "content": "You are continuing a previous answer. Continue seamlessly from the exact cutoff point in the same language and style. No intro, no repetition, no new greeting."},
+                           {"role": "user", "content": f"Previous answer cut off here:\n...\n{tail}\n\n[Continue from exactly where it stopped and complete the answer fully]"}]},
+                       timeout=(15, timeout))
+            j = r.json() or {}
+            if isinstance(j.get("error"), dict):
+                break
+            ch = (j.get("choices") or [{}])[0]
+            chunk = ((ch.get("message") or {}).get("content") or "").strip()
+            if not chunk:
+                break
+            out = out + "\n" + chunk
+            print(f"[RWD] 📜 بەردەوامی #{_cn + 1}: +{len(chunk)} پیت", flush=True)
+            if (ch.get("finish_reason") or "") != "length" and not chunk[-1].isalnum():
+                break
+        except Exception as e:
+            print(f"[RWD] بەردەوامی شکستی هێنا: {str(e)[:50]}", flush=True)
+            break
+    return out
 
 
 # ════════════════════════════════════════════════════════════
