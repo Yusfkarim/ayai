@@ -1026,3 +1026,8 @@
 ## #95U5 (2026-09-22) — gz gated-pop + EM 8-candidate 🛡️
 - gz 400-identity: direct → مۆدێلەکە gated ـە → لە کاتالۆگ لابەرە؛ proxy → cookie-strip → WALL 30خولەک
 - EM signup: 3res+5dc+direct (8 کاندید) + SG-GOOD memory (پرۆکسی سەلمێنراو یەکەم، persist) + drought-sleep (60→300s) + tried-counts
+
+## #95U6 (2026-09-22) — EM v6-signup + risk-store 🌱
+- داتا: tried=res0/dc5 — حەوز 0 res ـە! direct هەمیشە risk؛ TLS-signup ـیش 0-quota (تاقیکرایەوە)
+- signup via IPv6-زۆرەملێ (کاندیدی نوێ پێش direct) — egress جیاواز، لەوانە risk نەبێت
+- risk-store (لەبری فڕێدان) + prune + daemon re-check 10/خول (revive ئەگەر کوانتا گەڕا)

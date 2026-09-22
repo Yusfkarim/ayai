@@ -1310,13 +1310,72 @@ def _em_tokens_fresh():
     return _out
 
 
+_EM_V6SRC = [None]
+
+
+def _em_v6_sess():
+    """#95U6: سێشنی IPv6-زۆرەملێ (egress جیاواز → لەوانە risk نەبێت)"""
+    import socket as _so
+    try:
+        if not _EM_V6SRC[0]:
+            _s = _so.create_connection(("2606:4700:4700::1111", 443), timeout=8)
+            _EM_V6SRC[0] = _s.getsockname()[0]
+            _s.close()
+        from urllib3.connection import HTTPSConnection as _HC
+        from urllib3.poolmanager import PoolManager as _PM
+        from requests.adapters import HTTPAdapter as _HA
+
+        class _V6Conn(_HC):
+            def _new_conn(self):
+                for _af, _st, _pr, _cn, _sa in _so.getaddrinfo(self.host, self.port, _so.AF_INET6, _so.SOCK_STREAM):
+                    try:
+                        _ss = _so.socket(_af, _st, _pr)
+                        _ss.settimeout(self.timeout)
+                        _ss.bind((_EM_V6SRC[0], 0))
+                        _ss.connect(_sa)
+                        return _ss
+                    except Exception:
+                        continue
+                raise Exception("em-v6: no route")
+
+        class _V6PMX(_PM):
+            def connection_from_host(self, host, port=None, scheme="http"):
+                _p = super().connection_from_host(host, port, scheme)
+                _p.ConnectionCls = _V6Conn
+                return _p
+
+        class _V6Ad(_HA):
+            def init_poolmanager(self, *a, **k):
+                self.poolmanager = _V6PMX(*a, **k)
+
+        _sess = requests.Session()
+        _sess.headers.update(_em_headers())
+        _sess.mount("https://", _V6Ad())
+        _sess.trust_env = False
+        return _sess
+    except Exception as e:
+        print(f"[EM-POOL] v6-sess: {str(e)[:50]}", flush=True)
+        return None
+
+
 def _em_signup_new():
     """#94U63: سایناپی easemate — inbox→code→register (O-E) — زنجیرە سەلمێنراوە"""
     import random as _r, string as _s, time as _t, re as _re
     try:
         today = _lim_today()
-        if len(EM_ST.get("accounts") or []) >= 10000:
-            return None
+        if len(EM_ST.get("accounts") or []) >= 9500:  # #95U6: prune risk-کۆنەکان (شوێن بۆ باشەکان)
+            try:
+                with EM_LOCK:
+                    _aa = EM_ST.get("accounts") or []
+                    _aa.sort(key=lambda _a: ((_a.get("quota") or 0), (_a.get("t") or 0)))
+                    while len(_aa) > 9000 and not (_aa[0].get("quota") or 0):
+                        _rm = _aa.pop(0)
+                        (EM_ST.get("limits") or {}).pop((_rm or {}).get("email") or "", None)
+                    _em_save_acc()
+            except Exception:
+                pass
+            if len(EM_ST.get("accounts") or []) >= 10000:
+                return None
         if not _sg_reserve(EM_ST, 10000, today, EM_LOCK):
             return None
         try:
@@ -1343,23 +1402,30 @@ def _em_signup_new():
             _dc95.sort(key=lambda _p: -_EM_SG_GOOD.get(_p, 0))
         except Exception:
             pass
-        _cands95 = [(_p, "res") for _p in _res95] + [(_p, "dc") for _p in _dc95] + [(None, "direct")]  # #95U4؛ #95U5: 3res+5dc+direct
+        _cands95 = [(_p, "res") for _p in _res95] + [(_p, "dc") for _p in _dc95] + [("V6", "v6"), (None, "direct")]  # #95U4؛ #95U5؛ #95U6: 3res+5dc+v6+direct
         _sess = requests.Session()
         _sess.headers.update(_em_headers())
         _apw = "Em" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=6)) + "!1"
         _tok = None
         j = {}
         _first95 = True
+        _sess95 = _sess
         for _px, _pt95 in _cands95:  # #95U4: دووبارە بە پرۆکسی جیاواز (هەمان inbox — بودجە بەفیڕۆ ناچێت)
+            if _px == "V6":  # #95U6
+                _sess95 = _em_v6_sess()
+                if _sess95 is None:
+                    continue
+            else:
+                _sess95 = _sess
             try:
-                if _px:
+                if _px and _px != "V6":
                     _sess.proxies.update({"http": _px, "https": _px})
-                else:
+                elif not _px:
                     try:
                         _sess.proxies.clear()
                     except Exception:
                         pass
-                r = _sess.post(_EM_API + "/auth/send-email-code",
+                r = _sess95.post(_EM_API + "/auth/send-email-code",
                                json={"email": email, "type": "user_register", **_em_shasign()}, timeout=(10, 25))
             except Exception:
                 continue
@@ -1383,7 +1449,7 @@ def _em_signup_new():
                 continue
             _g = {"email": email, "password": _apw, "email_code": _code, "register_url": ""}
             try:
-                r2 = _sess.post(_EM_API + "/auth/register", json={**_em_shasign()},
+                r2 = _sess95.post(_EM_API + "/auth/register", json={**_em_shasign()},
                                 headers={"O-E": _em_aes_oe(_g)}, timeout=(10, 25))
             except Exception:
                 continue
@@ -1404,8 +1470,17 @@ def _em_signup_new():
                 _qt = int(((_pj.get("perm") or {}).get("token_total")) or 0)
         except Exception:
             pass
-        if _qt <= 0:
-            print(f"[EM-POOL] risk/0-quota ⏭️ {email} via={_pt95} tried=res{len(_res95)}/dc{len(_dc95)} (فڕێدرا)", flush=True)
+        if _qt <= 0:  # #95U6: risk پارێزبکە (لەبری فڕێدان) — لەوانەیە سبەی کوانتا بگرێتەوە
+            try:
+                with EM_LOCK:
+                    EM_ST["accounts"].append({"email": email, "password": _apw, "token": _tok,
+                                              "uid": ((j.get("data") or {}).get("user") or {}).get("id"),
+                                              "t": _t.time(), "quota": 0, "rk": 0})
+                    EM_ST.setdefault("limits", {})[email] = {"risk": today}
+                    _em_save_acc()
+            except Exception:
+                pass
+            print(f"[EM-POOL] risk/0-quota ⏭️ {email} via={_pt95} (پارێزرا)", flush=True)
             return None
         with EM_LOCK:
             EM_ST["accounts"].append({"email": email, "password": _apw, "token": _tok,
@@ -6167,6 +6242,35 @@ def _em_daemon():
             _al = sum(1 for _a in _accs if _pool_acc_alive(_a, _lim, _exh, _today, time.time()))
             _sg = EM_ST.get("signups") or {}
             _sgn = _sg.get("n", 0) if _sg.get("date") == _today else 0
+            try:  # #95U6: پشکنینی risk-کۆنەکان (10/خول — لەوانە کوانتا گەڕابێتەوە)
+                _rk = [a for a in (EM_ST.get("accounts") or []) if not (a.get("quota") or 0)]
+                _rk.sort(key=lambda a: (a.get("rk") or 0))
+                _dirty = False
+                for _a in _rk[:10]:
+                    if _a.get("rk") and time.time() - _a["rk"] < 72000:
+                        continue
+                    _a["rk"] = time.time()
+                    _dirty = True
+                    try:
+                        _env = dict(os.environ, EM_TOKEN=_a.get("token") or "")
+                        _pp = subprocess.run([NODE_BIN, EM_CLIENT, "perm"], capture_output=True, timeout=60, env=_env)
+                        _pl = [l for l in (_pp.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+                        if _pl:
+                            _q = int((((json.loads(_pl[-1])).get("perm") or {}).get("token_total")) or 0)
+                            if _q > 0:
+                                _a["quota"] = _q
+                                (EM_ST.get("limits") or {}).pop(_a.get("email") or "", None)
+                                print(f"[EM-POOL] 🎉 risk→quota {_a.get('email')} quota={_q}", flush=True)
+                    except Exception:
+                        pass
+                if _dirty:
+                    try:
+                        with EM_LOCK:
+                            _em_save_acc()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             if _al < 1000 and len(_accs) < 10000 and _sgn < 10000:
                 _need = min(8, max(2, 1000 - _al))
                 _kept95 = 0
