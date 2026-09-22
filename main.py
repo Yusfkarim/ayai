@@ -8531,7 +8531,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     return 0
             try:
-                api_brain_ensure()  # #94U2: /health ەش دڵنیابێت لە API-BRAIN
+                # #97h: api_brain_ensure قورسە (detect_brain_api) — هەرگیز سنکڕۆن لە /health — تەنها پاشبنەما ئەگەر کۆن بوو
+                if not API_BRAIN["servers"] or time.time() - float(API_BRAIN.get("t") or 0) > API_REFRESH_SEC:
+                    threading.Thread(target=api_brain_ensure, daemon=True).start()
             except Exception:
                 pass
             try:  # #96U7: self-check لە پاشبنەما — هەرگیز /health مەبەستە (پرۆبە قورسەکان خنکاندنیان)
@@ -8551,7 +8553,9 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
             }
             return self._send(200, body)
         if cp in ("/", "/health"):
-            api_brain_ensure()
+            # #97h: پاشبنەما — /health یەکسەر وەڵام دەداتەوە
+            if not API_BRAIN["servers"] or time.time() - float(API_BRAIN.get("t") or 0) > API_REFRESH_SEC:
+                threading.Thread(target=api_brain_ensure, daemon=True).start()
             self._send(200, {"ok": True, "service": "smart-chatbot-api",
                              "mode": API_BRAIN["mode"], "servers": len(API_BRAIN["servers"])})
         elif cp in ("/models", "/v1/models"):
@@ -8562,7 +8566,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 if not (_hmac8.compare_digest(_k.encode(), API_KEY.encode()) or _k in _API_KEYS):
                     _note_badkey(_sec_ip(self))  # #94U11
                     return self._send(401, {"error": "invalid API key"})
-            api_brain_ensure()
+            if not API_BRAIN["servers"] or time.time() - float(API_BRAIN.get("t") or 0) > API_REFRESH_SEC:
+                threading.Thread(target=api_brain_ensure, daemon=True).start()  # #97h
             data = [{"id": s["alias"], "object": "model", "owned_by": "smart-chatbot"}
                     for s in _api_servers()]
             self._send(200, {"object": "list", "data": data})
@@ -10335,7 +10340,12 @@ def handle_message(msg):
 
 
 def setup_commands():
-    """فەرمانەکانی مێنیو — لەگەڵ دووبارەهەوڵ (تا هەرگیز ون نەبن)"""
+    """فەرمانەکانی مێنیو — #97h: لە پاشبنەما (گیروخدانی بوت نەگرێت — لۆپی TG یەکسەر دەست پێدەکات)"""
+    threading.Thread(target=_setup_commands_go, daemon=True).start()
+
+
+def _setup_commands_go():
+    """فەرمانەکانی مێنیو — لەگەڵ دووبارەهەوڵ"""
     cmds = [
         {"command": "start", "description": "بدء المحادثة مع البوت"},
         {"command": "new", "description": "محادثة جديدة"},
@@ -12432,14 +12442,16 @@ def cbox_chat(messages, model_key="aichat", timeout=110, depth=0):
 
 
 def _cbox_seed():
-    """لە بووت — ئەگەر حەوز بەتاڵە → ٢ ئەکاونت"""
-    try:
-        if not _cbox_alive():
-            for _ in range(2):
-                _cbox_new_account()
-            print(f"[CX] حەوز: {len(_cbox_alive())} ئەکاونتی زیندوو", flush=True)
-    except Exception as e:
-        print(f"[CX] seed: {str(e)[:70]}", flush=True)
+    """لە بووت — ئەگەر حەوز بەتاڵە → ٢ ئەکاونت — #97h: لە پاشبنەما (٢ ساینئەپ = تا ٨٠چ گیروخ)"""
+    def _go():
+        try:
+            if not _cbox_alive():
+                for _ in range(2):
+                    _cbox_new_account()
+                print(f"[CX] حەوز: {len(_cbox_alive())} ئەکاونتی زیندوو", flush=True)
+        except Exception as e:
+            print(f"[CX] seed: {str(e)[:70]}", flush=True)
+    threading.Thread(target=_go, daemon=True).start()
 
 
 # ════════════════ #97: AllChat (app.askallchat.com) — Firebase + کۆنسێنسۆسی فرە-مۆدێل ════════════════
@@ -12767,7 +12779,7 @@ def _ach_seed():
     """پڕکردنەوەی حەوز لە دەستپێک — ٣ ئەکاونت لە پاشبنەما (١٥٠خ دواکەوتن — OOM-پارێزراو لە کاتی بوت)"""
     def _go():
         try:
-            time.sleep(150)  # #97b: بوت + detect_brain تەواو ببن — پاشان مینت
+            time.sleep(240)  # #97h: دوای زریانی بوت — مینت نەخنکێنێت
             need = 3 - len(_ach_alive())
             for _ in range(max(0, need)):
                 if len(_ach_alive()) >= 3:
@@ -13029,6 +13041,13 @@ def main():
         print("⚠️ هیچ سەرچاوەیەک نەدۆزرایەوە — دواتر دووبارە هەوڵ دەدرێتەوە", flush=True)
 
     # #94U13 NEVER-STOP: webhook لە سەرەتاوە خۆکارانە دەسڕدرێتەوە + لۆگی ئەنجام + دووبارەکردنەوە
+    # #97h: واتچدۆگی زوو — ئەگەر هەر بەشێکی کۆتایی-بوت گیروخ بخوات (>٤خ) → exit → Fly ڕیستارت (هەرگیز بێ-لۆپ نامێنێت)
+    try:
+        faulthandler.cancel_dump_traceback_later()
+        faulthandler.dump_traceback_later(420, exit=True)
+        print("[BOOT] واتچدۆگی زوو چالاکە — ٧خ", flush=True)
+    except Exception:
+        pass
     try:
         _dw = tg("deleteWebhook", drop_pending_updates=False) or {}
         print(f"[BOOT] deleteWebhook ok={_dw.get('ok')}", flush=True)
@@ -13087,13 +13106,13 @@ def main():
         faulthandler.cancel_dump_traceback_later()
     except Exception:
         pass
-    faulthandler.dump_traceback_later(240, exit=True)  # #96U4b: main-loop >90s بوەستێت → traceback + exit → Fly ڕیستارت
+    faulthandler.dump_traceback_later(420, exit=True)  # #96U4b: main-loop >90s بوەستێت → traceback + exit → Fly ڕیستارت
     while True:
         try:
             cycle += 1
             try:
                 faulthandler.cancel_dump_traceback_later()
-                faulthandler.dump_traceback_later(240, exit=True)  # #96U4b
+                faulthandler.dump_traceback_later(420, exit=True)  # #96U4b
             except Exception:
                 pass
             if cycle % 10 == 1:
