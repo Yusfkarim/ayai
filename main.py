@@ -8214,7 +8214,17 @@ def _audit_dispatch95():
         print(f"[AUDIT] {str(e)[:60]}", flush=True)
 
 
-_audit_dispatch95()
+
+def _audit_later():
+    """#96U4b: 45s دوای بووت — هەموو فەنکشنەکان ئەوکات پێناسەکراون"""
+    try:
+        time.sleep(45)
+        _audit_dispatch95()
+    except Exception:
+        pass
+
+
+threading.Thread(target=_audit_later, daemon=True).start()
 
 
 class APIHandler(http.server.BaseHTTPRequestHandler):
@@ -8321,31 +8331,6 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                     return len(d.get("accounts", [])) if isinstance(d, dict) else len(d)
                 except Exception:
                     return 0
-            def _pstat(f, cap):
-                # #94U20: ژمارەی ئەکاونت + زیندووی ئەمڕۆ + بودجەی ساینئەپی ماوە
-                try:
-                    d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
-                    accs = d.get("accounts", []) or []
-                    lim = d.get("limits") or {}
-                    exh = d.get("exhausted") or {}
-                    today = _lim_today()
-                    def _ok(a):
-                        e = a.get("email") or "?"
-                        if today in (lim.get(e) or {}).values():
-                            return False
-                        v = exh.get(e)
-                        if v in (None, 0, "", False):
-                            return True
-                        try:
-                            return float(v) <= time.time()
-                        except Exception:
-                            return str(v)[:10] != today
-                    alive = sum(1 for a in accs if _ok(a))
-                    sg = d.get("signups") or {}
-                    used = sg.get("n", 0) if sg.get("date") == today else 0
-                    return {"n": len(accs), "alive": alive, "signups": f"{used}/{cap}"}
-                except Exception:
-                    return {"n": 0, "alive": 0, "signups": f"0/{cap}"}
             try:
                 api_brain_ensure()  # #94U2: /health ەش دڵنیابێت لە API-BRAIN
             except Exception:
@@ -8359,7 +8344,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat("alle_accounts.json", 10000), "al": _pstat("al_accounts.json", 10000), "em": _pstat("em_accounts.json", 10000)},  # #94U32b؛ #94U46؛ #94U47؛ #94U48
+                "pools": (_POOL_STATS_CACHE["data"] or {"ca": _pstat_calc("ca_accounts.json", 10000), "cb": _pstat_calc("cb_accounts.json", 10000), "nv": _pstat_calc("nv_accounts.json", 10000), "ac": _pstat_calc("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat_calc("alle_accounts.json", 10000), "al": _pstat_calc("al_accounts.json", 10000), "em": _pstat_calc("em_accounts.json", 10000)}),  # #96U4b: کاش — دیکریپت لە داواکاری لابرا
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
@@ -12205,6 +12190,62 @@ def _cbox_seed():
         print(f"[CX] seed: {str(e)[:70]}", flush=True)
 
 
+_POOL_STATS_CACHE = {"t": 0.0, "data": {}}
+
+
+def _pstat_calc(f, cap):
+    """#94U20: ژمارەی ئەکاونت + زیندووی ئەمڕۆ + بودجەی ساینئەپی ماوە"""
+    try:
+        d = _json_load_safe(os.path.join(DATA_DIR, f)) or {}
+        accs = d.get("accounts", []) or []
+        lim = d.get("limits") or {}
+        exh = d.get("exhausted") or {}
+        today = _lim_today()
+
+        def _ok(a):
+            e = a.get("email") or "?"
+            if today in (lim.get(e) or {}).values():
+                return False
+            v = exh.get(e)
+            if v in (None, 0, "", False):
+                return True
+            try:
+                return float(v) <= time.time()
+            except Exception:
+                return str(v)[:10] != today
+        alive = sum(1 for a in accs if _ok(a))
+        sg = d.get("signups") or {}
+        used = sg.get("n", 0) if sg.get("date") == today else 0
+        return {"n": len(accs), "alive": alive, "signups": f"{used}/{cap}"}
+    except Exception:
+        return {"n": 0, "alive": 0, "signups": f"0/{cap}"}
+
+
+def _pool_stats_refresh():
+    """#96U4b: هەموو حەوزەکان یەکجار دەخوێنرێتەوە و کاش دەکرێن — /health ئیتر دیکریپت ناکات"""
+    try:
+        data = {"ca": _pstat_calc("ca_accounts.json", 10000),
+                "cb": _pstat_calc("cb_accounts.json", 10000),
+                "nv": _pstat_calc("nv_accounts.json", 10000),
+                "ac": _pstat_calc("ac_accounts.json", 10000),
+                "rwd": _rwd_stat(),
+                "alle": _pstat_calc("alle_accounts.json", 10000),
+                "al": _pstat_calc("al_accounts.json", 10000),
+                "em": _pstat_calc("em_accounts.json", 10000)}
+        _POOL_STATS_CACHE["data"] = data
+        _POOL_STATS_CACHE["t"] = time.time()
+    except Exception as e:
+        print(f"[POOL-STATS] {str(e)[:60]}", flush=True)
+
+
+def _pool_stats_daemon():
+    """#96U4b: نوێکردنەوەی ئامارەکان هەر ٢ خولەک — لە دەرەوەی ڕێڕەوی داواکاری"""
+    time.sleep(20)
+    while True:
+        _pool_stats_refresh()
+        time.sleep(120)
+
+
 def _memwatch_daemon():
     """#94U10+#94U15: چاودێری بیرگە — سنووری ڕێژەیی لە کۆی RAM (بۆ 1GB: GC لە 800MB، ڕیستارت لە 920MB)"""
     import gc as _gc
@@ -12305,6 +12346,7 @@ def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     _check_code_integrity(is_boot=True)
     _enc_migrate_all()  # #94U12: شێفرەکردنی هەموو فایلە کۆنەکان
+    threading.Thread(target=_pool_stats_daemon, daemon=True).start()  # #96U4b
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_memwatch_daemon, daemon=True).start()
@@ -12435,13 +12477,13 @@ def main():
         faulthandler.cancel_dump_traceback_later()
     except Exception:
         pass
-    faulthandler.dump_traceback_later(90, exit=True)  # #94U17: main-loop >90s بوەستێت → traceback + exit → Fly ڕیستارت
+    faulthandler.dump_traceback_later(240, exit=True)  # #96U4b: main-loop >90s بوەستێت → traceback + exit → Fly ڕیستارت
     while True:
         try:
             cycle += 1
             try:
                 faulthandler.cancel_dump_traceback_later()
-                faulthandler.dump_traceback_later(90, exit=True)
+                faulthandler.dump_traceback_later(240, exit=True)  # #96U4b
             except Exception:
                 pass
             if cycle % 10 == 1:
