@@ -934,3 +934,8 @@
 ## #94U52 (2026-09-22)
 - em هێشتا ❌: top پرۆکسییەکان هەموو socks بوون → 1 هەوڵ تەنها؛ چاککرا: http-fetch قووڵتر (n*4+4)
 - gz هێشتا ❌: datacenter IP = VPN-block (429) — residential تەنها دەچێت؛ چاککرا: `_px_list_res` + loop (res یان fallback) + پرێنتی کۆتایی
+
+## #94U53 (2026-09-22)
+- em هێشتا ❌: حەوزەکە socks ـە و undici socks ناکات → pfetch (node-fetch@3 + socks-proxy-agent + Readable.toWeb بۆ getReader) بۆ em/ak + package.json
+- em/ak: هەموو شێوازەکان + mark-bad لەسەر timeout/no-output؛ gz: mark-bad لەسەر connection-error (strikes حەوزەکە پاک دەکاتەوە)
+- سەلمێنرا: em-client بە socks5 زیندوو ✅ «سڵاو، چۆنیت؟»

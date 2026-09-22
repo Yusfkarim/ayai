@@ -43,11 +43,37 @@ let VISITOR_ID = randomUUID();
 if (process.env.EM_FRESH_ID === '1') VISITOR_ID = randomUUID();
 
 // #87: پشتگیری پرۆکسی (EM_PROXY env) — بۆ بلۆکی IP
+// #94U53: socks via node-fetch (undici ProxyAgent socks ناکات)
+let _nf = null, _nfAgent = null;
 if (process.env.EM_PROXY) {
-  try {
-    const { ProxyAgent, setGlobalDispatcher } = await import('undici');
-    setGlobalDispatcher(new ProxyAgent(process.env.EM_PROXY));
-  } catch (e) { console.error('[em] proxy load fail:', e.message); }
+  if (process.env.EM_PROXY.startsWith('socks')) {
+    try {
+      _nf = (await import('node-fetch')).default;
+      const { SocksProxyAgent } = await import('socks-proxy-agent');
+      _nfAgent = new SocksProxyAgent(process.env.EM_PROXY);
+    } catch (e) { console.error('[em] socks load fail:', e.message); }
+  } else {
+    try {
+      const { ProxyAgent, setGlobalDispatcher } = await import('undici');
+      setGlobalDispatcher(new ProxyAgent(process.env.EM_PROXY));
+    } catch (e) { console.error('[em] proxy load fail:', e.message); }
+  }
+}
+async function pfetch(url, opts = {}) {
+  if (!_nf || !_nfAgent) return fetch(url, opts);
+  const r = await _nf(url, { ...opts, agent: _nfAgent });
+  if (r.body && typeof r.body.getReader !== 'function') {
+    try {
+      const { Readable } = await import('node:stream');
+      const web = Readable.toWeb(r.body);
+      return new Proxy(r, { get(t, p) {
+        if (p === 'body') return web;
+        const v = t[p];
+        return typeof v === 'function' ? v.bind(t) : v;
+      }});
+    } catch { return r; }
+  }
+  return r;
 }
 const seed = JSON.stringify({
   modelId: 6, modelName: 'Gemini 3.1 Flash Lite', configVersion: 2,
@@ -149,7 +175,7 @@ async function post(path, body, timeoutMs = 30000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    return await fetch(API + path, { method: 'POST', headers: h, body: JSON.stringify(body), signal: ctrl.signal });
+    return await pfetch(API + path, { method: 'POST', headers: h, body: JSON.stringify(body), signal: ctrl.signal });
   } finally { clearTimeout(t); }
 }
 
@@ -239,7 +265,7 @@ async function main() {
   let full = '';
   let lastErr = null;
   try {
-    const res = await fetch(API + '/api2/stream/exec_operation', {
+    const res = await pfetch(API + '/api2/stream/exec_operation', {
       method: 'POST', headers: h, body: JSON.stringify(body), signal: ctrl.signal,
     });
     if (!res.ok) {
@@ -333,7 +359,7 @@ async function main() {
       const h2 = baseHeaders();
       h2['sign'] = s2; h2['timestamp'] = t2; h2['identity-id'] = IID;
       h2['Accept'] = 'text/event-stream'; h2['Cache-Control'] = 'no-cache';
-      const res2 = await fetch(API + '/api2/stream/exec_operation', { method: 'POST', headers: h2, body: JSON.stringify(body2) });
+      const res2 = await pfetch(API + '/api2/stream/exec_operation', { method: 'POST', headers: h2, body: JSON.stringify(body2) });
       let full2 = '';
       if (res2.ok && (res2.headers.get('content-type') || '').includes('event-stream')) {
         const reader2 = res2.body.getReader();

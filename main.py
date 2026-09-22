@@ -983,7 +983,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
-    for _i, _px in enumerate(_px_list_http(3)):  # #94U50؛ #94U51: http تەنها
+    for _i, _px in enumerate(_px_list(3)):  # #94U50؛ #94U53: هەموو شێوازەکان (node socks ـیش دەکات)
         _env = dict(os.environ, EM_PROXY=_px, EM_ROTATE=str(_i + 1), EM_FRESH_ID="1") if _px else None
         try:
             p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
@@ -994,9 +994,21 @@ def em_chat(messages, model_id, timeout=90, depth=0):
                 subprocess.run(["pkill", "-f", EM_CLIENT.split("/")[-1]], capture_output=True, timeout=5)
             except Exception:
                 pass
+            if _px:  # #94U53: پرۆکسی هێواش → خراپ + داهاتوو
+                try:
+                    _proxy_mark_bad(_px)
+                except Exception:
+                    pass
+                _last = EMError("easemate timeout")
+                continue
             raise EMError("easemate timeout")
         lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
         if not lines:
+            if _px:  # #94U53
+                try:
+                    _proxy_mark_bad(_px)
+                except Exception:
+                    pass
             _last = EMError("easemate no output")
             continue
         try:
@@ -2485,7 +2497,7 @@ def ak_chat(model_id, messages, timeout=110):
         rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
     payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
     _last = EMError("ak: failed")
-    for _px in _px_list_http(2):  # #94U49؛ #94U51: http تەنها
+    for _px in _px_list(2):  # #94U49؛ #94U53: هەموو شێوازەکان
         _env = dict(os.environ, AK_PROXY=_px) if _px else None
         try:
             p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
@@ -3939,6 +3951,11 @@ def gz_chat(messages, model_id, timeout=110):
             r = s.post(GZ_BASE + "/api/data/users/inferenceServer.infer", json=inf,
                        headers={"x-giz-instance-id": inst}, timeout=(15, timeout))
         except Exception as e:
+            if _px:  # #94U53: پرۆکسی مردوو → خراپ (strikes)
+                try:
+                    _proxy_mark_bad(_px)
+                except Exception:
+                    pass
             _last = EMError(f"gz: {str(e)[:60]}")
             continue
         if r.status_code in (429, 401, 403):
