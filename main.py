@@ -5348,7 +5348,7 @@ def _pool_daemon():
     pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000),
              ("CB", _m.CB_ST, _m._cb_signup_new, 10000, 1000),
              ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000),
-             ("AC", _m.AC_ST, _m._ac_signup_new, 300, 30))
+             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000))  # #94U47
     import concurrent.futures as _cf
     _was_catch = None
     while True:
@@ -5380,11 +5380,11 @@ def _pool_daemon():
                     _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, 40, 2, 4)
                              for _nm, _st, _fn, _tgt, _at in pools[:3]]
                     _cf.wait(_futs)
-                _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 300, 30, 2, 3, 6)
+                _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000, 20, 2, 4)  # #94U47: catch-up بەچ 20
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
-                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, 20 if _nm != "AC" else 2, 3, 6)
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, 20, 3, 6)  # #94U47: AC ـیش بەچ 20
                 time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
         except Exception as e:
             print(f"[POOL] daemon: {str(e)[:60]}", flush=True)
@@ -5740,11 +5740,11 @@ def _ac_signup_new():
     sg = AC_ST.get("signups") or {"date": "", "n": 0}
     if sg.get("date") != today:
         sg = {"date": today, "n": 0}
-    if len(AC_ST.get("accounts") or []) >= 300:  # #94U32: 40→300
+    if len(AC_ST.get("accounts") or []) >= 10000:  # #94U32: 40→300؛ #94U47: →10000 (وەک CA/CB/NV)
         return None
     if not _sg_breaker_allow(AC_KEY):  # #94U34
         return None
-    if not _sg_reserve(AC_ST, 200, today, _AC_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 20→200
+    if not _sg_reserve(AC_ST, 10000, today, _AC_LK):  # #94U23 بودجە لەژێر لۆک؛ #94U47: 200→10000/ڕۆژ (breaker دەیپارێزێت)
         return None
     n = AC_ST["next_num"] + random.randint(0, 2000)  # #94U32 jitter
     for _ in range(6):
@@ -7273,7 +7273,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 200), "rwd": _rwd_stat()},  # #94U32b؛ #94U46
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat()},  # #94U32b؛ #94U46؛ #94U47
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
@@ -8172,6 +8172,18 @@ def _revive_source(kind, err=None):
             elif kind == "rwd":  # #94U46: ناسنامەی داهاتوو (1000 زیندوو)
                 _rwd_next_identity()
                 steps.append("next-ident")
+            elif kind == "gz":  # #94U47: cooldown ی مۆدێلەکان لابەرە (سێشن خۆی تازەیە)
+                try:
+                    _GZ_BADC.clear()
+                except Exception:
+                    pass
+                steps.append("cooldown-clear")
+            elif kind == "ak":  # #94U47: cooldown لابەرە
+                try:
+                    _AK_COOLDOWN["until"] = 0
+                except Exception:
+                    pass
+                steps.append("cooldown-clear")
             elif kind == "pia":
                 _pia_signup_new()
                 steps.append("signup")
@@ -8779,7 +8791,7 @@ def handle_message(msg):
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/30 · RWD {rwd}/1000\n",  # #94U38؛ #94U46
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000\n",  # #94U38؛ #94U46
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):
@@ -9151,6 +9163,11 @@ def self_heal_once():
     probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     probes["rwd"] = lambda: rwd_chat(_RWD_VERIFIED[0], [{"role": "user", "content": "hi"}], timeout=45)  # #94U46
+    # #94U47: پشکنینی دانە-دانە — act/em/gz ـیش (هەموو خولێک تاقی دەکرێنەوە)
+    probes["act"] = lambda: act_chat(ACT_MODELS[0], [{"role": "user", "content": "hi"}], timeout=45)
+    probes["em"] = lambda: em_chat([{"role": "user", "content": "hi"}], EASEMATE_MODELS[0]["model_id"], timeout=45)
+    if _GZ_SYNC.get("catalog"):
+        probes["gz"] = lambda: gz_chat([{"role": "user", "content": "hi"}], list(_GZ_SYNC["catalog"].keys())[0], timeout=45)
     # #94U43: پشکنینی هەموو حەوزە ئەکاونتییەکان — ac/pia/alle ـیش
     if MS.get("ac_ok"):
         probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
@@ -10585,9 +10602,9 @@ def _pia_signup_new():
         sg = PIA_ST.get("signups") or {"date": "", "n": 0}
         if sg.get("date") != today:
             sg = {"date": today, "n": 0}
-        if len(PIA_ST.get("accounts") or []) >= 60:  # #94U32: 12→60
+        if len(PIA_ST.get("accounts") or []) >= 10000:  # #94U32: 12→60؛ #94U47: →10000
             return None
-        if not _sg_reserve(PIA_ST, 30, today, PIA_LOCK):  # #94U23 بودجە لەژێر لۆک؛ #94U32: 6→30
+        if not _sg_reserve(PIA_ST, 300, today, PIA_LOCK):  # #94U23 بودجە لەژێر لۆک؛ #94U47: 30→300/ڕۆژ (temp-mail سنووردارە)
             return None
         s = requests.Session()
         s.headers.update({"User-Agent": _rand_ua(), "Accept": "application/json",
@@ -10648,16 +10665,22 @@ def _pia_signup_new():
 
 
 def _pia_signup_daemon():
-    """هەر ٦ کاتژمێر — ئەگەر هەموو ئەکاونتەکان لیمیت بوون یان کەم بوون → نوێ دروست دەکات"""
+    """هەر ٦ کاتژمێر — ئەگەر هەموو ئەکاونتەکان لیمیت بوون یان کەم بوون → نوێ دروست دەکات؛ #94U47: ئامانج 1000، بەچ 10/خول"""
     while True:
         try:
             time.sleep(3600 * 2)
-            accs = PIA_ST.get("accounts") or []
-            today = time.strftime("%Y-%m-%d", time.gmtime())
-            lim = PIA_ST.get("limits") or {}
-            alive = [a for a in accs if (lim.get(a.get("email") or "?") or {}).get("*") != today]
-            if len(alive) < 6:  # #94U32: 2→6
+            for _ in range(10):
+                accs = PIA_ST.get("accounts") or []
+                today = time.strftime("%Y-%m-%d", time.gmtime())
+                lim = PIA_ST.get("limits") or {}
+                alive = [a for a in accs if (lim.get(a.get("email") or "?") or {}).get("*") != today]
+                if len(alive) >= 1000 or len(accs) >= 10000:
+                    break
+                _before = len(accs)
                 _pia_signup_new()
+                if len(PIA_ST.get("accounts") or []) <= _before:
+                    break  # بودجە/temp-mail گیراوە — خولی داهاتوو
+                time.sleep(20)
         except Exception:
             time.sleep(300)
 
@@ -10713,9 +10736,9 @@ def _cbox_new_account():
         with CBOX_LOCK:
             CBOX_ST.setdefault("accounts", []).append(acc)
             _ca_all = CBOX_ST.get("accounts") or []
-            if len(_ca_all) > 120:  # #94U44: مردووەکان کۆنابنەوە — زیندوو 100 + مردوو 20
-                _ca_live = [a for a in _ca_all if not a.get("dead")][-100:]
-                _ca_dead = [a for a in _ca_all if a.get("dead")][-20:]
+            if len(_ca_all) > 1000:  # #94U44: 120؛ #94U47: →1000 (زیندوو 900 + مردوو 100)
+                _ca_live = [a for a in _ca_all if not a.get("dead")][-900:]
+                _ca_dead = [a for a in _ca_all if a.get("dead")][-100:]
                 CBOX_ST["accounts"] = _ca_live + _ca_dead
             sg = CBOX_ST.get("signups") or {"date": "", "n": 0}
             if sg.get("date") != today:
