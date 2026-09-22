@@ -1040,3 +1040,9 @@
 ## #95U7 (2026-09-22) — res-hunt + trust 🌱
 - risk=non-res-IP (کۆتا: v4/v6/DC/TLS/dc-proxy هەموو 0!) — تەنها res-IP کوانتا دەدات
 - harvester: +geonode google-filtered 2 پەیج (کەمتر-flagged)؛ node signin-mode + check-in (worker یەکەمجار + recheck ڕۆژانە)
+
+## #96U1 (2026-09-22) — audit fixes + em-sleep ⚡
+- AUDIT: pyflakes undefined `q` لە _api_call95 (aff-fallback NameError ی شاراوە!) → q passed ✅
+- audit: network-timeouts پاک ✅، loops ✅، threads ✅، persist-atomic ✅، revive ✅، /health ✅، node ✅
+- em-sleep: probe em❌ (<5خولەک) → چاتەکان em ناکەن (fallback خێرا)؛ probe خۆی bypass (5/5 test ✅)
+- node signin → post() (timeout+pfetch)؛ /status += EM alive

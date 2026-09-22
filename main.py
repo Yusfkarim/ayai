@@ -1079,9 +1079,18 @@ def _em_try_once(payload, px, timeout, acc=None):
     raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
 
 
-def em_chat(messages, model_id, timeout=90, depth=0):
+def em_chat(messages, model_id, timeout=90, depth=0, probe=False):
     """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی جیاوازەکان + ناسنامەی نوێ
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
+    if not probe:  # #96U1: probe دەیڵێت em مردووە → چات مەیکە (fallback خێرا)؛ probe خۆی دەگەڕێت
+        try:
+            _st96 = (_HEAL_STATE.get("status") or {}).get("em") or {}
+            if _st96.get("ok") is False and time.time() - float(_st96.get("t") or 0) < 300:
+                raise EMError("easemate asleep (probe \u274c)")
+        except EMError:
+            raise
+        except Exception:
+            pass
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
     try:
@@ -8118,7 +8127,7 @@ def _resolve_server(ref):
     return None
 
 
-def _api_call95(kind, cand, full):
+def _api_call95(kind, cand, full, q):
     """#95U1: dispatch یەک کاندید — لە future (preemptable) بانگ دەکرێت"""
     if kind == "em":
         return em_chat(full, cand["model_id"], timeout=75)
@@ -8500,7 +8509,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 _rem95 = 100 - (time.time() - t_api0)  # #95U1: future-guard — کاندید ناتوانێت لە بودجە زیاتر بخوات
                 _ex95 = _cf95.ThreadPoolExecutor(max_workers=1)
                 try:
-                    _fut95 = _ex95.submit(_api_call95, kind, cand, full)
+                    _fut95 = _ex95.submit(_api_call95, kind, cand, full, q)
                     try:
                         content = _fut95.result(timeout=max(5, _rem95))
                     except _cf95.TimeoutError:
@@ -9780,6 +9789,7 @@ def handle_message(msg):
                     return 0
             ca, cb, nv, ac = _a("ca_accounts.json"), _a("cb_accounts.json"), _a("nv_accounts.json"), _a("ac_accounts.json")
             alle, al = _a("alle_accounts.json"), _a("al_accounts.json")  # #94U48
+            em = _a("em_accounts.json")  # #96U1
             try:  # #94U46: ناسنامە زیندووەکانی rewind
                 _rd = _json_load_safe(os.path.join(DATA_DIR, "rwd_pool.json")) or {}
                 _ri = _rd.get("idents") or []
@@ -9791,7 +9801,7 @@ def handle_message(msg):
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000 · ALLE {alle}/1000 · AL {al}/1000\n",  # #94U38؛ #94U46؛ #94U48
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000 · ALLE {alle}/1000 · AL {al}/1000 · EM {em}/1000\n",  # #94U38؛ #94U46؛ #94U48؛ #96U1
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):
@@ -10165,7 +10175,7 @@ def self_heal_once():
     probes["rwd"] = lambda: rwd_chat(_RWD_VERIFIED[0], [{"role": "user", "content": "hi"}], timeout=45)  # #94U46
     # #94U47: پشکنینی دانە-دانە — act/em/gz ـیش (هەموو خولێک تاقی دەکرێنەوە)
     probes["act"] = lambda: act_chat(ACT_MODELS[0], [{"role": "user", "content": "hi"}], timeout=45)
-    probes["em"] = lambda: em_chat([{"role": "user", "content": "hi"}], EASEMATE_MODELS[0]["model_id"], timeout=45)
+    probes["em"] = lambda: em_chat([{"role": "user", "content": "hi"}], EASEMATE_MODELS[0]["model_id"], timeout=45, probe=True)  # #96U1: probe لە sleep بەدەرە
     if _GZ_SYNC.get("catalog"):
         probes["gz"] = _gz_probe  # #94U57: 3-مۆدێڵ failover
     # #94U43: پشکنینی هەموو حەوزە ئەکاونتییەکان — ac/pia/alle ـیش

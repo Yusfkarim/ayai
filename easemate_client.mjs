@@ -254,9 +254,7 @@ async function permMode() {
 async function signinMode() {
   await getIdentity();
   try {
-    const { sign, timestamp } = await getSigns({});
-    const h = baseHeaders(); h['sign'] = sign; h['timestamp'] = timestamp; h['identity-id'] = IID;
-    const r = await fetch(API + '/api2/task/signin', { method: 'POST', headers: h, body: '{}' });
+    const r = await post('/api2/task/signin', {});  // #96U1: sign+timeout+pfetch یەکگرتوو
     const j = await r.json().catch(() => ({}));
     emit({ ok: true, signin: j, code: j?.code });
   } catch (e) {
