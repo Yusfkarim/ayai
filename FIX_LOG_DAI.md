@@ -901,3 +901,10 @@
 - **act/em/gz**: ناسنامە/سێشنی تازە هەر داوایەک (بێسنوور لە بنەڕەتەوە) + پشکنینی نوێ + revive (gz/ak cooldown-clear).
 - **plain keyless** (l7/duck/al/ct/qb/ng/z02/fla/pol/g4f/hk/hf/yl/hb/gk/aiml/aka/pi/cbc): سنووری IP/ڕێژە — حەوزی ناسنامە ناگونجێت؛ breaker+revive+fallbackی 30-سەرچاوەیی دەیپارێزێت.
 - **پشکنین**: ast OK، pyflakes 0ی نوێ، markers 13/13 ✅.
+
+## #94U48 (2026-09-22)
+- RWD هەمیشە 1000: `_rwd_swap` (همان-index + total++ تاکو 10000) + mark/charge گۆڕینی خێرا + ensure هەر-مردوو ≤200/خول (T1/T2/T3 ✅)
+- ALLE حەوزی 1000: زنجیرەی تەواو سەلمێنرا (register 201 → کۆد A-###### لە ~6چرکە → email/verify 200 → login 200)؛ create/conversation لە سێرڤەر شکاوە (401 تەنانەت بۆ seed بە payload ی وێب + XRW + cookie) → چارە: replicate ی کۆنوێرزی هاوبەشکراوی seed (`ALLE_SHARE=4df75c05…` — Replication Successful ✅ uid 33894/33895)؛ `_alle_signup_new` + daemon (catch-up بەچ 3 / maintenance بەچ 2) + بودجە 10000/ڕۆژ + revive-fix (تۆکنی کۆن مەسڕە)
+- AL حەوزی 1000: `_al_signup_new` ی Supabase خێرا (~1چرکە) خرایە daemon (بەچ 15/20) — T5 ✅ 2 ئەکاونت
+- /health + /status: کلیلی alle/al زیادکران
+- keyless ی تر (aiml=فەندزی ئەکاونت و 17 دانە): پێویستیان بە لێکۆڵینەوەی signup ـە — U49

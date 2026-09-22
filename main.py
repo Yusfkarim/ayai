@@ -1266,7 +1266,7 @@ def _rwd_ensure():
                 _rwd_save(force=True)
                 return
             _dead = RWD_ST.get("dead") or {}
-            if len(_dead) > 50 and (RWD_ST.get("total") or 0) < RWD_ABSMAX:  # جێگۆڕکێی کۆمەڵ (تا 200/جار)
+            if _dead and (RWD_ST.get("total") or 0) < RWD_ABSMAX:  # #94U48: هەر مردووێک — یەکسەر (تا 200/جار)
                 _ex = set(_RWD_UAS)
                 _n_rep = 0
                 for _j in range(len(_RWD_UAS)):
@@ -1310,12 +1310,29 @@ def _rwd_skip_dead():
         pass
 
 
+def _rwd_swap(ua):
+    """#94U48: جێگۆڕکێی یەکسەر — مردوو لە هەمان شوێن دەگۆڕدرێت بە تازە (1000 هەمیشە پڕ)."""
+    try:
+        if (RWD_ST.get("total") or 0) >= RWD_ABSMAX:
+            return False
+        with _RWD_LK:
+            if ua in _RWD_UAS:
+                _RWD_UAS[_RWD_UAS.index(ua)] = _rwd_gen_ua(set(_RWD_UAS))
+                RWD_ST["total"] = (RWD_ST.get("total") or 0) + 1
+            (RWD_ST.get("dead") or {}).pop(ua, None)
+            (RWD_ST.get("used") or {}).pop(ua, None)
+        _rwd_save()
+        return True
+    except Exception:
+        return False
+
+
 def _rwd_mark_dead(ua=None):
     try:
         ua = ua or _rwd_cur()
         with _RWD_LK:
             RWD_ST.setdefault("dead", {})[ua] = 1
-        _rwd_save()
+        _rwd_swap(ua)  # #94U48: یەکسەر جێگۆڕکێ — 1-بۆ-1
     except Exception:
         pass
 
@@ -1328,9 +1345,13 @@ def _rwd_charge(pin_chars, pout_chars, ua=None):
         with _RWD_LK:
             _u = RWD_ST.setdefault("used", {})
             _u[ua] = (_u.get(ua) or 0) + est
-            if _u[ua] >= RWD_BUDGET:
+            _crossed = _u[ua] >= RWD_BUDGET
+            if _crossed:
                 RWD_ST.setdefault("dead", {})[ua] = 1
-        _rwd_save()
+        if _crossed:
+            _rwd_swap(ua)  # #94U48: یەکسەر جێگۆڕکێ — 1-بۆ-1
+        else:
+            _rwd_save()
     except Exception:
         pass
 
@@ -5348,7 +5369,9 @@ def _pool_daemon():
     pools = (("CA", _m.CA_ST, _m._ca_signup_new, 10000, 1000),
              ("CB", _m.CB_ST, _m._cb_signup_new, 10000, 1000),
              ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000),
-             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000))  # #94U47
+             ("ALLE", _m.ALLE_ST, _m._alle_signup_new, 10000, 1000),
+             ("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000),
+             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000))  # #94U47؛ #94U48: ALLE+AL
     import concurrent.futures as _cf
     _was_catch = None
     while True:
@@ -5360,7 +5383,7 @@ def _pool_daemon():
         _catch = False
         _today = _lim_today()
         _now = time.time()
-        for _nm, _st, _fn, _tgt, _at in pools[:3]:
+        for _nm, _st, _fn, _tgt, _at in pools[:4]:  # #94U48: ALLE ـیش
             try:
                 _accs = _st.get("accounts") or []
                 _lim = _st.get("limits") or {}
@@ -5372,19 +5395,20 @@ def _pool_daemon():
             except Exception:
                 pass
         if _catch != _was_catch:
-            print(f"[POOL] {'🚀 catch-up: CA+CB+NV پێکەوە بەچ 40' if _catch else '🛡 maintenance: 1-بۆ-1 پاراستنی 1000'}", flush=True)
+            print(f"[POOL] {'🚀 catch-up: CA+CB+NV+ALLE پێکەوە بەچ 40' if _catch else '🛡 maintenance: 1-بۆ-1 پاراستنی 1000'}", flush=True)
             _was_catch = _catch
         try:
             if _catch:
-                with _cf.ThreadPoolExecutor(max_workers=3) as _ex:
-                    _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, 40, 2, 4)
-                             for _nm, _st, _fn, _tgt, _at in pools[:3]]
+                with _cf.ThreadPoolExecutor(max_workers=4) as _ex:  # #94U48: 4 (ALLE ~70چرکە → بەچ 3)
+                    _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, (3 if _nm == "ALLE" else 40), 2, 4)
+                             for _nm, _st, _fn, _tgt, _at in pools[:4]]
                     _cf.wait(_futs)
+                _pool_fill_one("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000, 15, 2, 4)  # #94U48: Supabase خێرا
                 _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000, 20, 2, 4)  # #94U47: catch-up بەچ 20
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
-                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, 20, 3, 6)  # #94U47: AC ـیش بەچ 20
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (2 if _nm == "ALLE" else 20), 3, 6)  # #94U47؛ #94U48: ALLE بەچ 2
                 time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
         except Exception as e:
             print(f"[POOL] daemon: {str(e)[:60]}", flush=True)
@@ -7273,7 +7297,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat()},  # #94U32b؛ #94U46؛ #94U47
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat("alle_accounts.json", 10000), "al": _pstat("al_accounts.json", 10000)},  # #94U32b؛ #94U46؛ #94U47؛ #94U48
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
@@ -8191,8 +8215,7 @@ def _revive_source(kind, err=None):
                 _n_al = 0
                 for _a in (ALLE_ST.get("accounts") or []):
                     try:
-                        _a.pop("token", None)
-                        _alle_login(_a, force=True)
+                        _alle_login(_a, force=True)  # #94U48: تۆکنی کۆن مەسڕە
                         _n_al += 1
                     except Exception:
                         pass
@@ -8780,6 +8803,7 @@ def handle_message(msg):
                 except Exception:
                     return 0
             ca, cb, nv, ac = _a("ca_accounts.json"), _a("cb_accounts.json"), _a("nv_accounts.json"), _a("ac_accounts.json")
+            alle, al = _a("alle_accounts.json"), _a("al_accounts.json")  # #94U48
             try:  # #94U46: ناسنامە زیندووەکانی rewind
                 _rd = _json_load_safe(os.path.join(DATA_DIR, "rwd_pool.json")) or {}
                 _ri = _rd.get("idents") or []
@@ -8791,7 +8815,7 @@ def handle_message(msg):
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000\n",  # #94U38؛ #94U46
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000 · ALLE {alle}/1000 · AL {al}/1000\n",  # #94U38؛ #94U46؛ #94U48
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):
@@ -10205,7 +10229,7 @@ ALLE_API = "https://api.alle-ai.com/api/v1"
 ALLE_WSS = "wss://api.alle-ai.com/app/pb1ry0ntlug7dm2fga0s?protocol=7&client=js&version=8.4.0-1reverb&flash=false"
 ALLE_AUTH_EP = "https://api.alle-ai.com/broadcasting/auth"
 ALLE_ACC_FILE = os.path.join(DATA_DIR, "alle_accounts.json")
-ALLE_ST = {"accounts": [], "idx": 0, "limits": {}}
+ALLE_ST = {"accounts": [], "idx": 0, "limits": {}, "signups": {}}  # #94U48: حەوزی 1000
 ALLE_LOCK = threading.Lock()
 _ALLE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 
@@ -10215,12 +10239,14 @@ def _alle_load_acc():
     ALLE_ST["accounts"] = d.get("accounts") or []
     ALLE_ST["idx"] = int(d.get("idx") or 0)
     ALLE_ST["limits"] = d.get("limits") or {}
+    ALLE_ST["signups"] = d.get("signups") or {}  # #94U48
 
 
 def _alle_save_acc():
     _json_save(ALLE_ACC_FILE, {"accounts": ALLE_ST.get("accounts") or [],
                                "idx": ALLE_ST.get("idx") or 0,
-                               "limits": ALLE_ST.get("limits") or {}})
+                               "limits": ALLE_ST.get("limits") or {},
+                               "signups": ALLE_ST.get("signups") or {}})  # #94U48
 
 _ALLE_SEED = [{"email": "fipexa5604@dreameg.com", "password": "fipexa5604@dreameg.comA",
                "conv": "6c073793-a0a0-4648-b29a-ea2fb989b11e", "pos": 6}]
@@ -10235,6 +10261,82 @@ def _alle_seed():
 
 _alle_load_acc()
 _alle_seed()
+
+ALLE_SHARE = "4df75c05-26a6-4be6-aa6f-5758e1c5206c"  # #94U48: کۆنوێرزی هاوبەشکراوی seed — create/conversation لە سێرڤەر شکاوە (401) → replicate
+
+
+def _alle_signup_new():
+    """#94U48: سایناپی نوێی alle-ai — inbox→register→کۆد A-######→verify→login→replicate→conv (زنجیرە سەلمێنراوە)"""
+    import random as _r, string as _s, time as _t, re as _re
+    try:
+        today = _lim_today()
+        _accs = ALLE_ST.get("accounts") or []
+        _lim = ALLE_ST.get("limits") or {}
+        _alive = sum(1 for _a in _accs if today not in (_lim.get(_a.get("email") or "?") or {}).values())
+        if len(_accs) >= 10000 or _alive >= 1000:
+            return None
+        if not _sg_reserve(ALLE_ST, 10000, today, ALLE_LOCK):
+            return None
+        _UA = _r.choice([_ALLE_UA, _rand_ua()])
+        s = requests.Session(); s.headers.update({"User-Agent": _UA})
+        mb = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30)).json() or {}
+        email, jwt = mb.get("mailbox"), mb.get("token")
+        if not email or not jwt:
+            return None
+        fn_ = _r.choice(["Tara", "Dilan", "Avin", "Shilan", "Hana", "Lana", "Alan", "Aram", "Diyar", "Hemin", "Karwan", "Rebin"])
+        ln_ = _r.choice(["Wali", "Karim", "Hassan", "Omar", "Salih", "Aziz", "Mahmud", "Qadir"])
+        pw = "Ix" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=10)) + "1!"
+        H = {"Accept": "application/json", "Content-Type": "application/json", "User-Agent": _UA,
+             "Origin": "https://app.alle-ai.com", "Referer": "https://app.alle-ai.com/auth"}
+        rg = requests.post(ALLE_API + "/register",
+            json={"first_name": fn_, "last_name": ln_, "email": email, "password": pw, "password_confirmation": pw},
+            headers=H, timeout=(10, 30))
+        rd = rg.json() or {}
+        tok = (rd.get("data") or {}).get("token")
+        if rg.status_code != 201 or not tok:
+            return None
+        mh = {"Authorization": "Bearer " + jwt, "Accept": "application/json"}
+        code = None
+        for _i in range(14):
+            _t.sleep(5)
+            try:
+                msgs = (s.get("https://web2.temp-mail.org/messages", headers=mh, timeout=(10, 25)).json() or {}).get("messages") or []
+            except Exception:
+                continue
+            if msgs:
+                try:
+                    body = s.get(f"https://web2.temp-mail.org/messages/{msgs[0].get('_id')}", headers=mh, timeout=(10, 25)).text or ""
+                except Exception:
+                    continue
+                m = _re.search(r'A-\d{6}', body)
+                if m:
+                    code = m.group(0)
+                    break
+        if not code:
+            return None
+        AH = {**H, "Authorization": "Bearer " + tok}
+        v = requests.post(ALLE_API + "/email/verify", json={"code": code}, headers=AH, timeout=(10, 20))
+        if v.status_code != 200 or not (v.json() or {}).get("is_valid"):
+            return None
+        lg = requests.post(ALLE_API + "/login", json={"email": email, "password": pw}, headers=H, timeout=(10, 30))
+        ld = (lg.json() or {}).get("data") or {}
+        ftok, uid = ld.get("token"), (ld.get("user") or {}).get("id")
+        if lg.status_code != 200 or not ftok:
+            return None
+        rp = requests.post(ALLE_API + f"/share/{ALLE_SHARE}",
+            headers={**H, "Authorization": "Bearer " + ftok}, timeout=(10, 30))
+        sess = ((rp.json() or {}).get("data") or {}).get("session")
+        if rp.status_code != 200 or not sess:
+            return None
+        with ALLE_LOCK:
+            ALLE_ST.setdefault("accounts", []).append(
+                {"email": email, "password": pw, "token": ftok, "uid": uid, "conv": sess, "pos": 1, "ua": _UA})
+            _alle_save_acc()
+        print(f"[ALLE] ئەکاونتی نوێ ✅ {email} uid={uid}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[ALLE] سایناپ: {str(e)[:60]}", flush=True)
+        return None
 
 
 def alle_servers():
