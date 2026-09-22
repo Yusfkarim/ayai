@@ -8384,6 +8384,8 @@ def _api_call95(kind, cand, full, q):
         return pia_chat(full, cand["model_id"])
     elif kind == "cbox":
         return cbox_chat(full, cand["model_id"])
+    elif kind == "ach":
+        return ach_chat(full, cand["model_id"])
     elif kind == "lr":
         return lr_chat(full, cand.get("model_id"))
     elif kind == "alle":
@@ -8810,6 +8812,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = pia_chat(nmsgs, nsrv["model_id"])
                     elif k == "cbox":
                         content = cbox_chat(nmsgs, nsrv["model_id"])
+                    elif k == "ach":
+                        content = ach_chat(nmsgs, nsrv["model_id"])
                     elif k == "alle":
                         content = alle_chat(nmsgs, nsrv["model_id"])
                     elif k == "aiml":
@@ -9126,6 +9130,10 @@ def detect_brain(allow_fallback=True):
         servers += cbox_servers()
     except Exception as e:
         print(f"[BRAIN] cbox fail: {e}", flush=True)
+    try:
+        servers += ach_servers()  # #97: AllChat — کۆنسێنسۆس + ٣ مۆدێل
+    except Exception as e:
+        print(f"[BRAIN] ach fail: {e}", flush=True)
     try:
         servers += lr_servers()  # #96U3: lorka
     except Exception as e:
@@ -9466,6 +9474,9 @@ def _revive_source(kind, err=None):
             elif kind == "cbox":
                 _cbox_new_account()
                 steps.append("account")
+            elif kind == "ach":
+                _ach_new_account()
+                steps.append("account")
             elif kind == "rwd":  # #94U46: ناسنامەی داهاتوو (1000 زیندوو)
                 _rwd_next_identity()
                 steps.append("next-ident")
@@ -9553,6 +9564,9 @@ def _limit_recharge(kind, err):
             # #94CX: ئەکاونتی نوێ = ١ داواکاری — یەکسەر:
             threading.Thread(target=_cbox_new_account, daemon=True).start()
             print(f"[LIMIT-RECHARGE] cbox: ئەکاونتی نوێ (١ داواکاری)...", flush=True)
+        elif kind == "ach":
+            threading.Thread(target=_ach_new_account, daemon=True).start()
+            print(f"[LIMIT-RECHARGE] ach: ئەکاونتی نوێی AllChat (~٢٥چ)...", flush=True)
         elif kind == "pia":
             threading.Thread(target=_pia_signup_new, daemon=True).start()
             print(f"[LIMIT-RECHARGE] pia: ئەکاونتی نوێ...", flush=True)
@@ -9792,15 +9806,19 @@ def ask(session, question):
             if k == "cbox":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = cbox_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "cbox"
+            if k == "ach":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = ach_chat(msgs, cand["model_id"])
+                return a, "ach"
             if k == "lr":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = lr_chat(msgs, cand["model_id"])
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "lr"
-                if leaks(a):
-                    raise EMError("identity leak")
-                return a, "cbox"
             if k == "alle":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = alle_chat(msgs, cand["model_id"])
@@ -9962,14 +9980,17 @@ def ask(session, question):
                     return a, "pia"
                 if k == "cbox":
                     a = cbox_chat(nmsgs, nsrv["model_id"])
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "cbox"
+                if k == "ach":
+                    a = ach_chat(nmsgs, nsrv["model_id"])
+                    return a, "ach"
                 if k == "lr":
                     a = lr_chat(nmsgs, nsrv.get("model_id"))
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "lr"
-                    if leaks(a):
-                        raise EMError("identity leak")
-                    return a, "cbox"
                 if k == "alle":
                     a = alle_chat(nmsgs, nsrv["model_id"])
                     if leaks(a):
@@ -10470,6 +10491,19 @@ def self_heal_once():
             raise
     probes["cb"] = _cb_probe
     probes["cbox"] = lambda: cbox_chat([{"role": "user", "content": "hi"}], "aichat", timeout=50)
+
+    def _ach_probe():
+        # #97: چاتی ڕاستەقینە تەنیا هەر ٣٠خ — لە نێواندا ئەگەر حەوز زیندووە → کاتی پێشوو
+        now = time.time()
+        if now - float(ACH_ST.get("probe", {}).get("t") or 0) < 1800 and ACH_ST["probe"].get("ans"):
+            if _ach_alive():
+                return ACH_ST["probe"]["ans"]
+        a = ach_chat([{"role": "user", "content": "hi"}], "gemini", timeout=60)
+        with ACH_LOCK:
+            ACH_ST["probe"] = {"t": now, "ans": a}
+        return a
+
+    probes["ach"] = _ach_probe
     probes["nv"] = lambda: nv_chat([{"role": "user", "content": "hi"}], "auto", timeout=50)
     probes["rwd"] = lambda: rwd_chat(_RWD_VERIFIED[0], [{"role": "user", "content": "hi"}], timeout=45)  # #94U46
     # #94U47: پشکنینی دانە-دانە — act/em/gz ـیش (هەموو خولێک تاقی دەکرێنەوە)
@@ -11087,7 +11121,7 @@ def _chaos_daemon():
                 try:
                     fn = globals().get(f"{k}_chat")
                     if fn:
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "lr"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "ach", "lr"):
                             a = fn(msgs, srv.get("model_id") or srv.get("id"), timeout=30)
                         elif k in ("fla", "qb", "ng"):
                             a = fn(msgs, timeout=30)
@@ -11205,7 +11239,7 @@ def _hot_model_daemon():
                     fn = globals().get(f"{k}_chat")
                     if fn:
                         msgs = [{"role": "user", "content": "ping"}]
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "lr"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "ach", "lr"):
                             fn(msgs, srv.get("model_id") or mid, timeout=25)
                 except Exception:
                     pass
@@ -12408,6 +12442,327 @@ def _cbox_seed():
         print(f"[CX] seed: {str(e)[:70]}", flush=True)
 
 
+# ════════════════ #97: AllChat (app.askallchat.com) — Firebase + کۆنسێنسۆسی فرە-مۆدێل ════════════════
+# کرایەوە بە تەواوی: mail.tm → signUp → oobCode-verify → signIn → streamGeneralChat/allChatSmartRoute
+ACH_FB_KEY = "AIzaSyD1AvSr0PAlcU6h3ugpp032EaKYHEr7ef0"
+ACH_API = "https://us-central1-allchatprod.cloudfunctions.net"
+ACH_ORIG = {"Origin": "https://app.askallchat.com", "Referer": "https://app.askallchat.com/"}
+ACH_ACC_FILE = os.path.join(DATA_DIR, "ach_accounts.json")
+ACH_ST = {"accounts": [], "idx": 0, "signups": {"date": "", "n": 0}, "probe": {"t": 0.0, "ans": ""}}
+ACH_LOCK = threading.Lock()
+# (کلیلی ناوخۆیی، ناوی بۆت، مۆدێلی ڕاستەقینەی AllChat)
+ACH_MODELS = [("consensus", "AllChat Consensus", ""),  # SmartRoute — کۆنسێنسۆسی فرە-مۆدێل
+              ("gemini", "Gemini Flash-Lite", "google/gemini-2.5-flash-lite"),
+              ("gpt4o", "GPT-4o Mini", "openai/gpt-4o-mini"),
+              ("llama", "Llama 3.1 8B", "meta-llama/llama-3.1-8b-instruct")]
+ACH_REAL = {k: m for k, _, m in ACH_MODELS if m}
+ACH_BUDGET = 2      # نامە/ئەکاونت (بەخۆڕایی ≈٢-٣ — بە ٢ خۆپاراستنە)
+ACH_DAY_CAP = 250   # ساینئەپ/ڕۆژ — خۆپاراستنی mail.tm
+
+
+def _ach_load():
+    d = _json_load_safe(ACH_ACC_FILE) or {}
+    ACH_ST["accounts"] = d.get("accounts") or []
+    ACH_ST["idx"] = int(d.get("idx") or 0)
+    ACH_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+
+
+def _ach_save():
+    _json_save(ACH_ACC_FILE, {"accounts": ACH_ST.get("accounts") or [],
+                               "idx": ACH_ST.get("idx") or 0,
+                               "signups": ACH_ST.get("signups") or {"date": "", "n": 0}})
+
+
+def _ach_mail_new(sess):
+    """ئیمەیڵی کاتی mail.tm — 429 → خستنەوە (٢ جار)"""
+    em = "alchat" + uuid.uuid4().hex[:10] + "@uberip.com"
+    pw = "Xq" + uuid.uuid4().hex[:12] + "A!"
+    for i in range(3):
+        try:
+            sess.post("https://api.mail.tm/accounts", json={"address": em, "password": pw}, timeout=(12, 30))
+            time.sleep(3 if i == 0 else 1)
+            for j in range(2):
+                rt = sess.post("https://api.mail.tm/token", json={"address": em, "password": pw}, timeout=(12, 30))
+                if rt.status_code == 200 and (rt.json() or {}).get("token"):
+                    return em, pw, rt.json()["token"]
+                time.sleep(25 if rt.status_code == 429 else 4)
+            return em, pw, None
+        except Exception as e:
+            if i == 2:
+                print(f"[ACH] mail: {str(e)[:70]}", flush=True)
+            time.sleep(5)
+    return em, pw, None
+
+
+def _ach_wait_oob(sess, mtok, want="oobCode="):
+    """چاوەڕوانی نامەی Firebase — دەرهێنانی کۆد"""
+    for _ in range(12):
+        time.sleep(5)
+        try:
+            msgs = sess.get("https://api.mail.tm/messages",
+                            headers={"Authorization": f"Bearer {mtok}", "Accept": "application/json"},
+                            timeout=(12, 25)).json() or []
+        except Exception:
+            continue
+        for it in (msgs if isinstance(msgs, list) else [])[:3]:
+            try:
+                full = sess.get(f"https://api.mail.tm/messages/{it['id']}",
+                                headers={"Authorization": f"Bearer {mtok}", "Accept": "application/json"},
+                                timeout=(12, 25)).json() or {}
+            except Exception:
+                continue
+            m = re.search(r'oobCode=([a-zA-Z0-9_\-]+)', (full.get("text") or "") + (full.get("html") and str(full.get("html")) or ""))
+            if m:
+                return m.group(1)
+    return None
+
+
+def _ach_fb_login(sess, email, pw):
+    """لۆگین — idToken ی تازە (بۆ توکنی بەسەڕبوو >٤٠خ)"""
+    r = sess.post(f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={ACH_FB_KEY}",
+                  json={"email": email, "password": pw, "returnSecureToken": True}, timeout=(12, 30))
+    d = r.json() or {}
+    return d.get("idToken"), d.get("localId")
+
+
+def _ach_new_account():
+    """ئەکاونتی تەواوی AllChat: mail.tm → signUp → verify(oobCode) → signIn — ~٢٥ چرکە"""
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    with ACH_LOCK:
+        sg = ACH_ST.get("signups") or {"date": "", "n": 0}
+        if sg.get("date") == today and int(sg.get("n") or 0) >= ACH_DAY_CAP:
+            return None
+    try:
+        sess = requests.Session()
+        em, pw, mtok = _ach_mail_new(sess)
+        r = sess.post(f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={ACH_FB_KEY}",
+                      json={"email": em, "password": pw, "returnSecureToken": True}, timeout=(12, 30))
+        d = r.json() or {}
+        idtok, uid = d.get("idToken"), d.get("localId")
+        if not idtok:
+            print(f"[ACH] signUp fail: {r.status_code} {str(d)[:90]}", flush=True)
+            return None
+        # پشتڕاستکردنەوەی ئیمەیڵ — ناچاری (چات 403 email_unverified)
+        try:
+            sess.post(f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={ACH_FB_KEY}",
+                      json={"requestType": "VERIFY_EMAIL", "idToken": idtok}, timeout=(12, 30))
+            if mtok:
+                code = _ach_wait_oob(sess, mtok)
+                if code:
+                    sess.post(f"https://identitytoolkit.googleapis.com/v1/accounts:update?key={ACH_FB_KEY}",
+                              json={"oobCode": code}, timeout=(12, 30))
+        except Exception:
+            pass
+        tok, _ = _ach_fb_login(sess, em, pw)
+        acc = {"email": em, "pw": pw, "uid": uid, "tok": tok or idtok,
+               "ts": time.time(), "day": today, "n": 0, "dead": 0}
+        with ACH_LOCK:
+            ACH_ST.setdefault("accounts", []).append(acc)
+            _aa = ACH_ST.get("accounts") or []
+            if len(_aa) > 320:
+                _lv = [a for a in _aa if not a.get("dead")][-260:]
+                _dd = [a for a in _aa if a.get("dead")][-60:]
+                ACH_ST["accounts"] = _lv + _dd
+            sg = ACH_ST.get("signups") or {"date": "", "n": 0}
+            if sg.get("date") != today:
+                sg = {"date": today, "n": 0}
+            sg["n"] = int(sg.get("n") or 0) + 1
+            ACH_ST["signups"] = sg
+            _ach_save()
+        print(f"[ACH] ئەکاونتی نوێ: {em[:18]}… (حەوز: {len(_ach_alive())})", flush=True)
+        return acc
+    except Exception as e:
+        print(f"[ACH] new-acct: {str(e)[:80]}", flush=True)
+        return None
+
+
+def _ach_alive():
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    out = []
+    for a in (ACH_ST.get("accounts") or []):
+        if a.get("dead"):
+            continue
+        if int(a.get("n") or 0) >= ACH_BUDGET:
+            continue
+        if a.get("day") != today:
+            a["day"], a["n"] = today, 0  # کوانتا ڕۆژانە نەبووە — ژماردنی ناوخۆ تەنیا
+        out.append(a)
+    return out
+
+
+def _ach_pick():
+    accs = _ach_alive()
+    if not accs:
+        return _ach_new_account()
+    a = accs[ACH_ST.get("idx", 0) % len(accs)]
+    ACH_ST["idx"] = (ACH_ST.get("idx", 0) + 1) % len(accs)
+    return a
+
+
+def _ach_tok(acc):
+    """توکنی تازە ئەگەر بەسەڕبوو (>٣٥خ)"""
+    if time.time() - float(acc.get("ts") or 0) < 2100 and acc.get("tok"):
+        return acc["tok"]
+    try:
+        sess = requests.Session()
+        tok, _ = _ach_fb_login(sess, acc.get("email") or "", acc.get("pw") or "")
+        if tok:
+            acc["tok"], acc["ts"] = tok, time.time()
+            with ACH_LOCK:
+                _ach_save()
+            return tok
+    except Exception:
+        pass
+    return acc.get("tok") or ""
+
+
+class _AchLimit(Exception):
+    pass
+
+
+def _ach_call(acc, model_key, user_msg, history, timeout):
+    """یەک داواکاری — دەگەڕێنێتەوە (وەڵام، consensus_meta) — limitReached → _AchLimit"""
+    tok = _ach_tok(acc)
+    if not tok:
+        raise _AchLimit("no-token")
+    hdrs = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json", **ACH_ORIG}
+    body = {"userId": acc.get("uid"), "conversationId": "new",
+            "userMessage": user_msg, "userMessageId": "u-" + uuid.uuid4().hex[:12],
+            "assistantMessageId": "a-" + uuid.uuid4().hex[:12],
+            "conversationHistory": history, "memoryLimit": 20 if model_key == "consensus" else 10}
+    ep = "allChatSmartRoute"
+    if model_key == "consensus":
+        body["mode"] = "smart"
+    else:
+        ep = "streamGeneralChat"
+        body["model"] = ACH_REAL.get(model_key, "google/gemini-2.5-flash-lite")
+    r = requests.post(f"{ACH_API}/{ep}", json=body, headers=hdrs, timeout=(12, timeout), stream=True)
+    if r.status_code == 429:
+        time.sleep(2)
+        r = requests.post(f"{ACH_API}/{ep}", json=body, headers=hdrs, timeout=(12, timeout), stream=True)
+    if r.status_code in (401, 403):
+        raise _AchLimit(f"auth{r.status_code}")
+    if r.status_code == 402:
+        raise _AchLimit("tier402")
+    parts, cmeta = [], None
+    r.raw.decode_content = True
+    for raw in r.iter_lines(chunk_size=None):
+        if not raw:
+            continue
+        ln = raw.decode("utf-8", "ignore").strip() if isinstance(raw, bytes) else str(raw).strip()
+        if not ln.startswith("data:"):
+            continue
+        p = ln[5:].strip()
+        if p == "[DONE]":
+            break
+        try:
+            d = json.loads(p)
+        except Exception:
+            continue
+        t = d.get("type") if isinstance(d, dict) else None
+        if t == "content":
+            parts.append(str(d.get("content") or ""))
+        elif t == "limitReached":
+            raise _AchLimit(str(d.get("reason") or "limit"))
+        elif t == "error":
+            raise _AchLimit(str(d.get("error") or d.get("message") or "err")[:90])
+        elif t == "done":
+            cm = d.get("consensus_meta") or {}
+            if cm:
+                cmeta = {"confidence": cm.get("confidence"), "points": (cm.get("consensus_points") or [])[:4]}
+            break
+    ans = "".join(parts).strip()
+    if not ans:
+        raise _AchLimit("empty")
+    return ans, cmeta
+
+
+def ach_chat(messages, model_key="consensus", timeout=110, depth=0):
+    """چاتی AllChat — ڕۆتەیشنی ئەکاونت + دروستکردنی خۆکار لەسەر limitReached"""
+    if depth == 0 and not (ACH_ST.get("accounts")):
+        _ach_load()
+    sys_txt = " ".join(str(m.get("content")) for m in messages if m.get("role") == "system")[:600]
+    rest = [m for m in messages if m.get("role") != "system"]
+    last = rest[-1] if rest else {"role": "user", "content": "سلام"}
+    hist = [{"role": ("user" if m.get("role") == "user" else "assistant"),
+             "content": str(m.get("content"))[:1200]} for m in rest[:-1]][-6:]
+    umsg = str(last.get("content"))[:6000]
+    if sys_txt:
+        umsg = f"[رێنمایی کەسایەتی: {sys_txt}]\n\n{umsg}"
+    for _ in range(2):
+        acc = _ach_pick()
+        if not acc:
+            raise EMError("ach: ئەکاونت نەدروست بوو")
+        try:
+            ans, cm = _ach_call(acc, model_key, umsg, hist, timeout)
+            acc["n"] = int(acc.get("n") or 0) + 1
+            if int(acc.get("n") or 0) >= ACH_BUDGET:
+                acc["dead"] = 1
+            with ACH_LOCK:
+                _ach_save()
+            return ans
+        except _AchLimit as e:
+            s = str(e)
+            acc["dead"] = 1
+            with ACH_LOCK:
+                _ach_save()
+            if depth == 0:
+                na = _ach_new_account()
+                if na:
+                    return ach_chat(messages, model_key, timeout, depth=1)
+            raise EMError(f"ach: {s[:80]}")
+        except EMError:
+            raise
+        except Exception as e:
+            if depth == 0:
+                acc["dead"] = 1
+                with ACH_LOCK:
+                    _ach_save()
+                na = _ach_new_account()
+                if na:
+                    return ach_chat(messages, model_key, timeout, depth=1)
+            raise EMError(f"ach: {str(e)[:80]}")
+    raise EMError("ach: دووبارە بوونەوە سەرکەوتوو نەبوو")
+
+
+def ach_servers():
+    out = []
+    for key, nm, _m in ACH_MODELS:
+        out.append({"id": f"ach-{key}", "name": f"{nm} (AllChat)", "model_id": key, "kind": "ach"})
+    return out
+
+
+def _ach_seed():
+    """پڕکردنەوەی حەوز لە دەستپێک — ٣ ئەکاونت لە پاشبنەما"""
+    def _go():
+        try:
+            need = 3 - len(_ach_alive())
+            for _ in range(max(0, need)):
+                if len(_ach_alive()) >= 3:
+                    break
+                _ach_new_account()
+                time.sleep(4)
+            print(f"[ACH] حەوزی سەرەتایی: {len(_ach_alive())} ئەکاونت", flush=True)
+        except Exception as e:
+            print(f"[ACH] seed: {str(e)[:70]}", flush=True)
+    threading.Thread(target=_go, daemon=True).start()
+
+
+def _ach_daemon():
+    """هەر ٤ خولەک — ئەگەر حەوز <٣ → یەک ئەکاونتی نوێ (خاڤ = بۆ mail.tm)"""
+    time.sleep(90)
+    while True:
+        try:
+            if len(_ach_alive()) < 3:
+                _ach_new_account()
+                time.sleep(4)
+            time.sleep(240)
+        except Exception:
+            time.sleep(120)
+
+
+# ════════════════ کۆتایی #97: AllChat ════════════════
+
 _POOL_STATS_CACHE = {"t": 0.0, "data": {}}
 
 
@@ -12657,6 +13012,9 @@ def main():
     threading.Thread(target=_pia_signup_daemon, daemon=True).start()
     threading.Thread(target=_cbox_daemon, daemon=True).start()
     _cbox_seed()
+    threading.Thread(target=_ach_daemon, daemon=True).start()  # #97: AllChat حەوز-بنیاتەر
+    _ach_load()
+    _ach_seed()
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
     def _safe_handle_guarded(m):
