@@ -984,3 +984,19 @@
 - node: EM_TOKEN (Bearer) + EM_FAMILY=6 (IPv6-direct — کەناڵی کوانتای جیاواز، سەلمێنرا 200)
 - pool: em_accounts.json + worker (بەچ 2) + token round-robin لە شەپۆلەکان + per-account burn + refresh
 - ئامانج: 25 (→ 1000 دوای سەلماندنی کوانتا)؛ seed: ئەکاونتی تاقیکراو
+
+## #94U63b (2026-09-22)
+- EM لە catch-up ـیش (daemon تەنها یەکەم-4 + AL + AC پڕدەکات — EM وەک 7ەم دەخنکا تا ALLE<1000)
+
+## #94U64 (2026-09-22) — risk-filter 🎯
+- SMOKING GUN: query_permission — anon تازە token_total=50000! ئەکاونتی تازە token_total=0 (risk-flag: check-in «For risk users, rewards are not granted»)
+- 6101 = دەرگای IP ـە (سەربەخۆ لە کوانتای identity/ئەکاونت)؛ 3 تاقی: DC-IP + هەر دۆمەینێک → هەمیشە 0-quota
+- worker: پشکنینی perm (node perm-mode) → تەنها quota>0 دەمێنێتەوە + res-first signup + ئامانج 1000 (catch-up بەچ 8، maintenance بەچ 6)
+- یەکەم keep سەلمێنرا: n=1→2 (1 لە 5 هەوڵ ≈ 20٪ — بەڵگە res-IP کوانتا دەدات!)
+
+## #94U65 (2026-09-22)
+- 6101 زۆرینە IP-ە نەک ئەکاونت → burn-counter: ئەکاونت تەنها دوای 5× لەسەریەک دەسوتێت؛ سەرکەوتن → f6101=0 + used+1؛ 401/auth → یەکسەر burn (4/4 exec-test ✅)
+
+## #94U66 (2026-09-22)
+- success-log: tok-flag (anon vs email/quota) — داتا بۆ تاقی یەکلاکەرەوە: ئایا token-chat لەسەر fresh-IP لە IP-bucket تێدەپەڕێت؟
+- مۆدێڵی ئێستا: IP-bucket ڕۆژانە بچووک (~1-2 چات) + identity 50K; ئەگەر ئەکاونت bypass بکات → pool=زێڕ، ئەگەر نا → تەنها anon-IP-hunting

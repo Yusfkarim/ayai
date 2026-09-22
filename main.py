@@ -21,6 +21,7 @@ import faulthandler
 import socketserver
 import subprocess
 import threading
+import concurrent.futures as _cf95  # #95U1: candidate future-guard
 import time
 import shutil
 import uuid
@@ -1100,8 +1101,21 @@ def em_chat(messages, model_id, timeout=90, depth=0):
         pass
     _k63 = [0]
     _waves = [_empx[_i:_i + 3] for _i in range(0, len(_empx), 3)]  # شەپۆلی 3-یاڵە — یەکەم سەرکەوتن دەیباتەوە
+    _t095 = time.time()
+    _dead95 = _t095 + timeout  # #95U1: دێدلاینی گشتی (نەک شەپۆل-بە-شەپۆل)
+    try:
+        _nb95 = sum(1 for _v in _EM_BURNED.values() if _v == _today)
+    except Exception:
+        _nb95 = 0
+    if _nb95 >= 150 and len(_waves) > 2:  # #95U1: ڕۆژی سوتاو → تەنها 2 شەپۆل (fail-fast → fallback)
+        print(f"[EM] fail-fast: {_nb95} سوتاو → 2 شەپۆل", flush=True)
+        _waves = _waves[:2]
     _nattempt = 0
     for _w in _waves:
+        _rem95 = _dead95 - time.time()  # #95U1
+        if _rem95 <= 3:
+            _last = EMError("easemate deadline")
+            break
         _ex59 = _cfw.ThreadPoolExecutor(max_workers=len(_w))
         try:
             _jobs63 = []
@@ -1111,7 +1125,7 @@ def em_chat(messages, model_id, timeout=90, depth=0):
                 _jobs63.append((_px, _a63))
             _futs = {_ex59.submit(_em_try_once, payload, _px, timeout, _a): _px for _px, _a in _jobs63}
             try:
-                for _f in _cfw.as_completed(_futs, timeout=timeout + 15):
+                for _f in _cfw.as_completed(_futs, timeout=min(40, _rem95)):  # #95U1
                     _nattempt += 1
                     try:
                         _ans59 = _f.result()
@@ -4229,7 +4243,7 @@ def _gz_rid(n):
     return "".join(_sc.choice(_st.ascii_letters + _st.digits + "-_") for _ in range(n))
 
 
-def gz_chat(messages, model_id, timeout=110):
+def gz_chat(messages, model_id, timeout=90):  # #95U1: 110→90 + دێدلاینی گشتی
     """چاتی GizAI — session ی نەناسراو ← infer → {"status":"completed","output":…}؛ #94U50: 429/401 → سێشن+پرۆکسی نوێ"""
     import time as _t
     if _t.time() < _GZ_BADC.get(model_id, 0):
@@ -4251,7 +4265,12 @@ def gz_chat(messages, model_id, timeout=110):
     except Exception:
         pass
     _loop = [None] + (_use if len(_use) >= 2 else _allpx[:2])  # دایرێکت یەکەم + proxy ـەکان
+    _dead95 = _t.time() + min(timeout, 90)  # #95U1
     for _px in _loop:
+        _rem95 = _dead95 - _t.time()  # #95U1
+        if _rem95 <= 6:
+            _last = EMError("gz: deadline")
+            break
         try:
             s = requests.Session()
             s.headers.update({"User-Agent": GZ_UA, "Content-Type": "application/json",
@@ -4263,7 +4282,7 @@ def gz_chat(messages, model_id, timeout=110):
                         json={"visitorId": _gz_rid(32), "session": {"mode": "chat", "shared": False,
                               "modeInput": {"baseModel": "dynamic", "settings": {"character": "AI", "responseMode": "text"},
                               "reasoning": {"level": "low", "mode": "default"}, "context": "general",
-                              "reference": "auto", "showChoices": False}}}, timeout=(10, 25))
+                              "reference": "auto", "showChoices": False}}}, timeout=(10, min(25, max(8, int(_rem95)))))  # #95U1
             sid = (r0.json() or {}).get("sessionId") if r0.status_code in (200, 201) else None
             if not sid:
                 _sm = ""
@@ -4279,7 +4298,7 @@ def gz_chat(messages, model_id, timeout=110):
                              "settings": {"character": "AI", "responseMode": "text"}, "context": "general"},
                    "subscribeId": _gz_rid(22), "instanceId": inst}
             r = s.post(GZ_BASE + "/api/data/users/inferenceServer.infer", json=inf,
-                       headers={"x-giz-instance-id": inst}, timeout=(15, timeout))
+                       headers={"x-giz-instance-id": inst}, timeout=(15, min(45, max(10, int(_rem95)))))  # #95U1
         except Exception as e:
             if _px:  # #94U53: پرۆکسی مردوو → خراپ (strikes)
                 try:
@@ -7767,6 +7786,74 @@ def _resolve_server(ref):
     return None
 
 
+def _api_call95(kind, cand, full):
+    """#95U1: dispatch یەک کاندید — لە future (preemptable) بانگ دەکرێت"""
+    if kind == "em":
+        return em_chat(full, cand["model_id"], timeout=75)
+    elif kind == "aff":
+        return AIFreeChat(model=cand["id"], endpoint=cand.get("endpoint")).chat(q, history=full)
+    elif kind == "cbc":
+        return cbc_chat(full)
+    elif kind == "rwd":
+        return rwd_chat(cand["model_id"], full)
+    elif kind == "act":
+        return act_chat(cand["model_id"], full)
+    elif kind == "fla":
+        return fla_chat(full)
+    elif kind == "z02":
+        return z02_chat(full, cand["model_id"])
+    elif kind == "qb":
+        return qb_chat(full)
+    elif kind == "duck":
+        return duck_chat(cand["model_id"], full)
+    elif kind == "ak":
+        return ak_chat(cand["model_id"], full)
+    elif kind == "ng":
+        return ng_chat(full)
+    elif kind == "l7":
+        return l7_chat(full, cand["model_id"])
+    elif kind == "g4f":
+        return g4f_chat(full, cand["model_id"], timeout=50)  # #94U19
+    elif kind == "ct":
+        return ct_chat(full, cand["model_id"])
+    elif kind == "yl":
+        return yl_chat(full, cand["model_id"])
+    elif kind == "hk":
+        return hk_chat(full, cand["model_id"])
+    elif kind == "hf":
+        return hf_chat(full, cand["model_id"])
+    elif kind == "aka":
+        return aka_chat(full, cand["model_id"])
+    elif kind == "hb":
+        return hb_chat(full, cand["model_id"])
+    elif kind == "gk":
+        return gk_chat(full, cand["model_id"])
+    elif kind == "gz":
+        return gz_chat(full, cand["model_id"], timeout=75)
+    elif kind == "pi":
+        return pi_chat(full, cand["model_id"])
+    elif kind == "cb":
+        return cb_chat(full, cand["model_id"])
+    elif kind == "ca":
+        return ca_chat(full, cand["model_id"])
+    elif kind == "ac":
+        return ac_chat(full, cand["model_id"])
+    elif kind == "nv":
+        return nv_chat(full, cand["model_id"])
+    elif kind == "al":
+        return al_chat(full, cand["model_id"])
+    elif kind == "pia":
+        return pia_chat(full, cand["model_id"])
+    elif kind == "cbox":
+        return cbox_chat(full, cand["model_id"])
+    elif kind == "alle":
+        return alle_chat(full, cand["model_id"])
+    elif kind == "aiml":
+        return aiml_chat(full, cand["model_id"])
+    else:
+        return pol_chat(cand["id"], full)
+
+
 class APIHandler(http.server.BaseHTTPRequestHandler):
     def _clean_path(self):
         p = self.path.split("?")[0].rstrip("/")
@@ -8078,70 +8165,19 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 break
             try:
                 kind = cand.get("kind")
-                if kind == "em":
-                    content = em_chat(full, cand["model_id"])
-                elif kind == "aff":
-                    content = AIFreeChat(model=cand["id"], endpoint=cand.get("endpoint")).chat(q, history=full)
-                elif kind == "cbc":
-                    content = cbc_chat(full)
-                elif kind == "rwd":
-                    content = rwd_chat(cand["model_id"], full)
-                elif kind == "act":
-                    content = act_chat(cand["model_id"], full)
-                elif kind == "fla":
-                    content = fla_chat(full)
-                elif kind == "z02":
-                    content = z02_chat(full, cand["model_id"])
-                elif kind == "qb":
-                    content = qb_chat(full)
-                elif kind == "duck":
-                    content = duck_chat(cand["model_id"], full)
-                elif kind == "ak":
-                    content = ak_chat(cand["model_id"], full)
-                elif kind == "ng":
-                    content = ng_chat(full)
-                elif kind == "l7":
-                    content = l7_chat(full, cand["model_id"])
-                elif kind == "g4f":
-                    content = g4f_chat(full, cand["model_id"], timeout=50)  # #94U19
-                elif kind == "ct":
-                    content = ct_chat(full, cand["model_id"])
-                elif kind == "yl":
-                    content = yl_chat(full, cand["model_id"])
-                elif kind == "hk":
-                    content = hk_chat(full, cand["model_id"])
-                elif kind == "hf":
-                    content = hf_chat(full, cand["model_id"])
-                elif kind == "aka":
-                    content = aka_chat(full, cand["model_id"])
-                elif kind == "hb":
-                    content = hb_chat(full, cand["model_id"])
-                elif kind == "gk":
-                    content = gk_chat(full, cand["model_id"])
-                elif kind == "gz":
-                    content = gz_chat(full, cand["model_id"])
-                elif kind == "pi":
-                    content = pi_chat(full, cand["model_id"])
-                elif kind == "cb":
-                    content = cb_chat(full, cand["model_id"])
-                elif kind == "ca":
-                    content = ca_chat(full, cand["model_id"])
-                elif kind == "ac":
-                    content = ac_chat(full, cand["model_id"])
-                elif kind == "nv":
-                    content = nv_chat(full, cand["model_id"])
-                elif kind == "al":
-                    content = al_chat(full, cand["model_id"])
-                elif kind == "pia":
-                    content = pia_chat(full, cand["model_id"])
-                elif kind == "cbox":
-                    content = cbox_chat(full, cand["model_id"])
-                elif kind == "alle":
-                    content = alle_chat(full, cand["model_id"])
-                elif kind == "aiml":
-                    content = aiml_chat(full, cand["model_id"])
-                else:
-                    content = pol_chat(cand["id"], full)
+                _rem95 = 100 - (time.time() - t_api0)  # #95U1: future-guard — کاندید ناتوانێت لە بودجە زیاتر بخوات
+                _ex95 = _cf95.ThreadPoolExecutor(max_workers=1)
+                try:
+                    _fut95 = _ex95.submit(_api_call95, kind, cand, full)
+                    try:
+                        content = _fut95.result(timeout=max(5, _rem95))
+                    except _cf95.TimeoutError:
+                        raise EMError(f"{kind}: candidate-timeout ({_rem95:.0f}s)")
+                finally:
+                    try:
+                        _ex95.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
                 if content:
                     _dg = _resp_degenerate(content)
                     if _dg >= 2:
@@ -10757,7 +10793,10 @@ def _admin_test_model(chat_id, model_ref):
             err = str(j.get("error") or r.text)[:80]
             reply(chat_id, f"❌ <b>شکستی هێنا</b> ({dt:.1f}s)\n⚠️ {err}")
     except Exception as e:
-        reply(chat_id, f"❌ <b>هەڵە:</b> {str(e)[:80]}")
+        _dt95 = time.time() - t0  # #95U1: کات + کۆتایی هەڵەکە (نەک سەرەتای بڕاو)
+        _em95 = str(e).replace("<", "").replace(">", "")
+        _em95 = _em95 if len(_em95) <= 150 else "…" + _em95[-150:]
+        reply(chat_id, f"❌ <b>هەڵە:</b> {_em95}\n⏱ {_dt95:.1f}s")
 
 
 
