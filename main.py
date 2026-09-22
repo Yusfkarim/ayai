@@ -5395,12 +5395,12 @@ def _pool_daemon():
             except Exception:
                 pass
         if _catch != _was_catch:
-            print(f"[POOL] {'🚀 catch-up: CA+CB+NV+ALLE پێکەوە بەچ 40' if _catch else '🛡 maintenance: 1-بۆ-1 پاراستنی 1000'}", flush=True)
+            print(f"[POOL] {'🚀 catch-up: CA+CB+NV+ALLE پێکەوە' if _catch else '🛡 maintenance: 1-بۆ-1 پاراستنی 1000'}", flush=True)
             _was_catch = _catch
         try:
             if _catch:
                 with _cf.ThreadPoolExecutor(max_workers=4) as _ex:  # #94U48: 4 (ALLE ~70چرکە → بەچ 3)
-                    _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, (3 if _nm == "ALLE" else 40), 2, 4)
+                    _futs = [_ex.submit(_pool_fill_one, _nm, _st, _fn, _tgt, _at, (10 if _nm == "ALLE" else 40), 2, 4)
                              for _nm, _st, _fn, _tgt, _at in pools[:4]]
                     _cf.wait(_futs)
                 _pool_fill_one("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000, 15, 2, 4)  # #94U48: Supabase خێرا
@@ -5408,7 +5408,7 @@ def _pool_daemon():
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
-                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (2 if _nm == "ALLE" else 20), 3, 6)  # #94U47؛ #94U48: ALLE بەچ 2
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (5 if _nm == "ALLE" else 20), 3, 6)  # #94U47؛ #94U48: ALLE بەچ 2
                 time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
         except Exception as e:
             print(f"[POOL] daemon: {str(e)[:60]}", flush=True)
