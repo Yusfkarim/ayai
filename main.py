@@ -12452,14 +12452,23 @@ ACH_ST = {"accounts": [], "idx": 0, "signups": {"date": "", "n": 0}, "probe": {"
 ACH_LOCK = threading.Lock()
 # (کلیلی ناوخۆیی، ناوی بۆت، مۆدێلی ڕاستەقینەی AllChat)
 ACH_MODELS = [("consensus", "GPT-5 Consensus", ""),  # SmartRoute — کۆنسێنسۆسی پریمیۆم: GPT-5-mini + Gemini-3/2.5 + DeepSeek
+              ("code", "GPT-5 Code", ""),             # CODE wrap → GPT-5-mini + Gemini-2.5-Flash (سەلمێنراو)
+              ("math", "GPT-5 Math", ""),             # MATH wrap → GPT-5-mini + DeepSeek-v3 (سەلمێنراو)
+              ("deep", "Deep Analysis", ""),          # ANALYSIS wrap → GPT-5-mini / Gemini-3-Flash (سەلمێنراو)
               ("gemini", "Gemini Flash-Lite", "google/gemini-2.5-flash-lite"),
               ("gpt4o", "GPT-4o Mini", "openai/gpt-4o-mini"),
               ("llama", "Llama 3.1 8B", "meta-llama/llama-3.1-8b-instruct")]
 ACH_REAL = {k: m for k, _, m in ACH_MODELS if m}
 ACH_BUDGET = 3      # نامە/ئەکاونت (٣ کۆنسێنسۆسی فرە-مۆدێل/ڕۆژ + ستاندەرد)
 ACH_DAY_CAP = 250   # ساینئەپ/ڕۆژ — خۆپاراستنی mail.tm
-# پێچانەوەی ئاڵۆزی — ڕاوتەری SmartRoute ناچار دەکات بۆ COMPLEX = مۆدێلی پریمیۆم (GPT-5-mini + هاوکار)
-ACH_COMPLEX_WRAP = "\n\n(تکایە بە شیکردنەوەیەکی قووڵ، بەراوردی فرە-ڕوانگە، و هەنگاوە بیرکارییەکان وەڵام بدەوە)"
+# #97f: پێچانەوەی کاتێگۆری — ڕاوتەری SmartRoute مۆدێلی پریمیۆمی تایبەت بەو جۆرە دادەنێت (سەلمێنراو):
+ACH_SMART = ("consensus", "code", "math", "deep")
+ACH_WRAPS = {
+    "consensus": "\n\n(تکایە بە شیکردنەوەیەکی قووڵ، بەراوردی فرە-ڕوانگە، و هەنگاوە بیرکارییەکان وەڵام بدەوە)",
+    "code": "\n\n(تکایە بە کۆدی تەواو و ڕوونکردنەوەی تەکنیکی قووڵ وەڵام بدەوە)",
+    "math": "\n\n(تکایە بە هاوکێشەی ماتماتیکی و سەلماندنی هەنگاو بە هەنگاو وەڵام بدەوە)",
+    "deep": "\n\n(تکایە بە بەراوردی فرە-ڕوانگەی قووڵ و شیکردنەوەی ڕەخنەگرانە وەڵام بدەوە)",
+}
 
 
 def _ach_load():
@@ -12631,9 +12640,9 @@ def _ach_call(acc, model_key, user_msg, history, timeout):
     body = {"userId": acc.get("uid"), "conversationId": "new",
             "userMessage": user_msg, "userMessageId": "u-" + uuid.uuid4().hex[:12],
             "assistantMessageId": "a-" + uuid.uuid4().hex[:12],
-            "conversationHistory": history, "memoryLimit": 20 if model_key == "consensus" else 10}
-    ep = "allChatSmartRoute"
-    if model_key == "consensus":
+            "conversationHistory": history, "memoryLimit": 20 if model_key in ACH_SMART else 10}
+    if model_key in ACH_SMART:
+        ep = "allChatSmartRoute"
         body["mode"] = "smart"
     else:
         ep = "streamGeneralChat"
@@ -12694,9 +12703,9 @@ def ach_chat(messages, model_key="consensus", timeout=110, depth=0):
     umsg = str(last.get("content"))[:6000]
     if sys_txt:
         umsg = f"[رێنمایی کەسایەتی: {sys_txt}]\n\n{umsg}"
-    # #97d: کۆنسێنسۆس → ناچارکردنی COMPLEX — ڕاوتەر مۆدێلی پریمیۆم دادەنێت (GPT-5-mini + Gemini/DeepSeek)
-    if model_key == "consensus":
-        umsg += ACH_COMPLEX_WRAP
+    # #97f: SmartRoute → ناچارکردنی COMPLEX بە پێچانەوەی کاتێگۆری — مۆدێلی پریمیۆمی تایبەت
+    if model_key in ACH_SMART:
+        umsg += ACH_WRAPS.get(model_key, ACH_WRAPS["consensus"])
         timeout = max(int(timeout or 0), 170)
     for _ in range(2):
         acc = _ach_pick()
