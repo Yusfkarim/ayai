@@ -4158,9 +4158,16 @@ def gz_servers():
     return out
 
 
+_GZ_PROBE_I = {"i": 0}  # #94U62: round-robin offset — هەر خولێک 3 مۆدێڵی جیاواز
+
+
 def _gz_probe():
-    """#94U57: probe — 3 مۆدێڵی یەکەمی کاتالۆگ failover (flaky ی تاک-مۆدێل نەبێتە ❌)"""
-    ids = list(_GZ_SYNC.get("catalog", {}).keys())[:3] or ["gpt-5-4-nano"]
+    """#94U57؛ #94U62: probe — round-robin 3-مۆدێڵ لە هەموو کاتالۆگ (combo ی (model,IP) بەکوانتا دەدۆزرێتەوە)"""
+    _all = list(_GZ_SYNC.get("catalog", {}).keys()) or ["gpt-5-4-nano"]
+    _n = len(_all)
+    _start = _GZ_PROBE_I["i"] % _n
+    _GZ_PROBE_I["i"] = _start + 3
+    ids = [_all[(_start + k) % _n] for k in range(min(3, _n))]
     _e = EMError("gz: probe")
     for _mid in ids:
         try:

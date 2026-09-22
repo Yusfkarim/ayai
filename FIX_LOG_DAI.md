@@ -974,3 +974,7 @@
 ## #94U61 (2026-09-22)
 - gz: 400-identity = proxy cookie-strip دەکات → qualification (httpbin echo، parallel، fail-open، کاش 1h)
 - gz: 3 seed سەلمێنراو (.191 201✅ + 2×429 reach✅) + حەوز → تەنها cookie-forward
+
+## #94U62 (2026-09-22)
+- gz: seed .191 + gemini-flash → 201 ✅✅ (کوانتا هەیە!) — probe: round-robin هەموو 12 مۆدێل (4 خول = پۆششی تەواو)
+- وانە: kimi لە هەموو IP ـەکان 429 (تاقیکردنەوەکان خۆیان دەیسوتێنن) — v.imp: sweep مەکە
