@@ -1243,9 +1243,16 @@ def _em_signup_new():
         if not email or not _poll:
             return None
         _t.sleep(_r.uniform(2, 6))
-        _pl = _px_list(6)
-        _cds = [p for p in _pl[1:] if p]
-        _px = _r.choice(_cds) if _cds else None
+        try:
+            _rx = [p for p in (_px_list_res(4) or []) if p]
+        except Exception:
+            _rx = []
+        if _rx:
+            _px = _r.choice(_rx)  # res یەکەم — کەمکردنەوەی risk-flag
+        else:
+            _pl = _px_list(6)
+            _cds = [p for p in _pl[1:] if p]
+            _px = _r.choice(_cds) if _cds else None
         _sess = requests.Session()
         _sess.headers.update(_em_headers())
         if _px:
@@ -1270,12 +1277,26 @@ def _em_signup_new():
         j = r2.json() or {}
         if j.get("code") != 0 or not (j.get("data") or {}).get("token"):
             return None
+        _tok = j["data"]["token"]
+        _qt = 0  # پشکنینی کۆتا (risk-filter): تەنها token_total>0 دەمێنێتەوە
+        try:
+            _env = dict(os.environ, EM_TOKEN=_tok)
+            _pp = subprocess.run([NODE_BIN, EM_CLIENT, "perm"], capture_output=True, timeout=60, env=_env)
+            _plines = [l for l in (_pp.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+            if _plines:
+                _pj = json.loads(_plines[-1])
+                _qt = int(((_pj.get("perm") or {}).get("token_total")) or 0)
+        except Exception:
+            pass
+        if _qt <= 0:
+            print(f"[EM-POOL] risk/0-quota ⏭️ {email} (فڕێدرا)", flush=True)
+            return None
         with EM_LOCK:
-            EM_ST["accounts"].append({"email": email, "password": _apw, "token": j["data"]["token"],
-                                      "uid": ((j.get("data") or {}).get("user") or {}).get("id"), "t": _t.time()})
+            EM_ST["accounts"].append({"email": email, "password": _apw, "token": _tok,
+                                      "uid": ((j.get("data") or {}).get("user") or {}).get("id"), "t": _t.time(), "quota": _qt})
             _em_save_acc()
-        print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} → {len(EM_ST['accounts'])}", flush=True)
-        return j["data"]["token"]
+        print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} quota={_qt} → {len(EM_ST['accounts'])}", flush=True)
+        return _tok
     except Exception as e:
         print(f"[EM-POOL] signup: {str(e)[:70]}", flush=True)
         return None
@@ -5930,7 +5951,7 @@ def _pool_daemon():
              ("ALLE", _m.ALLE_ST, _m._alle_signup_new, 10000, 1000),
              ("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000),
              ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000),  # #94U47؛ #94U48: ALLE+AL
-             ("EM", _m.EM_ST, _m._em_signup_new, 10000, 25))  # #94U63: EM POOL v1 (25 → 1000 دوای سەلماندن)
+             ("EM", _m.EM_ST, _m._em_signup_new, 10000, 1000))  # #94U63: EM POOL v1 (25 → 1000 دوای سەلماندن)
     import concurrent.futures as _cf
     _was_catch = None
     while True:
@@ -5964,11 +5985,11 @@ def _pool_daemon():
                     _cf.wait(_futs)
                 _pool_fill_one("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000, 15, 2, 4)  # #94U48: Supabase خێرا
                 _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000, 20, 2, 4)  # #94U47: catch-up بەچ 20
-                _pool_fill_one("EM", _m.EM_ST, _m._em_signup_new, 10000, 25, 2, 2, 4)  # #94U63b: EM لە catch-up ـیش (چاوەڕوانی ALLE مەکە)
+                _pool_fill_one("EM", _m.EM_ST, _m._em_signup_new, 10000, 1000, 8, 2, 4)  # #94U63b: EM لە catch-up ـیش (چاوەڕوانی ALLE مەکە)
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
-                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (5 if _nm == "ALLE" else (2 if _nm == "EM" else 20)), 3, 6)  # #94U47؛ #94U48؛ #94U63: EM بەچ 2
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (5 if _nm == "ALLE" else (6 if _nm == "EM" else 20)), 3, 6)  # #94U47؛ #94U48؛ #94U63: EM بەچ 2
                 time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
         except Exception as e:
             print(f"[POOL] daemon: {str(e)[:60]}", flush=True)

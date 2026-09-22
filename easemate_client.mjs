@@ -240,7 +240,19 @@ async function listModels() {
   emit({ ok: true, models: out });
 }
 
+async function permMode() {
+  await getIdentity();
+  try {
+    const r = await post('/api2/task/query_permission', {});
+    const j = await r.json().catch(() => ({}));
+    emit({ ok: true, perm: j?.data || null, code: j?.code });
+  } catch (e) {
+    emit({ ok: false, error: String(e && e.message || e).slice(0, 100) });
+  }
+}
+
 async function main() {
+  if (process.argv[2] === 'perm') return permMode();
   if (process.argv[2] === 'models') return listModels();
   let input = '';
   for await (const d of process.stdin) input += d;
