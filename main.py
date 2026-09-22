@@ -979,46 +979,41 @@ def em_servers():
 
 
 def em_chat(messages, model_id, timeout=90, depth=0):
-    """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی + ناسنامەی نوێ
-       #91F4: timeout 90s + zombie-kill (ناگوازرێ)"""
+    """پرسیار بۆ easemate — node client (ساین + session + SSE)؛ 6101 → پرۆکسی جیاوازەکان + ناسنامەی نوێ
+       #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
-    try:
-        p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
-                           capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # #91F4: کوشتنی هەموو node ەکەی کۆن (زۆرترین 3)
+    _last = EMError("easemate failed")
+    for _i, _px in enumerate(_px_list(3)):  # #94U50: هەر هەوڵێک IP ی جیاواز
+        _env = dict(os.environ, EM_PROXY=_px, EM_ROTATE=str(_i + 1), EM_FRESH_ID="1") if _px else None
         try:
-            subprocess.run(["pkill", "-f", EM_CLIENT.split("/")[-1]], capture_output=True, timeout=5)
+            p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
+                               capture_output=True, timeout=timeout, env=_env)
+        except subprocess.TimeoutExpired:
+            # #91F4: کوشتنی هەموو node ەکەی کۆن (زۆرترین 3)
+            try:
+                subprocess.run(["pkill", "-f", EM_CLIENT.split("/")[-1]], capture_output=True, timeout=5)
+            except Exception:
+                pass
+            raise EMError("easemate timeout")
+        lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+        if not lines:
+            _last = EMError("easemate no output")
+            continue
+        try:
+            obj = json.loads(lines[-1])
         except Exception:
-            pass
-        raise EMError("easemate timeout")
-    lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
-    if not lines:
-        raise EMError("easemate no output")
-    try:
-        obj = json.loads(lines[-1])
-    except Exception:
-        raise EMError("easemate bad output")
-    if obj.get("ok") and obj.get("answer"):
-        return obj["answer"]
-    # #87: لیمیت (6101) → spawn بە پرۆکسی + ناسنامەی نوێ (تا ٣ هەوڵ)
-    code = str(obj.get("code") or "")
-    if (code == "6101" or "free tokens" in str(obj.get("error", "")).lower()) and depth < 3:
-        try:
-            px = _proxy_get(1)
-            if px:
-                env = dict(os.environ, EM_PROXY=px[0], EM_ROTATE=str(depth + 1), EM_FRESH_ID="1")
-                p2 = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
-                                    capture_output=True, timeout=timeout, env=env)
-                l2 = [l for l in (p2.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
-                if l2:
-                    o2 = json.loads(l2[-1])
-                    if o2.get("ok") and o2.get("answer"):
-                        print(f"[EM] 6101 → پرۆکسی ✅ {px[0][:24]}", flush=True)
-                        return o2["answer"]
-        except Exception as e2:
-            print(f"[EM] rotate: {str(e2)[:60]}", flush=True)
-    raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
+            _last = EMError("easemate bad output")
+            continue
+        if obj.get("ok") and obj.get("answer"):
+            if _px:
+                print(f"[EM] 6101 → پرۆکسی ✅ {_px[:24]}", flush=True)
+            return obj["answer"]
+        code = str(obj.get("code") or "")
+        if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
+            _last = EMError(obj.get("error") or "easemate 6101", obj.get("code"))
+            continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو
+        raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
+    raise _last
 
 
 # ════════════════════════════════════════════════════════════
@@ -3907,7 +3902,7 @@ def _gz_rid(n):
 
 
 def gz_chat(messages, model_id, timeout=110):
-    """چاتی GizAI — session ی نەناسراو ← infer → {"status":"completed","output":…}"""
+    """چاتی GizAI — session ی نەناسراو ← infer → {"status":"completed","output":…}؛ #94U50: 429/401 → سێشن+پرۆکسی نوێ"""
     import time as _t
     if _t.time() < _GZ_BADC.get(model_id, 0):
         raise EMError("gz: cooldown")
@@ -3915,48 +3910,59 @@ def gz_chat(messages, model_id, timeout=110):
                         for m in messages if m.get("content")], 11)
     if not hist:
         raise EMError("gz: هیچ نامە")
-    try:
-        s = requests.Session()
-        s.headers.update({"User-Agent": GZ_UA, "Content-Type": "application/json",
-                          "Origin": GZ_BASE, "Referer": GZ_BASE + "/assistant?mode=chat&baseModel=dynamic"})
-        s.cookies.set("pfb9", GZ_PFB9, domain="www.giz.ai")
-        r0 = s.post(GZ_BASE + "/api/data/spaces/spaceServer.createAnonymousSession",
-                    json={"visitorId": _gz_rid(32), "session": {"mode": "chat", "shared": False,
-                          "modeInput": {"baseModel": "dynamic", "settings": {"character": "AI", "responseMode": "text"},
-                          "reasoning": {"level": "low", "mode": "default"}, "context": "general",
-                          "reference": "auto", "showChoices": False}}}, timeout=(10, 25))
-        sid = (r0.json() or {}).get("sessionId") if r0.status_code in (200, 201) else None
-        if not sid:
-            raise EMError(f"gz: session {r0.status_code}")
-        inst = _gz_rid(21)
-        inf = {"model": model_id,
-               "input": {"messages": hist, "sessionId": sid, "mode": "chat",
-                         "settings": {"character": "AI", "responseMode": "text"}, "context": "general"},
-               "subscribeId": _gz_rid(22), "instanceId": inst}
-        r = s.post(GZ_BASE + "/api/data/users/inferenceServer.infer", json=inf,
-                   headers={"x-giz-instance-id": inst}, timeout=(15, timeout))
-    except EMError:
-        raise
-    except Exception as e:
-        raise EMError(f"gz: {str(e)[:60]}")
-    if r.status_code == 429:
+    _last = EMError("gz: شکست")
+    for _px in _px_list(3):  # #94U50: سێشنی نوێ + IP ی نوێ بۆ هەر هەوڵێک
+        try:
+            s = requests.Session()
+            s.headers.update({"User-Agent": GZ_UA, "Content-Type": "application/json",
+                              "Origin": GZ_BASE, "Referer": GZ_BASE + "/assistant?mode=chat&baseModel=dynamic"})
+            if _px:
+                s.proxies.update({"http": _px, "https": _px})
+            s.cookies.set("pfb9", GZ_PFB9, domain="www.giz.ai")
+            r0 = s.post(GZ_BASE + "/api/data/spaces/spaceServer.createAnonymousSession",
+                        json={"visitorId": _gz_rid(32), "session": {"mode": "chat", "shared": False,
+                              "modeInput": {"baseModel": "dynamic", "settings": {"character": "AI", "responseMode": "text"},
+                              "reasoning": {"level": "low", "mode": "default"}, "context": "general",
+                              "reference": "auto", "showChoices": False}}}, timeout=(10, 25))
+            sid = (r0.json() or {}).get("sessionId") if r0.status_code in (200, 201) else None
+            if not sid:
+                _last = EMError(f"gz: session {r0.status_code}")
+                continue
+            inst = _gz_rid(21)
+            inf = {"model": model_id,
+                   "input": {"messages": hist, "sessionId": sid, "mode": "chat",
+                             "settings": {"character": "AI", "responseMode": "text"}, "context": "general"},
+                   "subscribeId": _gz_rid(22), "instanceId": inst}
+            r = s.post(GZ_BASE + "/api/data/users/inferenceServer.infer", json=inf,
+                       headers={"x-giz-instance-id": inst}, timeout=(15, timeout))
+        except Exception as e:
+            _last = EMError(f"gz: {str(e)[:60]}")
+            continue
+        if r.status_code in (429, 401, 403):
+            _last = EMError(f"gz: {r.status_code}")
+            continue
+        if r.status_code != 201 and r.status_code != 200:
+            raise EMError(f"gz: {r.status_code}")
+        try:
+            j = r.json()
+        except Exception:
+            _last = EMError("gz: parse")
+            continue
+        if (j.get("status") or "completed") != "completed":
+            _last = EMError(f"gz: status={j.get('status')}")
+            continue
+        ans = (j.get("output") or "").strip()
+        if not ans:
+            _last = EMError("gz: وەڵام بەتاڵ")
+            continue
+        return ans
+    if "429" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["quota"]
         raise EMError("gz: کوانتای مۆدێڵ (~١ کاتژمێر)")
-    if r.status_code == 401:
+    if "401" in str(_last) or "403" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["login"]
         raise EMError("gz: لۆگین-واڵ")
-    if r.status_code != 201 and r.status_code != 200:
-        raise EMError(f"gz: {r.status_code}")
-    try:
-        j = r.json()
-    except Exception:
-        raise EMError("gz: parse")
-    if (j.get("status") or "completed") != "completed":
-        raise EMError(f"gz: status={j.get('status')}")
-    ans = (j.get("output") or "").strip()
-    if not ans:
-        raise EMError("gz: وەڵام بەتاڵ")
-    return ans
+    raise _last
 
 
 def _gz_slug(v):
@@ -8309,12 +8315,8 @@ def _revive_source(kind, err=None):
     try:
         steps = []
         low = str(err or "").lower()
-        if kind == "em" and any(w in low for w in ("today", "daily", "free tokens", "monthly")):
-            _BREAKER[kind] = now + 3 * 3600
-            steps.append("breaker-3h")
-        else:
-            _BREAKER.pop(kind, None)
-            steps.append("breaker-clear")
+        _BREAKER.pop(kind, None)  # #94U50: em ـیش clear (پرۆکسی جیاوازەکان دەچەرخێن — 3h لابرا)
+        steps.append("breaker-clear")
         try:
             if kind in ("ca", "cb", "nv"):
                 _pool_reap()
@@ -10398,6 +10400,74 @@ _alle_seed()
 ALLE_SHARE = "4df75c05-26a6-4be6-aa6f-5758e1c5206c"  # #94U48: کۆنوێرزی هاوبەشکراوی seed — create/conversation لە سێرڤەر شکاوە (401) → replicate
 
 
+def _tmp_inbox():
+    """#94U50: inbox ی کاتی — temp-mail.org سەرەتا، mail.tm جێگرەوە (429-دژە)؛ دەگەڕێنێتەوە (email, poll_fn)"""
+    import random as _r
+    _UA = _rand_ua()
+    try:  # 1) temp-mail.org
+        s = requests.Session(); s.headers.update({"User-Agent": _UA})
+        mb = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30)).json() or {}
+        if mb.get("mailbox") and mb.get("token"):
+            jwt = mb["token"]
+
+            def _poll(n=14, gap=5):
+                mh = {"Authorization": "Bearer " + jwt, "Accept": "application/json"}
+                for _ in range(n):
+                    time.sleep(gap)
+                    try:
+                        msgs = (s.get("https://web2.temp-mail.org/messages", headers=mh, timeout=(10, 25)).json() or {}).get("messages") or []
+                    except Exception:
+                        continue
+                    if msgs and msgs[0].get("_id"):
+                        try:
+                            return s.get(f"https://web2.temp-mail.org/messages/{msgs[0].get('_id')}", headers=mh, timeout=(10, 25)).text or ""
+                        except Exception:
+                            continue
+                return ""
+            return mb["mailbox"], _poll
+    except Exception:
+        pass
+    try:  # 2) mail.tm (کاتی 429)
+        ms = requests.Session(); ms.headers.update({"User-Agent": _UA})
+        dom = (ms.get("https://api.mail.tm/domains", timeout=(15, 30)).json() or {}).get("hydra:member") or []
+        if not dom:
+            return None, None
+        addr = f"tmx{_r.randrange(100000, 999999)}{int(time.time()) % 100000}@{(dom[0] or {}).get('domain')}"
+        pw = "Xk9!mQ2#vLp8$zRw"
+        r = ms.post("https://api.mail.tm/accounts", json={"address": addr, "password": pw}, timeout=(15, 30))
+        if r.status_code not in (200, 201):
+            return None, None
+        mtok = (ms.post("https://api.mail.tm/token", json={"address": addr, "password": pw}, timeout=(15, 30)).json() or {}).get("token")
+        if not mtok:
+            return None, None
+
+        def _poll2(n=14, gap=5):
+            mh2 = {"Authorization": f"Bearer {mtok}"}
+            for _ in range(n):
+                time.sleep(gap)
+                try:
+                    msgs = (ms.get("https://api.mail.tm/messages", headers=mh2, timeout=(15, 30)).json() or {}).get("hydra:member") or []
+                except Exception:
+                    continue
+                if msgs and msgs[0].get("id"):
+                    try:
+                        d = ms.get(f"https://api.mail.tm/messages/{msgs[0].get('id')}", headers=mh2, timeout=(15, 30)).json() or {}
+                        t = d.get("text") or ""
+                        h = d.get("html") or ""
+                        if isinstance(t, list):
+                            t = " ".join(t)
+                        if isinstance(h, list):
+                            h = " ".join(h)
+                        return f"{t}\n{h}"
+                    except Exception:
+                        continue
+            return ""
+        print(f"[INBOX] mail.tm جێگرەوە ✅ {addr}", flush=True)
+        return addr, _poll2
+    except Exception:
+        return None, None
+
+
 def _alle_signup_new():
     """#94U48: سایناپی نوێی alle-ai — inbox→register→کۆد A-######→verify→login→replicate→conv (زنجیرە سەلمێنراوە)"""
     import random as _r, string as _s, time as _t, re as _re
@@ -10410,11 +10480,14 @@ def _alle_signup_new():
             return None
         if not _sg_reserve(ALLE_ST, 10000, today, ALLE_LOCK):
             return None
+        try:
+            _alle_save_acc()  # #94U50: بودجە خێرا پاشەکەوت بکە (هەوڵەکان دیار بن)
+        except Exception:
+            pass
         _UA = _r.choice([_ALLE_UA, _rand_ua()])
-        s = requests.Session(); s.headers.update({"User-Agent": _UA})
-        mb = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30)).json() or {}
-        email, jwt = mb.get("mailbox"), mb.get("token")
-        if not email or not jwt:
+        email, _poll = _tmp_inbox()  # #94U50: temp-mail.org → mail.tm
+        if not email or not _poll:
+            print("[ALLE] inbox fail (temp-mail 429 + mail.tm)", flush=True)
             return None
         fn_ = _r.choice(["Tara", "Dilan", "Avin", "Shilan", "Hana", "Lana", "Alan", "Aram", "Diyar", "Hemin", "Karwan", "Rebin"])
         ln_ = _r.choice(["Wali", "Karim", "Hassan", "Omar", "Salih", "Aziz", "Mahmud", "Qadir"])
@@ -10427,39 +10500,30 @@ def _alle_signup_new():
         rd = rg.json() or {}
         tok = (rd.get("data") or {}).get("token")
         if rg.status_code != 201 or not tok:
+            print(f"[ALLE] register fail: {rg.status_code} {rg.text[:80]}", flush=True)
             return None
-        mh = {"Authorization": "Bearer " + jwt, "Accept": "application/json"}
-        code = None
-        for _i in range(14):
-            _t.sleep(5)
-            try:
-                msgs = (s.get("https://web2.temp-mail.org/messages", headers=mh, timeout=(10, 25)).json() or {}).get("messages") or []
-            except Exception:
-                continue
-            if msgs:
-                try:
-                    body = s.get(f"https://web2.temp-mail.org/messages/{msgs[0].get('_id')}", headers=mh, timeout=(10, 25)).text or ""
-                except Exception:
-                    continue
-                m = _re.search(r'A-\d{6}', body)
-                if m:
-                    code = m.group(0)
-                    break
+        _body = _poll(14, 5)  # #94U50
+        _m = _re.search(r'A-\d{6}', _body or "")
+        code = _m.group(0) if _m else None
         if not code:
+            print(f"[ALLE] کۆد نەگەیشت {email}", flush=True)
             return None
         AH = {**H, "Authorization": "Bearer " + tok}
         v = requests.post(ALLE_API + "/email/verify", json={"code": code}, headers=AH, timeout=(10, 20))
         if v.status_code != 200 or not (v.json() or {}).get("is_valid"):
+            print(f"[ALLE] verify fail: {v.status_code} {v.text[:80]}", flush=True)
             return None
         lg = requests.post(ALLE_API + "/login", json={"email": email, "password": pw}, headers=H, timeout=(10, 30))
         ld = (lg.json() or {}).get("data") or {}
         ftok, uid = ld.get("token"), (ld.get("user") or {}).get("id")
         if lg.status_code != 200 or not ftok:
+            print(f"[ALLE] login fail: {lg.status_code}", flush=True)
             return None
         rp = requests.post(ALLE_API + f"/share/{ALLE_SHARE}",
             headers={**H, "Authorization": "Bearer " + ftok}, timeout=(10, 30))
         sess = ((rp.json() or {}).get("data") or {}).get("session")
         if rp.status_code != 200 or not sess:
+            print(f"[ALLE] replicate fail: {rp.status_code} {rp.text[:80]}", flush=True)
             return None
         with ALLE_LOCK:
             ALLE_ST.setdefault("accounts", []).append(
@@ -10842,14 +10906,9 @@ def _pia_signup_new():
             return None
         if not _sg_reserve(PIA_ST, 300, today, PIA_LOCK):  # #94U23 بودجە لەژێر لۆک؛ #94U47: 30→300/ڕۆژ (temp-mail سنووردارە)
             return None
-        s = requests.Session()
-        s.headers.update({"User-Agent": _rand_ua(), "Accept": "application/json",
-                          "Origin": "https://temp-mail.org", "Referer": "https://temp-mail.org/"})
-        r = s.post("https://web2.temp-mail.org/mailbox", timeout=(10, 30))
-        mb = r.json() or {}
-        email, jwt = mb.get("mailbox"), mb.get("token")
-        if not email or not jwt:
-            print(f"[PIA-SIGNUP] mailbox fail: {r.status_code}", flush=True)
+        email, _poll = _tmp_inbox()  # #94U50: temp-mail.org → mail.tm
+        if not email or not _poll:
+            print("[PIA-SIGNUP] mailbox fail (temp-mail 429 + mail.tm)", flush=True)
             return None
         s2 = requests.Session()
         s2.headers.update({"User-Agent": _rand_ua(), "Accept-Language": "en",
@@ -10860,27 +10919,9 @@ def _pia_signup_new():
         if (r2.json() or {}).get("code") != 1:
             print(f"[PIA-SIGNUP] sendCode fail: {r2.text[:80]}", flush=True)
             return None
-        code = None
-        mh = {"Authorization": "Bearer " + jwt, "Accept": "application/json"}
-        for _ in range(16):
-            time.sleep(6)
-            try:
-                r3 = s.get("https://web2.temp-mail.org/messages", headers=mh, timeout=(10, 25))
-                msgs = (r3.json() or {}).get("messages") or []
-            except Exception:
-                continue
-            if msgs:
-                mid = msgs[0].get("_id")
-                if not mid:
-                    continue
-                try:
-                    r4 = s.get(f"https://web2.temp-mail.org/messages/{mid}", headers=mh, timeout=(10, 25))
-                    nums = re.findall(r"\b(\d{4,8})\b", r4.text or "")
-                except Exception:
-                    continue
-                if nums:
-                    code = nums[0]
-                    break
+        _body = _poll(16, 6)  # #94U50
+        _nums = re.findall(r"\b(\d{4,8})\b", _body or "")
+        code = _nums[0] if _nums else None
         if not code:
             print(f"[PIA-SIGNUP] کۆد نەگەیشت {email}", flush=True)
             return None

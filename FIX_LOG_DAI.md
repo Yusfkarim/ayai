@@ -918,3 +918,10 @@
 - چاککرا: al 429/402 → ئەکاونتی داهاتوو + جێگۆڕکێ؛ alle/al چوونە `_replace_dead_worker` (1-بۆ-1)؛ duck سێشن-ڕۆتەیشن؛ anakin AK_PROXY
 - aiml (Geetest captcha) + hf (Cloudflare) → ئۆتۆ-سایناپ بە خۆڕایی مەحاڵە — failover ماوەتەوە
 - تێست: 7/7 لۆجیک ✅ + l7 زیندوو ✅
+
+## #94U50 (2026-09-22)
+- ALLE وەستابوو لە 13: temp-mail.org 429 (TooManyRequests) → inbox نەدەدرا → miss بێدەنگ → daemon وازی دەهێنا
+- چاککرا: `_tmp_inbox` (temp-mail.org → mail.tm جێگرەوە) بۆ ALLE+PIA + پرێنتی هەر هەنگاوێک + بودجە خێرا پاشەکەوت
+- em ❌: تەنها 1 پرۆکسی تاقی دەکرایەوە → لوپی دایرێکت+3-جیاواز + لابردنی breaker-3h
+- gz ❌ (login-wall 401): پرۆکسی نەبوو → سێشن+IP ی نوێ بۆ هەر هەوڵێک
+- سەلمێنرا: mail.tm fallback ✅ + em/gz لۆجیک ✅ + ALLE E2E زیندوو uid=33909 لە 18چرکە ✅
