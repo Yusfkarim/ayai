@@ -3912,7 +3912,9 @@ def gz_chat(messages, model_id, timeout=110):
     if not hist:
         raise EMError("gz: هیچ نامە")
     _last = EMError("gz: شکست")
-    for _px in _px_list(3):  # #94U50: سێشنی نوێ + IP ی نوێ بۆ هەر هەوڵێک
+    _gpx = _px_list_res(3)  # #94U52: residential یەکەم (datacenter VPN-block ـە)
+    _loop = _gpx if _gpx else _px_list(2)
+    for _px in _loop:
         try:
             s = requests.Session()
             s.headers.update({"User-Agent": GZ_UA, "Content-Type": "application/json",
@@ -3975,6 +3977,7 @@ def gz_chat(messages, model_id, timeout=110):
     if "401" in str(_last) or "403" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["login"]
         raise EMError("gz: لۆگین-واڵ")
+    print(f"[GZ] هەموو IP ـەکان شکستیان هێنا ({len(_loop)} هەوڵ): {_last}", flush=True)
     raise _last
 
 
@@ -5133,10 +5136,30 @@ def _px_list(n=3):
 def _px_list_http(n=3):
     """#94U51: [None, http1, ...] — تەنها http/https (node ProxyAgent socks ناکات)"""
     try:
-        pxs = [p for p in (_proxy_get(n + 2) or []) if p and p.startswith("http")][:n]
+        pxs = [p for p in (_proxy_get(n * 4 + 4) or []) if p and p.startswith("http")][:n]  # #94U52: قووڵتر (top هەموو socks بوو)
         return [None] + pxs
     except Exception:
         return [None]
+
+
+def _px_list_res(n=3):
+    """#94U52: پرۆکسی residential تەنها (IP ی خێزانی ڕاستەقینە — VPN-check تێدەپەڕێت)"""
+    try:
+        pool = PROXY_ST.get("pool") or {}
+        bad = PROXY_ST.get("bad") or []
+        cand = []
+        for k, v in pool.items():
+            if k in bad:
+                continue
+            if not (v or {}).get("res"):
+                continue
+            if not str(k).startswith("http"):
+                continue
+            cand.append(((v or {}).get("lat", 9), k))
+        cand.sort()
+        return [k for _, k in cand[:n]]
+    except Exception:
+        return []
 
 
 def _proxy_get(n=4):

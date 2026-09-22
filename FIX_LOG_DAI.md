@@ -930,3 +930,7 @@
 - em هێشتا ❌: node ProxyAgent socks ناکات → socks = بێدەنگ direct → هەموو 6101؛ چاککرا: `_px_list_http` بۆ em/ak + پرێنتی کۆتایی
 - gz هێشتا ❌: دوو دەرگای جیاواز — 429 VPN/proxy (IP) و 401 pay-as-you-go (مۆدێل)؛ چاککرا: message-aware (VPN→پرۆکسی داهاتوو، paywall→لە کاتالۆگ لابەرە + raise)
 - سەلمێنرا: http-only ✅ + prune ✅ (کاتالۆگی زیندوو 520 → 13 فری)
+
+## #94U52 (2026-09-22)
+- em هێشتا ❌: top پرۆکسییەکان هەموو socks بوون → 1 هەوڵ تەنها؛ چاککرا: http-fetch قووڵتر (n*4+4)
+- gz هێشتا ❌: datacenter IP = VPN-block (429) — residential تەنها دەچێت؛ چاککرا: `_px_list_res` + loop (res یان fallback) + پرێنتی کۆتایی
