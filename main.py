@@ -1026,7 +1026,11 @@ def _em_try_once(payload, px, timeout, acc=None):
                         _EM_GOOD.pop(_k, None)
             except Exception:
                 pass
-            print(f"[EM] 6101 → پرۆکسی ✅ {px[:24]}", flush=True)
+            try:
+                _tokflag = ("tok=" + (acc.get("email") or "?")[:18] + f"/q={acc.get('quota', '?')}") if acc else "anon"
+            except Exception:
+                _tokflag = "?"
+            print(f"[EM] 6101 → پرۆکسی ✅ {px[:24]} {_tokflag}", flush=True)
         if acc is not None:  # #94U65: سەرکەوتن → ژمارەی 6101 سفر + used+1
             try:
                 acc["f6101"] = 0
