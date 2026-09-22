@@ -939,3 +939,7 @@
 - em هێشتا ❌: حەوزەکە socks ـە و undici socks ناکات → pfetch (node-fetch@3 + socks-proxy-agent + Readable.toWeb بۆ getReader) بۆ em/ak + package.json
 - em/ak: هەموو شێوازەکان + mark-bad لەسەر timeout/no-output؛ gz: mark-bad لەسەر connection-error (strikes حەوزەکە پاک دەکاتەوە)
 - سەلمێنرا: em-client بە socks5 زیندوو ✅ «سڵاو، چۆنیت؟»
+
+## #94U54 (2026-09-22)
+- em هێشتا ❌: هەمان 3 پرۆکسی هەر خولێک (deterministic) → شەفڵ + 5 هەوڵ (دایرێکت+5)؛ ak/gz ـیش شەفڵ
+- gz ✅ بووەوە (res-proxy + mark-bad)؛ ALLE 63 و AL 166 و AC 278

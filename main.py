@@ -983,7 +983,12 @@ def em_chat(messages, model_id, timeout=90, depth=0):
        #91F4: timeout 90s + zombie-kill (ناگوازرێ)؛ #94U50: لوپی دایرێکت+3-پرۆکسی-جیاواز (نەک 1 دانە)"""
     payload = json.dumps({"model_id": int(model_id), "messages": messages}, ensure_ascii=False)
     _last = EMError("easemate failed")
-    for _i, _px in enumerate(_px_list(3)):  # #94U50؛ #94U53: هەموو شێوازەکان (node socks ـیش دەکات)
+    _empx = _px_list(5)  # #94U54: دایرێکت+5 + شەفڵ (هەر خولێک IP ی جیاواز → کوانتا دەدۆزرێتەوە)
+    try:
+        random.shuffle(_empx[1:])
+    except Exception:
+        pass
+    for _i, _px in enumerate(_empx):
         _env = dict(os.environ, EM_PROXY=_px, EM_ROTATE=str(_i + 1), EM_FRESH_ID="1") if _px else None
         try:
             p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
@@ -2497,7 +2502,12 @@ def ak_chat(model_id, messages, timeout=110):
         rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
     payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
     _last = EMError("ak: failed")
-    for _px in _px_list(2):  # #94U49؛ #94U53: هەموو شێوازەکان
+    _akpx = _px_list(3)
+    try:
+        random.shuffle(_akpx[1:])  # #94U54
+    except Exception:
+        pass
+    for _px in _akpx:
         _env = dict(os.environ, AK_PROXY=_px) if _px else None
         try:
             p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
@@ -3926,6 +3936,10 @@ def gz_chat(messages, model_id, timeout=110):
     _last = EMError("gz: شکست")
     _gpx = _px_list_res(3)  # #94U52: residential یەکەم (datacenter VPN-block ـە)
     _loop = _gpx if _gpx else _px_list(2)
+    try:
+        random.shuffle(_loop)  # #94U54: هەر خولێک IP ی جیاواز
+    except Exception:
+        pass
     for _px in _loop:
         try:
             s = requests.Session()
