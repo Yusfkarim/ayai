@@ -104,6 +104,10 @@ def _replace_dead_worker(kind):
             st, fn, fz = AC_ST, _ac_signup_new, False
         elif kind == "pia":
             st, fn, fz = PIA_ST, _pia_signup_new, False
+        elif kind == "alle":  # #94U49
+            st, fn, fz = ALLE_ST, _alle_signup_new, False
+        elif kind == "al":  # #94U49
+            st, fn, fz = AL_ST, _al_signup_new, False
         else:
             return
         if not _REPLACE_SEM.acquire(timeout=120):
@@ -1667,68 +1671,78 @@ def fla_servers():
 
 
 def fla_chat(messages, timeout=110):
-    """چاتی flatai — یەک مۆدێڵی سێرڤەری (GLM)؛ کواتی ڕۆژانە تەواو → EMError"""
+    """چاتی flatai — یەک مۆدێڵی سێرڤەری (GLM)؛ #94U49: کواتی ڕۆژانەی IP → سێشنی نوێ بە پرۆکسی"""
     import uuid as _uuid
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": _pick_ua(ACT_UAS),
-        "Origin": "https://flatai.org",
-        "Referer": "https://flatai.org/free-ai-chatbot-no-registration/",
-    })
+    msgs = _sys_keep([{"role": m["role"], "content": m["content"]}
+                        for m in messages if m.get("role") in ("user", "assistant", "system")], 19)
+    sys_txt = ""
+    for _i, _m in enumerate(msgs):  # #94U25: system لە هەر شوێنێک بێت بدۆزەرەوە
+        if _m.get("role") == "system" and _m.get("content"):
+            sys_txt = msgs.pop(_i)["content"]
+            break
 
     def F(**kv):
         return {k: (None, v) for k, v in kv.items()}
 
-    try:
-        s.get("https://flatai.org/free-ai-chatbot-no-registration/", timeout=(15, 30))
-        r = s.post(FLA_AJAX, files=F(action="chatbot2_session"), timeout=(15, 30))
-        sess = r.json()["data"]
-        r = s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
-                                     history_nonce=sess["history_nonce"], operation="load"),
-                   timeout=(15, 30))
-        ld = r.json()["data"]
-        chat_id = str(_uuid.uuid4())
-        chats = json.loads(ld["values"].get("allChats", "{}"))
-        chats[chat_id] = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                          "title": "New conversation", "messages": []}
-        s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
-                                 history_nonce=sess["history_nonce"], operation="save",
-                                 values=json.dumps({**ld["values"], "allChats": json.dumps(chats)}),
-                                 revision=str(ld["revision"])), timeout=(15, 30))
-        msgs = _sys_keep([{"role": m["role"], "content": m["content"]}
-                            for m in messages if m.get("role") in ("user", "assistant", "system")], 19)
-        sys_txt = ""
-        for _i, _m in enumerate(msgs):  # #94U25: system لە هەر شوێنێک بێت بدۆزەرەوە
-            if _m.get("role") == "system" and _m.get("content"):
-                sys_txt = msgs.pop(_i)["content"]
-                break
-        r = s.post(FLA_AJAX, files=F(action="my_chatbot", nonce=sess["nonce"],
-                                     history_nonce=sess["history_nonce"],
-                                     request_id=str(_uuid.uuid4()), chat_id=chat_id,
-                                     messages=json.dumps(msgs),
-                                     system_message_content=sys_txt),
-                   timeout=(15, timeout))
-        if r.status_code == 429:
-            raise EMError("fla: کواتی ڕۆژانە تەواو (IP)")
-        ct = r.headers.get("content-type", "")
-        if r.status_code != 200 or "event-stream" not in ct:
-            raise EMError(f"fla: {r.status_code}")
-        text = ""
-        for line in r.content.decode("utf-8", "replace").splitlines():
-            if line.startswith("data: "):
-                try:
-                    d = json.loads(line[6:])
-                    if isinstance(d, dict) and isinstance(d.get("text"), str) and d["text"]:
-                        text = d["text"]  # کۆتا (done) دەباتەوە
-                except Exception:
-                    pass
-        if text.strip():
-            return text.strip()
-        raise EMError("fla: وەڵام نەگەڕایەوە")
-    except EMError:
-        raise
-    except Exception as e:
-        raise EMError(f"fla: {str(e)[:60]}")
+    _last = EMError("fla: شکست")
+    for _px in _px_list(3):  # #94U49: سێشنی WP ی نوێ + IP ی نوێ بۆ هەر هەوڵێک
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": _pick_ua(ACT_UAS),
+            "Origin": "https://flatai.org",
+            "Referer": "https://flatai.org/free-ai-chatbot-no-registration/",
+        })
+        if _px:
+            s.proxies.update({"http": _px, "https": _px})
+        try:
+            s.get("https://flatai.org/free-ai-chatbot-no-registration/", timeout=(15, 30))
+            r = s.post(FLA_AJAX, files=F(action="chatbot2_session"), timeout=(15, 30))
+            sess = r.json()["data"]
+            r = s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
+                                         history_nonce=sess["history_nonce"], operation="load"),
+                       timeout=(15, 30))
+            ld = r.json()["data"]
+            chat_id = str(_uuid.uuid4())
+            chats = json.loads(ld["values"].get("allChats", "{}"))
+            chats[chat_id] = {"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+                              "title": "New conversation", "messages": []}
+            s.post(FLA_AJAX, files=F(action="chatbot2_history", nonce=sess["nonce"],
+                                     history_nonce=sess["history_nonce"], operation="save",
+                                     values=json.dumps({**ld["values"], "allChats": json.dumps(chats)}),
+                                     revision=str(ld["revision"])), timeout=(15, 30))
+            r = s.post(FLA_AJAX, files=F(action="my_chatbot", nonce=sess["nonce"],
+                                         history_nonce=sess["history_nonce"],
+                                         request_id=str(_uuid.uuid4()), chat_id=chat_id,
+                                         messages=json.dumps(msgs),
+                                         system_message_content=sys_txt),
+                       timeout=(15, timeout))
+            if r.status_code == 429:
+                _last = EMError("fla: کواتی ڕۆژانە تەواو (IP)")
+                continue
+            ct = r.headers.get("content-type", "")
+            if r.status_code != 200 or "event-stream" not in ct:
+                _last = EMError(f"fla: {r.status_code}")
+                continue
+            text = ""
+            for line in r.content.decode("utf-8", "replace").splitlines():
+                if line.startswith("data: "):
+                    try:
+                        d = json.loads(line[6:])
+                        if isinstance(d, dict) and isinstance(d.get("text"), str) and d["text"]:
+                            text = d["text"]  # کۆتا (done) دەباتەوە
+                    except Exception:
+                        pass
+            if text.strip():
+                return text.strip()
+            _last = EMError("fla: وەڵام نەگەڕایەوە")
+        except EMError as e:
+            if "کوات" in str(e):
+                _last = e
+                continue
+            raise
+        except Exception as e:
+            _last = EMError(f"fla: {str(e)[:60]}")
+    raise _last
 
 
 # ════════════════════════════════════════════════════════════
@@ -2342,27 +2356,29 @@ def _duck_signals():
     return _b.b64encode(_j.dumps(p, separators=(",", ":")).encode("utf-8")).decode("ascii")
 
 
-def _duck_warm():
+def _duck_warm(px=None):  # #94U49: px
     if DUCK_WARMED[0]:
         return
     with DUCK_LOCK:
         if DUCK_WARMED[0]:
             return
         try:
+            _kw = {"proxies": {"http": px, "https": px}} if px else {}
             _duck_session().get("https://duck.ai/", headers={
-                "Accept": "text/html", "Upgrade-Insecure-Requests": "1"}, timeout=(15, 20))
+                "Accept": "text/html", "Upgrade-Insecure-Requests": "1"}, timeout=(15, 20), **_kw)
         except Exception:
             pass
         DUCK_WARMED[0] = True
 
 
-def _duck_attempt(model_id, msgs, timeout):
+def _duck_attempt(model_id, msgs, timeout, px=None):  # #94U49: px
     import json as _j, random as _r, uuid as _u
     s = _duck_session()
-    _duck_warm()
+    _duck_warm(px)
+    _kw = {"proxies": {"http": px, "https": px}} if px else {}
     r = s.get("https://duck.ai/duckchat/v1/status", headers={
         "x-vqd-accept": "1", "Cache-Control": "no-store", "Accept": "*/*"},
-        timeout=(15, 25))
+        timeout=(15, 25), **_kw)
     if r.status_code != 200:
         raise EMError(f"duck: status {r.status_code}")
     ch = r.headers.get("x-vqd-hash-1")
@@ -2388,7 +2404,7 @@ def _duck_attempt(model_id, msgs, timeout):
             "x-vqd-hash-1": h1, "x-fe-signals": _duck_signals(),
             "x-fe-version": DUCK_FE_VERSION, "x-ddg-journey-id": _u.uuid4().hex}
     r2 = s.post("https://duck.ai/duckchat/v1/chat", data=_j.dumps(payload),
-                headers=hdrs, timeout=(15, timeout))
+                headers=hdrs, timeout=(15, timeout), **_kw)
     if r2.status_code != 200:
         raise EMError(f"duck: {r2.status_code}")
     text = []
@@ -2413,7 +2429,8 @@ def _duck_attempt(model_id, msgs, timeout):
 
 
 def duck_chat(model_id, messages, timeout=110):
-    """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + ٢ هەوڵ"""
+    """چاتی duck.ai — system دەفڕێتە ناو یەکەم نامەی بەکارهێنەر + سێشن/پرۆکسی نوێ (#94U49)"""
+    global DUCK_SESSION
     sys_txt = " ".join(m["content"] for m in messages if m.get("role") == "system")[:32000]
     rest = [m for m in messages if m.get("role") != "system"][-21:]
     if rest and rest[0].get("role") == "user" and sys_txt:
@@ -2422,9 +2439,15 @@ def duck_chat(model_id, messages, timeout=110):
     elif sys_txt:
         rest = [{"role": "user", "content": f"[ئاراستەی سیستەم: {sys_txt}]"}] + rest
     last = None
-    for i in range(2):
+    for i, _px in enumerate(_px_list(2)):
+        if i > 0:  # #94U49: سێشنی نوێ + IP ی نوێ
+            try:
+                DUCK_SESSION = None
+                DUCK_WARMED[0] = False
+            except Exception:
+                pass
         try:
-            return _duck_attempt(model_id, rest, timeout)
+            return _duck_attempt(model_id, rest, timeout, px=_px)
         except EMError as e:
             last = e
             if "418" not in str(e) and "429" not in str(e):
@@ -2454,7 +2477,7 @@ def ak_servers():
 
 
 def ak_chat(model_id, messages, timeout=110):
-    """چاتی anakin — node client؛ system تێکەڵ بە یەکەم نامە (شێوازی qb)"""
+    """چاتی anakin — node client؛ system تێکەڵ بە یەکەم نامە (شێوازی qb)؛ #94U49: 429 → پرۆکسی (AK_PROXY)"""
     import time as _t
     if _t.time() < _AK_COOLDOWN["until"]:
         raise EMError("ak: cooldown")
@@ -2465,24 +2488,34 @@ def ak_chat(model_id, messages, timeout=110):
         rest[0] = dict(rest[0])
         rest[0]["content"] = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{rest[0]['content']}"
     payload = json.dumps({"model_id": int(model_id), "messages": rest}, ensure_ascii=False)
-    try:
-        p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
-                           capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise EMError("ak: timeout")
-    lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
-    if not lines:
-        raise EMError("ak: no output")
-    try:
-        obj = json.loads(lines[-1])
-    except Exception:
-        raise EMError("ak: bad output")
-    if obj.get("ok") and obj.get("answer"):
-        return obj["answer"]
-    code = str(obj.get("code") or "")
-    if "429" in code:
+    _last = EMError("ak: failed")
+    for _px in _px_list(2):  # #94U49: دایرێکت + ٢ پرۆکسی
+        _env = dict(os.environ, AK_PROXY=_px) if _px else None
+        try:
+            p = subprocess.run([NODE_BIN, AK_CLIENT], input=payload.encode("utf-8"),
+                               capture_output=True, timeout=timeout, env=_env)
+        except subprocess.TimeoutExpired:
+            _last = EMError("ak: timeout")
+            continue
+        lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+        if not lines:
+            _last = EMError("ak: no output")
+            continue
+        try:
+            obj = json.loads(lines[-1])
+        except Exception:
+            _last = EMError("ak: bad output")
+            continue
+        if obj.get("ok") and obj.get("answer"):
+            return obj["answer"]
+        code = str(obj.get("code") or "")
+        if "429" in code:
+            _last = EMError(obj.get("error") or "ak: 429", obj.get("code"))
+            continue
+        raise EMError(obj.get("error") or "ak: failed", obj.get("code"))
+    if "429" in str(_last):
         _AK_COOLDOWN["until"] = _t.time() + 600
-    raise EMError(obj.get("error") or "ak: failed", obj.get("code"))
+    raise _last
 
 
 
@@ -2560,19 +2593,29 @@ def l7_servers():
 
 
 def l7_chat(messages, model_id="mistral-Nemo-Instruct-2407", timeout=90):
-    """چاتی llm7.io — میوان: ١٠ داواکاری/خولەک، ٦٠/کاتژمێر بێ کلیل"""
+    """چاتی llm7.io — میوان: ١٠ داواکاری/خولەک، ٦٠/کاتژمێر بێ کلیل؛ #94U49: پرۆکسی لەسەر لیمێت"""
     import time as _t
     if _t.time() < L7_LIMIT["until"]:
         raise EMError("l7: cooldown")
     body = {"model": model_id, "messages": messages, "max_tokens": 4000}  # #94U29 LONG-OUT
-    try:
-        r = requests.post(L7_BASE + "/chat/completions", json=body,
-                          headers={"User-Agent": _pick_ua(ACT_UAS),
-                                   "Content-Type": "application/json",
-                                   "Referer": "https://llm7.io"},
-                          timeout=(15, timeout))
-    except Exception as e:
-        raise EMError(f"l7: {str(e)[:60]}")
+    r = None
+    _last_e = None
+    for _px in _px_list(3):  # #94U49: دایرێکت + ٣ پرۆکسی
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
+        try:
+            r = requests.post(L7_BASE + "/chat/completions", json=body,
+                              headers={"User-Agent": _pick_ua(ACT_UAS),
+                                       "Content-Type": "application/json",
+                                       "Referer": "https://llm7.io"},
+                              timeout=(15, timeout), **_kw)
+        except Exception as e:
+            _last_e, r = e, None
+            continue
+        if r.status_code in (429, 402, 403):
+            continue  # IP خێو کراوە → IP ی داهاتوو
+        break
+    if r is None:
+        raise EMError(f"l7: {str(_last_e)[:60]}")
     if r.status_code != 200:
         if r.status_code in (429, 402):
             L7_LIMIT["until"] = _t.time() + 600
@@ -2765,7 +2808,7 @@ def ng_servers():
 
 
 def ng_chat(messages, timeout=110):
-    """چاتی notegpt — مێژوو بۆ یەک نامە؛ template ی homework یش لابردن"""
+    """چاتی notegpt — مێژوو بۆ یەک نامە؛ template ی homework یش لابردن؛ #94U49: پرۆکسی لەسەر لیمێت"""
     import time as _t
     if _t.time() < NG_LIMIT["until"]:
         raise EMError("ng: cooldown")
@@ -2779,45 +2822,53 @@ def ng_chat(messages, timeout=110):
         user_txt = " ".join(m.get("content", "") for m in messages)[-2000:]
     if sys_txt:
         user_txt = f"[ئاراستەی سیستەم: {sys_txt}]\n\n{user_txt}"
-    try:
-        r = requests.post("https://notegpt.io/api/v2/homework/stream",
-                          json={"message": user_txt, "language": "auto", "model": "gemini-3.1-flash-lite",
-                                "tone": "default", "length": "moderate",
-                                "conversation_id": str(__import__("uuid").uuid4())},
-                          headers={"User-Agent": _pick_ua(ACT_UAS),
-                                   "Origin": "https://notegpt.io",
-                                   "Referer": "https://notegpt.io/ai-answer-generator"},
-                          timeout=(15, timeout), stream=True)
-    except Exception as e:
-        raise EMError(f"ng: {str(e)[:60]}")
-    if r.status_code != 200:
-        if r.status_code == 429:
-            NG_LIMIT["until"] = _t.time() + 1800
-        raise EMError(f"ng: {r.status_code}")
-    text = []
-    limit_hit = False
-    for line in r.iter_lines(decode_unicode=True):
-        if not line or not line.startswith("data: "):
-            continue
+    _last = EMError("ng: شکست")
+    for _px in _px_list(3):  # #94U49: دایرێکت + ٣ پرۆکسی
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
         try:
-            d = json.loads(line[6:])
-        except Exception:
+            r = requests.post("https://notegpt.io/api/v2/homework/stream",
+                              json={"message": user_txt, "language": "auto", "model": "gemini-3.1-flash-lite",
+                                    "tone": "default", "length": "moderate",
+                                    "conversation_id": str(__import__("uuid").uuid4())},
+                              headers={"User-Agent": _pick_ua(ACT_UAS),
+                                       "Origin": "https://notegpt.io",
+                                       "Referer": "https://notegpt.io/ai-answer-generator"},
+                              timeout=(15, timeout), stream=True, **_kw)
+        except Exception as e:
+            _last = EMError(f"ng: {str(e)[:60]}")
             continue
-        if isinstance(d.get("text"), str):
-            text.append(d["text"])
-        if d.get("code") == 164016:
-            limit_hit = True
-    ans = "".join(text).strip()
-    if limit_hit and not ans:
+        if r.status_code in (429, 403):
+            _last = EMError("ng: 429")
+            continue
+        if r.status_code != 200:
+            raise EMError(f"ng: {r.status_code}")
+        text = []
+        limit_hit = False
+        for line in r.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            try:
+                d = json.loads(line[6:])
+            except Exception:
+                continue
+            if isinstance(d.get("text"), str):
+                text.append(d["text"])
+            if d.get("code") == 164016:
+                limit_hit = True
+        ans = "".join(text).strip()
+        if limit_hit and not ans:
+            _last = EMError("ng: لیمیت ڕۆژانە")
+            continue
+        # template ی homework پاک بکەوە
+        ans = re.sub(r"^###\s*Question\s*\d*\s*", "", ans)
+        ans = re.sub(r"\n?###\s*(Answer|Solution Steps|[^\n]*)\s*", "\n", ans)
+        ans = ans.strip()
+        if ans:
+            return ans
+        _last = EMError("ng: وەڵام نەگەڕایەوە")
+    if "429" in str(_last) or "لیمیت" in str(_last):
         NG_LIMIT["until"] = _t.time() + 1800
-        raise EMError("ng: لیمیت ڕۆژانە")
-    # template ی homework پاک بکەوە
-    ans = re.sub(r"^###\s*Question\s*\d*\s*", "", ans)
-    ans = re.sub(r"\n?###\s*(Answer|Solution Steps|[^\n]*)\s*", "\n", ans)
-    ans = ans.strip()
-    if ans:
-        return ans
-    raise EMError("ng: وەڵام نەگەڕایەوە")
+    raise _last
 
 
 
@@ -2905,56 +2956,76 @@ def _ct_quota_ts():
 
 
 def ct_chat(messages, model_id="gpt-5.6-luna", timeout=150):
-    """چاتی chattide.ai — میوان: ٢ چات/ڕۆژ بۆ هەر IP؛ کۆدی 229 → دیلی تا نیوەشەوی UTC"""
+    """چاتی chattide.ai — میوان: ٢ چات/ڕۆژ بۆ هەر IP؛ کۆدی 229 → پرۆکسی داهاتوو (#94U49)؛ ئەگەر هەموو تەواو → دیلی تا نیوەشەوی UTC"""
     import time as _t
     if _t.time() < CT_LIMIT["quota_until"]:
         raise EMError("ct: daily quota (2/IP/day)")
     if _t.time() < CT_LIMIT["wobble_until"]:
         raise EMError("ct: wobble cooldown")
-    hd, ck = _ct_identity()
     body = {"spaceHandle": True, "roleId": 0, "conversationId": None, "model": model_id,
             "messages": [{"role": m.get("role", "user"),
                           "content": [{"type": "text", "text": m.get("content") or ""}]} for m in messages]}
-    try:
-        r = requests.post("https://api.chattide.ai/aigc/chat/v2/professional/stream",
-                          json=body, headers=hd, cookies=ck, timeout=(15, timeout))
-    except Exception as e:
-        raise EMError(f"ct: {str(e)[:60]}")
-    if r.status_code != 200:
-        raise EMError(f"ct: {r.status_code}")
-    txt = r.text
-    if '"code":229' in txt or "quota has been exhausted" in txt:
+    _last = EMError("ct: شکست")
+    for _px in _px_list(3):  # #94U49: ناسنامەی نوێ + IP ی نوێ بۆ هەر هەوڵێک
+        hd, ck = _ct_identity()
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
+        try:
+            r = requests.post("https://api.chattide.ai/aigc/chat/v2/professional/stream",
+                              json=body, headers=hd, cookies=ck, timeout=(15, timeout), **_kw)
+        except Exception as e:
+            _last = EMError(f"ct: {str(e)[:60]}")
+            continue
+        if r.status_code in (429, 403):
+            _last = EMError("ct: 229 quota")
+            continue
+        if r.status_code != 200:
+            raise EMError(f"ct: {r.status_code}")
+        txt = r.text
+        if '"code":229' in txt or "quota has been exhausted" in txt:
+            _last = EMError("ct: 229 quota")
+            continue
+        out = []
+        _wob = False
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            tok = line[5:].strip()
+            if not tok or tok == "--@DONE@--":
+                continue
+            if tok.startswith("Please refresh"):
+                _wob = True
+                break
+            if tok.startswith("{"):
+                try:
+                    j = json.loads(tok)
+                except Exception:
+                    continue
+                if str(j.get("code")) == "229" or "quota" in str(j.get("message") or "").lower():
+                    _last = EMError("ct: 229 quota")
+                    out = None
+                    break
+                continue
+            out.append(tok)
+        if out is None:
+            continue
+        if _wob:
+            _last = EMError("ct: refresh-wobble")
+            continue
+        ans = "".join(out).replace("-=- --", " ").replace("-=-n--", "\n").strip()
+        ans = re.sub(r" {3,}", "  ", ans)
+        if not ans:
+            _last = EMError("ct: وەڵام بەتاڵ")
+            continue
+        CT_LIMIT["quota_until"] = 0.0
+        CT_LIMIT["wobble_until"] = 0.0
+        return ans
+    if "229" in str(_last) or "quota" in str(_last):
         CT_LIMIT["quota_until"] = _ct_quota_ts()
         raise EMError("ct: 229 quota → دیلی بۆ نیوەشەوی UTC")
-    out = []
-    for line in txt.splitlines():
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        tok = line[5:].strip()
-        if not tok or tok == "--@DONE@--":
-            continue
-        if tok.startswith("Please refresh"):
-            CT_LIMIT["wobble_until"] = _t.time() + 600
-            raise EMError("ct: refresh-wobble → دیلی ١٠ خولەک")
-        if tok.startswith("{"):
-            try:
-                j = json.loads(tok)
-            except Exception:
-                continue
-            if str(j.get("code")) == "229" or "quota" in str(j.get("message") or "").lower():
-                CT_LIMIT["quota_until"] = _ct_quota_ts()
-                raise EMError("ct: 229 quota → دیلی بۆ نیوەشەوی UTC")
-            continue
-        out.append(tok)
-    ans = "".join(out).replace("-=- --", " ").replace("-=-n--", "\n").strip()
-    ans = re.sub(r" {3,}", "  ", ans)
-    if not ans:
-        CT_LIMIT["wobble_until"] = _t.time() + 300
-        raise EMError("ct: وەڵام بەتاڵ")
-    CT_LIMIT["quota_until"] = 0.0
-    CT_LIMIT["wobble_until"] = 0.0
-    return ans
+    if "wobble" in str(_last) or "بەتاڵ" in str(_last):
+        CT_LIMIT["wobble_until"] = _t.time() + 600
+    raise _last
 
 
 def _ct_label(mid):
@@ -3210,7 +3281,7 @@ def _hk_quota_ts():
 
 
 def hk_chat(messages, model_id="deepseek/deepseek-v4-flash", timeout=120):
-    """چاتی heck.ai — تک-شۆت (پرسیار + وەڵامی پێشوو)؛ 402 = کرێکی OpenRouter ەکەیان"""
+    """چاتی heck.ai — تک-شۆت (پرسیار + وەڵامی پێشوو)؛ 402 = کرێکی OpenRouter ەکەیان؛ #94U49: 429 → سێشن+پرۆکسی نوێ"""
     import time as _t
     if _t.time() < HK_LIMIT["until"]:
         raise EMError("hk: upstream credit cooldown")
@@ -3230,19 +3301,33 @@ def hk_chat(messages, model_id="deepseek/deepseek-v4-flash", timeout=120):
         raise EMError("hk: هیچ پرسیار")
     _sys = _sys_txt(messages)  # #94U25: system مەفەوتێنە — بیخە سەر پرسیار
     _q = (f"[Instructions: {_sys}]\n\n{last[-4000:]}" if _sys else last[-4000:])  # #94U26: system تەواو (14k) + کۆتایی پرسیار
-    sid = _hk_session()
-    body = {"model": model_id, "question": _q, "language": "English",
-            "sessionId": sid, "previousQuestion": pq, "previousAnswer": pa,
-            "imgUrls": [], "superSmartMode": False}
-    try:
-        r = requests.post(HK_BASE + "/chat", json=body, headers=_hk_headers(),
-                          timeout=(15, timeout), stream=True)
-    except Exception as e:
-        raise EMError(f"hk: {str(e)[:60]}")
+    r = None
+    for _i, _px in enumerate(_px_list(2)):  # #94U49: دایرێکت + ٢ پرۆکسی
+        try:
+            sid = _hk_session(force=(_i > 0))
+        except Exception as e:
+            if _i == 0:
+                raise EMError(f"hk: {str(e)[:60]}")
+            continue
+        body = {"model": model_id, "question": _q, "language": "English",
+                "sessionId": sid, "previousQuestion": pq, "previousAnswer": pa,
+                "imgUrls": [], "superSmartMode": False}
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
+        try:
+            r = requests.post(HK_BASE + "/chat", json=body, headers=_hk_headers(),
+                              timeout=(15, timeout), stream=True, **_kw)
+        except Exception:
+            r = None
+            continue
+        if r.status_code in (429, 403):
+            r = None
+            continue
+        break
+    if r is None:
+        HK_LIMIT["until"] = _t.time() + 600
+        raise EMError("hk: 429 → دیلی ١٠ خولەک")
     if r.status_code != 200:
-        if r.status_code == 429:
-            HK_LIMIT["until"] = _t.time() + 600
-        elif r.status_code in (400, 500) and model_id in MS.get("hk_ok", {}):
+        if r.status_code in (400, 500) and model_id in MS.get("hk_ok", {}):
             MS["hk_ok"].pop(model_id, None)
             MS.setdefault("hk_bad", {})[model_id] = {"code": r.status_code, "t": _t.time()}
             _ms_save()
@@ -3477,13 +3562,15 @@ def _aka_headers():
             "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin"}
 
 
-def _aka_session(force=False):
-    """session_token: GET / → GET /api/auth/session → POST refresh (فلۆوی براوزەر)"""
+def _aka_session(force=False, px=None):
+    """session_token: GET / → GET /api/auth/session → POST refresh (فلۆوی براوزەر)؛ #94U49: px"""
     import time as _t
-    if not force and _AKA["ses"] and _t.time() - _AKA["t"] < 43200:
+    if not force and not px and _AKA["ses"] and _t.time() - _AKA["t"] < 43200:
         return _AKA["ses"]
     s = requests.Session()
     s.headers.update(_aka_headers())
+    if px:
+        s.proxies.update({"http": px, "https": px})
     try:
         s.get(AKA_BASE + "/", timeout=(10, 20))
         r = s.get(AKA_BASE + "/api/auth/session", timeout=(10, 20))
@@ -3494,13 +3581,14 @@ def _aka_session(force=False):
         raise
     except Exception as e:
         raise EMError(f"aka: {str(e)[:60]}")
-    _AKA["ses"] = s
-    _AKA["t"] = _t.time()
+    if not px:
+        _AKA["ses"] = s
+        _AKA["t"] = _t.time()
     return s
 
 
 def aka_chat(messages, model_id="openai-gpt-oss-120b", timeout=110):
-    """چاتی akash — سیستەم-پرۆمپت لە مێژوو دەهێنرێت (بەتاڵ = نیوتراڵ)؛ 403 سێشن → ڕۆتەیشن"""
+    """چاتی akash — سیستەم-پرۆمپت لە مێژوو دەهێنرێت (بەتاڵ = نیوتراڵ)؛ 403 سێشن → ڕۆتەیشن؛ #94U49: 429 → سێشن+پرۆکسی نوێ"""
     import time as _t
     if _t.time() < AKA_LIMIT["until"]:
         raise EMError("aka: cooldown")
@@ -3513,10 +3601,15 @@ def aka_chat(messages, model_id="openai-gpt-oss-120b", timeout=110):
             rest.append(m)
     if not sys_content:
         sys_content = _AKA_NEUTRAL
+    _pxs = _px_list(2)
     last_err = None
-    for attempt in range(2):
+    for attempt in range(3):
+        _px = _pxs[attempt] if attempt < len(_pxs) else None
         try:
-            s = _AKA["ses"] if (_AKA["ses"] and attempt == 0) else _aka_session(force=(attempt == 1))
+            if attempt == 0 and _AKA["ses"]:
+                s = _AKA["ses"]
+            else:
+                s = _aka_session(force=True, px=_px)
         except Exception as e:
             last_err = e
             continue
@@ -3536,8 +3629,9 @@ def aka_chat(messages, model_id="openai-gpt-oss-120b", timeout=110):
             last_err = EMError(f"aka: {r.status_code} سێشن")
             continue
         if r.status_code == 429:
-            AKA_LIMIT["until"] = _t.time() + 900
-            raise EMError("aka: 429 → دیلی ١٥ خولەک")
+            _AKA["ses"] = None
+            last_err = EMError("aka: 429")
+            continue
         if r.status_code != 200:
             if r.status_code in (400, 500) and model_id in MS.get("aka_ok", {}):
                 MS["aka_ok"].pop(model_id, None)
@@ -3562,6 +3656,9 @@ def aka_chat(messages, model_id="openai-gpt-oss-120b", timeout=110):
         if ans:
             return ans
         last_err = EMError("aka: وەڵام بەتاڵ")
+    if last_err and "429" in str(last_err):
+        AKA_LIMIT["until"] = _t.time() + 900
+        raise EMError("aka: 429 → دیلی ١٥ خولەک")
     raise last_err or EMError("aka: شکست")
 
 
@@ -3629,7 +3726,7 @@ _HB_SYNC = {"t": 0.0}
 
 
 def hb_chat(messages, model_id="hotbot-chat", timeout=110):
-    """چاتی hotbot — یەک مۆدێڵ؛ ٤ چات بە IP، پاش بەتاڵی 200 → دیلی ٥ خولەک"""
+    """چاتی hotbot — یەک مۆدێڵ؛ ٤ چات بە IP؛ #94U49: پرۆکسی لەسەر لیمێت/بەتاڵی"""
     import time as _t
     if _t.time() < HB_LIMIT["until"]:
         raise EMError("hb: cooldown")
@@ -3641,53 +3738,60 @@ def hb_chat(messages, model_id="hotbot-chat", timeout=110):
     if not last:
         raise EMError("hb: هیچ پرسیار")
     import uuid as _uuid
-    cid = str(_uuid.uuid4())
-    try:
-        requests.get(HB_BASE + "/", headers={"User-Agent": HB_UA}, timeout=(10, 20))
-    except Exception:
-        pass
-    try:
-        rm = requests.post(HB_BASE + "/api/moderate",
-                           json={"text": last[-800:], "imageUrls": [], "chatId": cid, "requestType": "text"},
-                           headers={"User-Agent": HB_UA, "Content-Type": "application/json",
-                                    "Origin": HB_BASE, "Referer": HB_BASE + "/"}, timeout=(10, 20))
-        if rm.status_code == 200 and (rm.json() or {}).get("flagged"):
-            raise EMError("hb: moderate بلۆک")
-    except EMError:
-        raise
-    except Exception:
-        pass
     hist = _sys_keep([{"role": m.get("role", "user"), "content": m.get("content") or ""}
                         for m in messages if m.get("content")], 11)
-    try:
-        r = requests.post(HB_BASE + "/api/chat",
-                          json={"messages": hist, "model": "hotbot-chat", "chatId": cid,
-                                "effort": "light", "camp": False},
-                          headers={"User-Agent": HB_UA, "Content-Type": "application/json",
-                                   "Origin": HB_BASE, "Referer": HB_BASE + "/"},
-                          timeout=(15, timeout), stream=True)
-    except Exception as e:
-        raise EMError(f"hb: {str(e)[:60]}")
-    if r.status_code != 200:
-        if r.status_code == 429:
-            HB_LIMIT["until"] = _t.time() + 300
-        raise EMError(f"hb: {r.status_code}")
-    try:
-        raw = r.content
-    except Exception:
-        raw = b""
-    t = raw.decode("utf-8", "replace")
-    ans_parts = []
-    for m2 in re.finditer(r'data: (\{"content":".*?"\})', t):
+    _last = EMError("hb: شکست")
+    for _px in _px_list(3):  # #94U49: دایرێکت + ٣ پرۆکسی
+        cid = str(_uuid.uuid4())
+        _kw = {"proxies": {"http": _px, "https": _px}} if _px else {}
         try:
-            ans_parts.append(json.loads(m2.group(1)).get("content", ""))
+            requests.get(HB_BASE + "/", headers={"User-Agent": HB_UA}, timeout=(10, 20), **_kw)
         except Exception:
             pass
-    ans = "".join(ans_parts).strip()
-    if not ans:
-        HB_LIMIT["until"] = _t.time() + 300
-        raise EMError("hb: بەتاڵ → دیلی ٥ خولەک (کوانتا)")
-    return ans
+        try:
+            rm = requests.post(HB_BASE + "/api/moderate",
+                               json={"text": last[-800:], "imageUrls": [], "chatId": cid, "requestType": "text"},
+                               headers={"User-Agent": HB_UA, "Content-Type": "application/json",
+                                        "Origin": HB_BASE, "Referer": HB_BASE + "/"}, timeout=(10, 20), **_kw)
+            if rm.status_code == 200 and (rm.json() or {}).get("flagged"):
+                raise EMError("hb: moderate بلۆک")
+        except EMError:
+            raise
+        except Exception:
+            pass
+        try:
+            r = requests.post(HB_BASE + "/api/chat",
+                              json={"messages": hist, "model": "hotbot-chat", "chatId": cid,
+                                    "effort": "light", "camp": False},
+                              headers={"User-Agent": HB_UA, "Content-Type": "application/json",
+                                       "Origin": HB_BASE, "Referer": HB_BASE + "/"},
+                              timeout=(15, timeout), stream=True, **_kw)
+        except Exception as e:
+            _last = EMError(f"hb: {str(e)[:60]}")
+            continue
+        if r.status_code in (429, 403):
+            _last = EMError("hb: 429")
+            continue
+        if r.status_code != 200:
+            raise EMError(f"hb: {r.status_code}")
+        try:
+            raw = r.content
+        except Exception:
+            raw = b""
+        t = raw.decode("utf-8", "replace")
+        ans_parts = []
+        for m2 in re.finditer(r'data: (\{\"content\":\".*?\"\})', t):
+            try:
+                ans_parts.append(json.loads(m2.group(1)).get("content", ""))
+            except Exception:
+                pass
+        ans = "".join(ans_parts).strip()
+        if not ans:
+            _last = EMError("hb: بەتاڵ (کوانتا)")
+            continue
+        return ans
+    HB_LIMIT["until"] = _t.time() + 300
+    raise _last if "بەتاڵ" not in str(_last) else EMError("hb: بەتاڵ → دیلی ٥ خولەک (کوانتا)")
 
 
 def hb_servers():
@@ -4001,7 +4105,7 @@ def _pi_session():
 
 
 def pi_chat(messages, model_id="pi-chat", timeout=50):  # #94U19: 110→50 (stream-hang)
-    """چاتی Pi — مێژوو فلێت دەکرێت بۆ یەک دەق؛ SSE partial → یەک وەڵام"""
+    """چاتی Pi — مێژوو فلێت دەکرێت بۆ یەک دەق؛ SSE partial → یەک وەڵام؛ #94U49: 429 → سێشن+پرۆکسی نوێ"""
     import time as _t, uuid as _u, json as _j
     if _t.time() < PI_LIMIT["until"]:
         raise EMError("pi: cooldown")
@@ -4024,22 +4128,31 @@ def pi_chat(messages, model_id="pi-chat", timeout=50):  # #94U19: 110→50 (stre
     import re as _re
     text = _re.sub(r"\[User\]\s*\[Assistant\]", "", text)
     last = ""
+    _px2 = None
     for attempt in (1, 2):
         try:
             s = PI_STATE.get("s")
             did = PI_STATE.get("did")
             if s is None:
                 s, did = _pi_session()
+            _kw = {"proxies": {"http": _px2, "https": _px2}} if _px2 else {}
             r = s.post(PI_BASE + "/api/v2/chat",
                        json={"text": text, "conversation": "",
                              "eqDistinctId": did, "eqSessionId": str(_u.uuid4()),
                              "clientId": str(_u.uuid4())},
-                       headers=_pi_headers(), timeout=(15, timeout), stream=True)
+                       headers=_pi_headers(), timeout=(15, timeout), stream=True, **_kw)
             if r.status_code in (401, 403, 429) and attempt == 1:
                 PI_STATE["s"] = None
-                if r.status_code == 429:
-                    PI_LIMIT["until"] = _t.time() + 300
+                if r.status_code == 429:  # #94U49: دیلی مەکە — سێشنی نوێ + پرۆکسی
+                    try:
+                        _p = _proxy_get(1) or []
+                        _px2 = _p[0] if _p else None
+                    except Exception:
+                        _px2 = None
                 continue
+            if r.status_code == 429:
+                PI_LIMIT["until"] = _t.time() + 300
+                raise EMError("pi: 429")
             if r.status_code != 200:
                 raise EMError(f"pi: {r.status_code}")
             parts = []
@@ -4987,6 +5100,15 @@ def _proxy_harvester_daemon():
             print(f"[HARVESTER] هەڵە: {str(e)[:60]}", flush=True)
             _sl = 180
         time.sleep(_sl)
+
+
+def _px_list(n=3):
+    """#94U49: [None, px1, ...] — یەکەم ڕاستەوخۆ، دواتر پرۆکسی تازە بۆ هەر لیمێتی IP"""
+    try:
+        pxs = [p for p in (_proxy_get(n) or []) if p][:n]
+        return [None] + pxs
+    except Exception:
+        return [None]
 
 
 def _proxy_get(n=4):
@@ -6573,9 +6695,20 @@ def al_chat(messages, model_id, timeout=110):
             sess = _al_login(force=True)
             ck = {AL_COOKIE: json.dumps(sess)}
             continue
+        if r.status_code == 402 and attempt == 0:  # #94U49: ئەکاونتی داهاتوو
+            _al_rotate()
+            sess = _al_login(force=True)
+            ck = {AL_COOKIE: json.dumps(sess)}
+            continue
         if r.status_code == 402:
             raise EMError("al: سەبسکریپشن پێویستە — دەگوازرێتەوە")
+        if r.status_code == 429 and attempt == 0:  # #94U49: ئەکاونتی داهاتوو
+            _al_rotate()
+            sess = _al_login(force=True)
+            ck = {AL_COOKIE: json.dumps(sess)}
+            continue
         if r.status_code == 429:
+            _replace_dead_soon("al")  # #94U49: نوێ لە جێی
             raise EMError("al: لیمیت")
         if r.status_code != 200:
             raise EMError(f"al: HTTP{r.status_code}")
@@ -10387,6 +10520,7 @@ def _alle_mark(acc, mkey, err):
     low = str(err).lower()
     if any(w in low for w in ("free message", "no free", "daily", "message limit", "limit reached", "monthly limit")):
         lm["*"] = today
+        _replace_dead_soon("alle")  # #94U49: مردنی گشتی → نوێ لە جێی
     _alle_save_acc()
 
 

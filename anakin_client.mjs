@@ -13,6 +13,14 @@ const SECRET = '^wqZ*7@*2zTd2vcqPC9YWYgbwpq4dm&ZF9cQxpckt3Vge%';
 const FE_VERSION = "1.0.4-release.202512191850";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 
+// #94U49: پشتگیری پرۆکسی (AK_PROXY env) — بۆ لیمێتی IP
+if (process.env.AK_PROXY) {
+  try {
+    const { ProxyAgent, setGlobalDispatcher } = await import('undici');
+    setGlobalDispatcher(new ProxyAgent(process.env.AK_PROXY));
+  } catch (e) { console.error('[ak] proxy load fail:', e.message); }
+}
+
 function sign(body) {
   const ts = Date.now();
   const bh = objectHash(JSON.parse(JSON.stringify(body)), {

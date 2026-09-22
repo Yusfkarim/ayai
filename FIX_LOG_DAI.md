@@ -911,3 +911,10 @@
 
 ## #94U48b (2026-09-22)
 - ALLE خێوەندن: سایناپ ~18چرکە بوو (نەک 70) → catch-up بەچ 3→10 + maintenance بەچ 2→5؛ پرێنتی catch-up ڕاستکرا
+
+## #94U49 (2026-09-22)
+- پشکنینی دانە-بە-دانەی هەموو 32 سەرچاوە: 19 دانە ئۆتۆ-نوێبوونەوەیان هەیە (pool/daemon/replace/session/proxy) ✅
+- چاککرا: `_px_list` (دایرێکت+پرۆکسی) + l7/ng/ct/hb/fla/aka/hk/pi/duck/ak لەسەر لیمێتی IP → IP ی نوێ (cooldown تەنها ئەگەر هەموو شکست)
+- چاککرا: al 429/402 → ئەکاونتی داهاتوو + جێگۆڕکێ؛ alle/al چوونە `_replace_dead_worker` (1-بۆ-1)؛ duck سێشن-ڕۆتەیشن؛ anakin AK_PROXY
+- aiml (Geetest captcha) + hf (Cloudflare) → ئۆتۆ-سایناپ بە خۆڕایی مەحاڵە — failover ماوەتەوە
+- تێست: 7/7 لۆجیک ✅ + l7 زیندوو ✅
