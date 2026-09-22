@@ -951,6 +951,96 @@ EASEMATE_MODELS = [
 EM_MODELS_CACHE = {"models": None, "t": 0.0}
 _EM_BURNED = {}  # #94U58: proxy → ڕۆژی 6101 (تا reset ی سبەی باز بدرێت)
 _EM_GOOD = {}  # #94U59: proxy → دوایین سەرکەوتن (GOOD-first <6 کاتژمێر)
+_EM_PROXIES = {"list": [], "t": 0.0}  # #96U5: پرۆکسی شایەدی-کراو بۆ easemate (CF ئایپی فلای 403 دەدات)
+_EM_CH403 = {}  # #96U5: کەناڵ(direct/V6) → کاتی دوا 403
+_EM_PXFILE = os.path.join(DATA_DIR, "em_proxies.json")
+
+
+def _em_proxies_load():
+    try:
+        d = _json_load_safe(_EM_PXFILE) or {}
+        _EM_PROXIES["list"] = [p for p in (d.get("proxies") or []) if p][:8]
+        _EM_PROXIES["t"] = float(d.get("t") or 0)
+    except Exception:
+        pass
+
+
+def _em_px_probe(px, timeout=24):
+    """#96U5: ئایا ئەم پرۆکسیە دەگاتەوە easemate؟ (node client models — هەرزان)"""
+    try:
+        env = dict(os.environ, EM_PROXY=px if str(px).startswith("http") else "http://" + str(px), EM_ROTATE="1")
+        p = subprocess.run([NODE_BIN, EM_CLIENT, "models"], capture_output=True, timeout=timeout, env=env)
+        out = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
+        if out:
+            return bool(json.loads(out[-1]).get("ok"))
+    except Exception:
+        return False
+    return False
+
+
+def _em_candidate_proxies(limit=14):
+    """#96U5: پرۆکسی تازەی گشتی + ئەوانی پاڵی بۆت — ئەمانەی ئەمڕۆ نەسوتاون"""
+    out = []
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    for url in ("https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
+                "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"):
+        try:
+            txt = requests.get(url, timeout=15).text
+            for ln in txt.split():
+                ln = ln.strip().replace("http://", "")
+                if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}$", ln):
+                    px = "http://" + ln
+                    if _EM_BURNED.get(px) != today and px not in out:
+                        out.append(px)
+        except Exception:
+            continue
+    try:
+        for k in (PROXY_ST.get("pool") or {}):
+            if str(k).startswith("http") and _EM_BURNED.get(k) != today and k not in out:
+                out.append(k)
+    except Exception:
+        pass
+    random.shuffle(out)
+    return out[:limit]
+
+
+def _em_proxy_reap_daemon():
+    """#96U5: هەر ١٥ خولەک — دڵنیابە ≥٤ پرۆکسی کاردەر بۆ easemate هەن (چارەسەری CF-403 ی فلای)"""
+    _em_proxies_load()
+    time.sleep(45)
+    while True:
+        try:
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            _EM_PROXIES["list"] = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != today]
+            aged = (not _EM_PROXIES["list"]) or (time.time() - _EM_PROXIES["t"] > 3600)
+            if len(_EM_PROXIES["list"]) < 4 or aged:
+                cands = _em_candidate_proxies(14)
+                good = []
+                if cands:
+                    import concurrent.futures as _cfx5
+                    with _cfx5.ThreadPoolExecutor(4) as ex5:
+                        for px, okp in zip(cands, ex5.map(_em_px_probe, cands)):
+                            if okp:
+                                good.append(px)
+                                if len(good) >= 6:
+                                    break
+                if good:
+                    _EM_PROXIES["list"] = good[:8]
+                    _EM_PROXIES["t"] = time.time()
+                    try:
+                        _json_save(_EM_PXFILE, {"proxies": _EM_PROXIES["list"], "t": _EM_PROXIES["t"]})
+                    except Exception:
+                        pass
+                    try:
+                        _now5 = time.time()
+                        for px in _EM_PROXIES["list"]:
+                            PROXY_ST["pool"].setdefault(px, {"t": _now5, "lat": 1.0, "res": False, "src": "em96"})
+                        print(f"[EM-PX] ✅ {len(good)} پرۆکسی بۆ easemate شایەدی کرا", flush=True)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[EM-PX] {str(e)[:60]}", flush=True)
+        time.sleep(900)
 
 
 class EMError(Exception):
@@ -1007,6 +1097,11 @@ def _em_try_once(payload, px, timeout, acc=None):
         raise EMError("easemate timeout")
     lines = [l for l in (p.stdout or b"").decode("utf-8", "replace").strip().splitlines() if l.strip()]
     if not lines:
+        if px in (None, "V6"):
+            try:
+                _EM_CH403[px or "direct"] = time.time()  # #96U5: CF-403 لەسەر ئایپی فلای
+            except Exception:
+                pass
         if px:
             try:
                 if px != "V6": _proxy_mark_bad(px)  # #94U63
@@ -1071,6 +1166,12 @@ def _em_try_once(payload, px, timeout, acc=None):
             _em_save_acc()
         except Exception:
             pass
+    _e403s = str(obj.get("code") or "") + " " + str(obj.get("error") or "")
+    if px in (None, "V6") and ("403" in _e403s or "identity" in _e403s.lower()):
+        try:
+            _EM_CH403[px or "direct"] = time.time()  # #96U5
+        except Exception:
+            pass
     if px:
         try:
             if px != "V6": _proxy_mark_bad(px)  # #94U63
@@ -1112,6 +1213,18 @@ def em_chat(messages, model_id, timeout=90, depth=0, probe=False):
         _empx = [None] + _fresh if len(_fresh) >= 2 else [None] + _er[:2]
         if _EM_BURNED.get("V6") != _today:  # #94U63: v6-direct وەک ئەندام (کەناڵی جیاواز)
             _empx = _empx[:1] + ["V6"] + _empx[1:]
+    except Exception:
+        pass
+    try:  # #96U5: کەناڵی CF-403 شکاو (٤٥خ) فڕێ بدە + پرۆکسی شایەدی-کراوی EM سەرەتا
+        if time.time() - float(_EM_CH403.get("direct") or 0) < 2700:
+            _empx = [x for x in _empx if x is not None]
+        if time.time() - float(_EM_CH403.get("V6") or 0) < 2700:
+            _empx = [x for x in _empx if x != "V6"]
+        _eg96 = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != _today][:4]
+        if _eg96:
+            _empx = _eg96 + [x for x in _empx if x not in _eg96]
+        if not _empx:
+            _empx = _eg96[:2] or _px_list(2)
     except Exception:
         pass
     import concurrent.futures as _cfw  # #94U59: race
@@ -12347,6 +12460,7 @@ def main():
     _check_code_integrity(is_boot=True)
     _enc_migrate_all()  # #94U12: شێفرەکردنی هەموو فایلە کۆنەکان
     threading.Thread(target=_pool_stats_daemon, daemon=True).start()  # #96U4b
+    threading.Thread(target=_em_proxy_reap_daemon, daemon=True).start()  # #96U5
     threading.Thread(target=_pool_backup_daemon, daemon=True).start()
     threading.Thread(target=_prewarm_daemon, daemon=True).start()
     threading.Thread(target=_memwatch_daemon, daemon=True).start()
