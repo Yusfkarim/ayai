@@ -1014,15 +1014,20 @@ def _em_proxy_reap_daemon():
             _EM_PROXIES["list"] = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != today]
             aged = (not _EM_PROXIES["list"]) or (time.time() - _EM_PROXIES["t"] > 3600)
             if len(_EM_PROXIES["list"]) < 4 or aged:
-                cands = _em_candidate_proxies(14)
+                cands = _em_candidate_proxies(30)  # #96U5b: فراوانتر
+                try:  # #96U5b: منزلی سەرەتا — ئەگەر ماندوو نەبن
+                    _resc = [p for p in _px_list_res(8) if p in cands]
+                    cands = _resc + [p for p in cands if p not in _resc]
+                except Exception:
+                    pass
                 good = []
                 if cands:
                     import concurrent.futures as _cfx5
-                    with _cfx5.ThreadPoolExecutor(4) as ex5:
+                    with _cfx5.ThreadPoolExecutor(8) as ex5:
                         for px, okp in zip(cands, ex5.map(_em_px_probe, cands)):
                             if okp:
                                 good.append(px)
-                                if len(good) >= 6:
+                                if len(good) >= 8:
                                     break
                 if good:
                     _EM_PROXIES["list"] = good[:8]
@@ -1221,8 +1226,12 @@ def em_chat(messages, model_id, timeout=90, depth=0, probe=False):
         if time.time() - float(_EM_CH403.get("V6") or 0) < 2700:
             _empx = [x for x in _empx if x != "V6"]
         _eg96 = [p for p in _EM_PROXIES["list"] if _EM_BURNED.get(p) != _today][:4]
-        if _eg96:
-            _empx = _eg96 + [x for x in _empx if x not in _eg96]
+        try:  # #96U5b: منزلی = ئایپی تایبەت → کەمتر لەلایەن خەڵکی ترەوە سوتاوە
+            _res96 = [p for p in _px_list_res(6) if _EM_BURNED.get(p) != _today and p not in _eg96]
+        except Exception:
+            _res96 = []
+        if _eg96 or _res96:
+            _empx = (_eg96 + _res96) + [x for x in _empx if x not in _eg96 and x not in _res96]
         if not _empx:
             _empx = _eg96[:2] or _px_list(2)
     except Exception:
