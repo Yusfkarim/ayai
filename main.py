@@ -12733,15 +12733,16 @@ def ach_servers():
 
 
 def _ach_seed():
-    """پڕکردنەوەی حەوز لە دەستپێک — ٣ ئەکاونت لە پاشبنەما"""
+    """پڕکردنەوەی حەوز لە دەستپێک — ٣ ئەکاونت لە پاشبنەما (١٥٠خ دواکەوتن — OOM-پارێزراو لە کاتی بوت)"""
     def _go():
         try:
+            time.sleep(150)  # #97b: بوت + detect_brain تەواو ببن — پاشان مینت
             need = 3 - len(_ach_alive())
             for _ in range(max(0, need)):
                 if len(_ach_alive()) >= 3:
                     break
                 _ach_new_account()
-                time.sleep(4)
+                time.sleep(6)
             print(f"[ACH] حەوزی سەرەتایی: {len(_ach_alive())} ئەکاونت", flush=True)
         except Exception as e:
             print(f"[ACH] seed: {str(e)[:70]}", flush=True)
@@ -12750,7 +12751,7 @@ def _ach_seed():
 
 def _ach_daemon():
     """هەر ٤ خولەک — ئەگەر حەوز <٣ → یەک ئەکاونتی نوێ (خاڤ = بۆ mail.tm)"""
-    time.sleep(90)
+    time.sleep(300)  # #97b: یەکەم خول دوای ئارامیی بوت
     while True:
         try:
             if len(_ach_alive()) < 3:
