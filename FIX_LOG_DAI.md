@@ -1031,3 +1031,12 @@
 - داتا: tried=res0/dc5 — حەوز 0 res ـە! direct هەمیشە risk؛ TLS-signup ـیش 0-quota (تاقیکرایەوە)
 - signup via IPv6-زۆرەملێ (کاندیدی نوێ پێش direct) — egress جیاواز، لەوانە risk نەبێت
 - risk-store (لەبری فڕێدان) + prune + daemon re-check 10/خول (revive ئەگەر کوانتا گەڕا)
+
+## #95U6 (2026-09-22) — EM v6-signup + risk-store 🌱
+- داتا: tried=res0/dc5 — حەوز 0 res ـە! direct هەمیشە risk؛ TLS-signup ـیش 0-quota (تاقیکرایەوە)
+- signup via IPv6-زۆرەملێ (کاندیدی نوێ پێش direct) — سەلمێنرا: v6 signup ✅ بەڵام quota=0 (risk=non-res IP، تەواو!)
+- risk-store (لەبری فڕێدان) + prune + daemon re-check 10/خول (revive ئەگەر کوانتا گەڕا)
+
+## #95U7 (2026-09-22) — res-hunt + trust 🌱
+- risk=non-res-IP (کۆتا: v4/v6/DC/TLS/dc-proxy هەموو 0!) — تەنها res-IP کوانتا دەدات
+- harvester: +geonode google-filtered 2 پەیج (کەمتر-flagged)؛ node signin-mode + check-in (worker یەکەمجار + recheck ڕۆژانە)

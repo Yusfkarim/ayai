@@ -1470,6 +1470,10 @@ def _em_signup_new():
                 _qt = int(((_pj.get("perm") or {}).get("token_total")) or 0)
         except Exception:
             pass
+        try:  # #95U7: check-in یەکەمجار (trust-building)
+            subprocess.run([NODE_BIN, EM_CLIENT, "signin"], capture_output=True, timeout=45, env=_env)
+        except Exception:
+            pass
         if _qt <= 0:  # #95U6: risk پارێزبکە (لەبری فڕێدان) — لەوانەیە سبەی کوانتا بگرێتەوە
             try:
                 with EM_LOCK:
@@ -5442,6 +5446,8 @@ def _proxy_fetch_all():
     urls = [
         "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
         "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=8000",
+        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=1&sort_by=lastChecked&sort_type=desc&protocols=http%2Chttps&google=true",  # #95U7: google-passed (کەمتر-flagged)
+        "https://proxylist.geonode.com/api/proxy-list?limit=500&page=2&sort_by=lastChecked&sort_type=desc&protocols=http%2Chttps&google=true",  # #95U7
         "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
         "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
         "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt",
@@ -6251,6 +6257,11 @@ def _em_daemon():
                         continue
                     _a["rk"] = time.time()
                     _dirty = True
+                    try:  # #95U7: check-in ڕۆژانە (trust-building)
+                        subprocess.run([NODE_BIN, EM_CLIENT, "signin"], capture_output=True, timeout=45,
+                                       env=dict(os.environ, EM_TOKEN=_a.get("token") or ""))
+                    except Exception:
+                        pass
                     try:
                         _env = dict(os.environ, EM_TOKEN=_a.get("token") or "")
                         _pp = subprocess.run([NODE_BIN, EM_CLIENT, "perm"], capture_output=True, timeout=60, env=_env)

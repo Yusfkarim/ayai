@@ -251,7 +251,21 @@ async function permMode() {
   }
 }
 
+async function signinMode() {
+  await getIdentity();
+  try {
+    const { sign, timestamp } = await getSigns({});
+    const h = baseHeaders(); h['sign'] = sign; h['timestamp'] = timestamp; h['identity-id'] = IID;
+    const r = await fetch(API + '/api2/task/signin', { method: 'POST', headers: h, body: '{}' });
+    const j = await r.json().catch(() => ({}));
+    emit({ ok: true, signin: j, code: j?.code });
+  } catch (e) {
+    emit({ ok: false, error: String(e && e.message || e).slice(0, 100) });
+  }
+}
+
 async function main() {
+  if (process.argv[2] === 'signin') return signinMode();
   if (process.argv[2] === 'perm') return permMode();
   if (process.argv[2] === 'models') return listModels();
   let input = '';
