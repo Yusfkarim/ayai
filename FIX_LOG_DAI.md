@@ -965,3 +965,8 @@
 - em: پرۆکسی max-45s + GOOD-first sticky (<6h)؛ pkill ـی کوێرانە لابرا (دەیکوژێتە چاتی تر)
 - node: SSE stall 150→60s؛ /test timeout 120→300s
 - هۆکاری /test-timeout: spawn-زنجیرە × هێواشی پرۆکسی (>120s)
+
+## #94U60 (2026-09-22)
+- gz BREAKTHROUGH: proxy (.191:11111) → 201 ✅ (دایرێکت-واڵ تێپەڕێنرا!) — کوانتا بە-IP ـە وەک em
+- gz: حەوزی تەواو 8 + بیرگەوری (429=(px,model)/کاتژمێر، 401=px/30خولەک) + GOOD-first + backoff 10خولەک
+- curl_cffi/sess-reuse/fresh-pfb9 هەموو 401 (واڵ بە-IP ـە، نەک fingerprint/identity)

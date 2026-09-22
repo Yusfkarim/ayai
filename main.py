@@ -3971,8 +3971,11 @@ GZ_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 # ناسنامەی نەناسراو (کوکی pfb9) — سەرڤەر بەند بە IP نییە
 GZ_PFB9 = "c7380813ca955a386914044983fbcf6a082dbf2bea2eb91917b37ba33d6ff05b"
 GZ_SKIP = {"dynamic"}  # dynamic لە ڕێپلەی 400 دەدات (resolve ی session ی وێب دەوێت)
-GZ_COOLDOWN = {"quota": 3700.0, "login": 3700.0}  # 401 = دوای کوانتاش دێتەوە → کاتژمێر
+GZ_COOLDOWN = {"quota": 600.0, "login": 600.0}  # #94U60: 10خولەک backoff (ڕێگاکان بیرگەوریان هەیە)
 _GZ_BADC = {}  # model → cooldown تا
+_GZ_BURNED = {}  # #94U60: (px,model) → کاتی 429 (کوانتای کاتژمێر)
+_GZ_WALL = {}  # #94U60: px → کاتی 401/403 (واڵ 30خولەک)
+_GZ_GOOD = {}  # #94U60: px → دوایین سەرکەوتن (GOOD-first)
 _GZ_SYNC = {"t": 0.0, "thread": None, "labels": {}}
 
 
@@ -3991,13 +3994,18 @@ def gz_chat(messages, model_id, timeout=110):
     if not hist:
         raise EMError("gz: هیچ نامە")
     _last = EMError("gz: شکست")
-    _gpx = _px_list_res(3)  # #94U52: residential یەکەم (datacenter VPN-block ـە)
-    _rest = _gpx if _gpx else _px_list(2)
+    _allpx = _px_list(8)[1:]  # #94U60: حەوزی تەواو 8 (سەلمێنرا: proxy واڵی دایرێکت تێدەپەڕێنێت ✅)
     try:
-        random.shuffle(_rest)  # #94U54: هەر خولێک IP ی جیاواز
+        random.shuffle(_allpx)  # #94U54: هەر خولێک IP ی جیاواز
     except Exception:
         pass
-    _loop = [None] + _rest  # #94U57: دایرێکت هەمیشە یەکەم (لە Fly سەلمێنرا 201 ✅)
+    _now60 = _t.time()
+    _use = [_p for _p in _allpx if _now60 > _GZ_WALL.get(_p, 0) and _now60 > _GZ_BURNED.get((_p, model_id), 0)]
+    try:  # #94U60: GOOD-first (<6 کاتژمێر)
+        _use.sort(key=lambda _p: 0 if _now60 - _GZ_GOOD.get(_p, 0) < 21600 else 1)
+    except Exception:
+        pass
+    _loop = [None] + (_use if len(_use) >= 2 else _allpx[:2])  # دایرێکت یەکەم + proxy ـەکان
     for _px in _loop:
         try:
             s = requests.Session()
@@ -4048,6 +4056,14 @@ def gz_chat(messages, model_id, timeout=110):
                 except Exception:
                     pass
                 raise EMError(f"gz: {model_id} paywalled")
+            if _px:  # #94U60: بیرگەوری — 429=(px,model)/کاتژمێر، 401/403=px/30خولەک
+                try:
+                    if r.status_code == 429:
+                        _GZ_BURNED[(_px, model_id)] = _t.time() + 3700.0
+                    else:
+                        _GZ_WALL[_px] = _t.time() + 1800.0
+                except Exception:
+                    pass
             _last = EMError(f"gz: {r.status_code} {_msg[:40]}")
             continue
         if r.status_code != 201 and r.status_code != 200:
@@ -4070,6 +4086,11 @@ def gz_chat(messages, model_id, timeout=110):
         if not ans:
             _last = EMError("gz: وەڵام بەتاڵ")
             continue
+        if _px:  # #94U60: GOOD
+            try:
+                _GZ_GOOD[_px] = _t.time()
+            except Exception:
+                pass
         return ans
     if "429" in str(_last):
         _GZ_BADC[model_id] = _t.time() + GZ_COOLDOWN["quota"]
