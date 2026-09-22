@@ -991,6 +991,19 @@ def _em_candidate_proxies(limit=14):
     """#96U5: پرۆکسی تازەی گشتی + ئەوانی پاڵی بۆت — ئەمانەی ئەمڕۆ نەسوتاون"""
     out = []
     today = time.strftime("%Y-%m-%d", time.gmtime())
+    # #96U6: ئەگەر بەکارهێنەر پرۆکسی منزلی پارەدراو دابنێت (Fly secret EM_RES_URL) → سەرەتا ئەوان
+    try:
+        _res_url = os.environ.get("EM_RES_URL")
+        if _res_url:
+            _rt = requests.get(_res_url, timeout=20).text
+            for _ln in _rt.split():
+                _ln = _ln.strip()
+                if re.match(r"^[a-zA-Z0-9.:/@_\-]+$", _ln) and ":" in _ln:
+                    _px = _ln if _ln.startswith("http") else "http://" + _ln
+                    if _px not in out:
+                        out.append(_px)
+    except Exception:
+        pass
     for url in ("https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=6000",
                 "https://raw.githubusercontent.com/TheSpeedX/PROXY-LIST/master/http.txt",
                 "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"):  # #96U6: +proxyscrape
