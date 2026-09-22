@@ -21,4 +21,3 @@ primary_region = "fra"
 [vm]
   memory = "512mb"
   size = "shared-cpu-1x"
-  memory = "256mb"
