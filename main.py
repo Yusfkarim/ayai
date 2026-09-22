@@ -5964,6 +5964,7 @@ def _pool_daemon():
                     _cf.wait(_futs)
                 _pool_fill_one("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000, 15, 2, 4)  # #94U48: Supabase خێرا
                 _pool_fill_one("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000, 20, 2, 4)  # #94U47: catch-up بەچ 20
+                _pool_fill_one("EM", _m.EM_ST, _m._em_signup_new, 10000, 25, 2, 2, 4)  # #94U63b: EM لە catch-up ـیش (چاوەڕوانی ALLE مەکە)
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
