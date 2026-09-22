@@ -8187,6 +8187,8 @@ def _api_call95(kind, cand, full, q):
         return pia_chat(full, cand["model_id"])
     elif kind == "cbox":
         return cbox_chat(full, cand["model_id"])
+    elif kind == "lr":
+        return lr_chat(full, cand.get("model_id"))
     elif kind == "alle":
         return alle_chat(full, cand["model_id"])
     elif kind == "aiml":
@@ -8202,7 +8204,7 @@ def _audit_dispatch95():
                  "duck_chat", "ak_chat", "ng_chat", "l7_chat", "g4f_chat", "ct_chat", "yl_chat",
                  "hk_chat", "hf_chat", "aka_chat", "hb_chat", "gk_chat", "gz_chat", "pi_chat",
                  "cb_chat", "ca_chat", "ac_chat", "nv_chat", "al_chat", "pia_chat", "cbox_chat",
-                 "alle_chat", "aiml_chat", "pol_chat", "AIFreeChat"]
+                 "alle_chat", "aiml_chat", "lr_chat", "pol_chat", "AIFreeChat"]
         _miss = [f for f in _need if not callable(globals().get(f))]
         if _miss:
             print(f"[AUDIT] ❌ dispatch شکاو: {_miss}", flush=True)
@@ -8629,6 +8631,8 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                         content = alle_chat(nmsgs, nsrv["model_id"])
                     elif k == "aiml":
                         content = aiml_chat(nmsgs, nsrv["model_id"])
+                    elif k == "lr":
+                        content = lr_chat(nmsgs, nsrv.get("model_id"))
                     else:
                         content = pol_chat(nsrv["id"], nmsgs)
                     if content and not _resp_degenerate(content):
@@ -8809,6 +8813,83 @@ def tg(method, **params):
         return {"ok": False, "description": str(e)}
 
 
+# ═══ #96U3: LORKA — app.lorka.ai (better-auth anonymous → gpt-5.4-nano، بێ ئەکاونت) ═══
+LR_B = "https://www.app.lorka.ai"
+LR_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+         "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
+_LR_SEM = threading.Semaphore(4)
+
+
+def _lr_anon_session():
+    """سێشنی نەناسراوی نوێ — هەر سێشن = ١ نامە (بۆیە بۆ هەر داواکارییەک یەک دروست دەکەین)"""
+    s = requests.Session()
+    s.headers.update({"User-Agent": LR_UA, "Accept-Language": "en"})
+    r = s.post(LR_B + "/api/auth/sign-in/anonymous", json={"newUser": True},
+               headers={"Origin": LR_B, "Referer": LR_B + "/chat",
+                        "Content-Type": "application/json"}, timeout=(10, 20))
+    if r.status_code != 200:
+        raise EMError(f"lr: signin {r.status_code}")
+    return s
+
+
+def _lr_um(role, text):
+    return {"id": str(uuid.uuid4()), "role": role,
+            "parts": [{"type": "text", "text": str(text)[:6000]}]}
+
+
+def lr_chat(messages, model_id=None, timeout=75):
+    """#96U3: چاتی lorka — سێشنی نەناسراو + مێژووی تەواو لە یەک داواکاریدا — SSE text-delta"""
+    with _LR_SEM:
+        sess = _lr_anon_session()
+        sys_txt = " ".join(str(m.get("content")) for m in messages if m.get("role") == "system")[:8000]
+        rest = [m for m in messages if m.get("role") != "system"][-12:]
+        ums = []
+        for i, m in enumerate(rest):
+            role = "assistant" if m.get("role") == "assistant" else "user"
+            txt = str(m.get("content"))
+            if i == 0 and sys_txt and role == "user":
+                txt = f"[ئاراستەی سیستەم: {sys_txt}]\n{txt}"
+            ums.append(_lr_um(role, txt))
+        if not ums:
+            ums = [_lr_um("user", "سلام")]
+        if ums[0]["role"] != "user":
+            ums.insert(0, _lr_um("user", sys_txt or "بەردەوامبە"))
+        body = {"id": str(uuid.uuid4()), "type": "chat",
+                "visitorId": uuid.uuid4().hex, "messages": ums}
+        r = sess.post(LR_B + "/api/v2/chat/anonymous", json=body, timeout=(10, timeout),
+                      stream=True, headers={"Origin": LR_B, "Referer": LR_B + "/chat",
+                                            "Content-Type": "application/json"})
+        if r.status_code == 429:
+            raise EMError("lr: لیمیت (429)")
+        if r.status_code != 200:
+            raise EMError(f"lr: HTTP {r.status_code}")
+        parts = []
+        for raw in r.iter_lines(chunk_size=None):
+            ln = raw.decode("utf-8", "ignore").strip()
+            if not ln.startswith("data:"):
+                continue
+            payload = ln[5:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                d = json.loads(payload)
+            except Exception:
+                continue
+            if d.get("type") == "text-delta":
+                parts.append(str(d.get("delta") or ""))
+            elif d.get("type") == "error":
+                raise EMError(f"lr: {str(d.get('errorText') or d.get('message') or 'error')[:80]}")
+        out = "".join(parts).strip()
+        if not out:
+            raise EMError("lr: وەڵامی بەتاڵ")
+        return out
+
+
+def lr_servers():
+    return [{"id": "lr-nano", "name": "GPT-5.4 Nano (Lorka)",
+             "model_id": "openai/gpt-5.4-nano", "kind": "lr"}]
+
+
 def detect_brain(allow_fallback=True):
     """هەر دوو سێرڤەرەکە تێکەڵ بۆ بۆت — easemate + aifreeforever + pollinations — مۆدێل ئایدی ڕاستەقینە"""
     servers = []
@@ -8862,6 +8943,10 @@ def detect_brain(allow_fallback=True):
         servers += cbox_servers()
     except Exception as e:
         print(f"[BRAIN] cbox fail: {e}", flush=True)
+    try:
+        servers += lr_servers()  # #96U3: lorka
+    except Exception as e:
+        print(f"[BRAIN] lr fail: {e}", flush=True)
     try:
         servers += ak_servers()
     except Exception as e:
@@ -9524,6 +9609,12 @@ def ask(session, question):
             if k == "cbox":
                 msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
                 a = cbox_chat(msgs, cand["model_id"])
+            if k == "lr":
+                msgs = [sys_msg] + history[-20:] + [{"role": "user", "content": question}]
+                a = lr_chat(msgs, cand["model_id"])
+                if leaks(a):
+                    raise EMError("identity leak")
+                return a, "lr"
                 if leaks(a):
                     raise EMError("identity leak")
                 return a, "cbox"
@@ -9688,6 +9779,11 @@ def ask(session, question):
                     return a, "pia"
                 if k == "cbox":
                     a = cbox_chat(nmsgs, nsrv["model_id"])
+                if k == "lr":
+                    a = lr_chat(nmsgs, nsrv.get("model_id"))
+                    if leaks(a):
+                        raise EMError("identity leak")
+                    return a, "lr"
                     if leaks(a):
                         raise EMError("identity leak")
                     return a, "cbox"
@@ -10202,6 +10298,7 @@ def self_heal_once():
     if MS.get("ac_ok"):
         probes["ac"] = lambda: ac_chat([{"role": "user", "content": "hi"}], list(MS["ac_ok"].keys())[0], timeout=45)
     probes["pia"] = lambda: pia_chat([{"role": "user", "content": "hi"}], PIA_AGENTS[0][0], timeout=45)
+    probes["lr"] = lambda: lr_chat([{"role": "user", "content": "hi"}], timeout=45)  # #96U3
     _alle_srv = next((s for s in (API_BRAIN.get("servers") or []) if s.get("kind") == "alle"), None)
     if _alle_srv and _alle_srv.get("model_id"):
         probes["alle"] = lambda _m=_alle_srv.get("model_id"): alle_chat([{"role": "user", "content": "hi"}], _m, timeout=45)
@@ -10787,7 +10884,7 @@ def _chaos_daemon():
                 try:
                     fn = globals().get(f"{k}_chat")
                     if fn:
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "lr"):
                             a = fn(msgs, srv.get("model_id") or srv.get("id"), timeout=30)
                         elif k in ("fla", "qb", "ng"):
                             a = fn(msgs, timeout=30)
@@ -10905,7 +11002,7 @@ def _hot_model_daemon():
                     fn = globals().get(f"{k}_chat")
                     if fn:
                         msgs = [{"role": "user", "content": "ping"}]
-                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox"):
+                        if k in ("ca", "cb", "nv", "ct", "hk", "hf", "aka", "hb", "gk", "gz", "pi", "ac", "l7", "g4f", "al", "aiml", "z02", "pia", "alle", "cbox", "lr"):
                             fn(msgs, srv.get("model_id") or mid, timeout=25)
                 except Exception:
                     pass
