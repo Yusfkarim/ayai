@@ -108,6 +108,8 @@ def _replace_dead_worker(kind):
             st, fn, fz = ALLE_ST, _alle_signup_new, False
         elif kind == "al":  # #94U49
             st, fn, fz = AL_ST, _al_signup_new, False
+        elif kind == "em":  # #94U63
+            st, fn, fz = EM_ST, _em_signup_new, False
         else:
             return
         if not _REPLACE_SEM.acquire(timeout=120):
@@ -980,17 +982,25 @@ def em_servers():
              "tier": m.get("tier", "basic"), "kind": "em"} for m in live]
 
 
-def _em_try_once(payload, px, timeout):
-    """#94U59: یەک هەوڵی easemate-node (thread-safe) — answer یان raise؛ ROTATE=3 (کوانتا بە-IP ـە)"""
-    _env = dict(os.environ, EM_PROXY=px, EM_ROTATE="3", EM_FRESH_ID="1") if px else None
-    _to = timeout if not px else min(timeout, 45)  # پرۆکسی: زۆرترین 45چرکە
+def _em_try_once(payload, px, timeout, acc=None):
+    """#94U59؛ #94U63: یەک هەوڵی easemate-node + ئەکاونت (EM_TOKEN) + V6"""
+    _tok63 = (acc or {}).get("token") if acc else None
+    if px == "V6":  # #94U63: دایرێکت-IPv6 (کەناڵی جیاواز)
+        _env = dict(os.environ, EM_FAMILY="6", EM_ROTATE="3", EM_FRESH_ID="1")
+    else:
+        _env = dict(os.environ, EM_PROXY=px, EM_ROTATE="3", EM_FRESH_ID="1") if px else None
+        if _env is None and _tok63:
+            _env = dict(os.environ)
+    if _env is not None and _tok63:
+        _env["EM_TOKEN"] = _tok63
+    _to = timeout if px in (None, "V6") else min(timeout, 45)  # پرۆکسی: زۆرترین 45چرکە
     try:
         p = subprocess.run([NODE_BIN, EM_CLIENT], input=payload.encode("utf-8"),
                            capture_output=True, timeout=_to, env=_env)
     except subprocess.TimeoutExpired:
         if px:
             try:
-                _proxy_mark_bad(px)
+                if px != "V6": _proxy_mark_bad(px)  # #94U63
             except Exception:
                 pass
         raise EMError("easemate timeout")
@@ -998,7 +1008,7 @@ def _em_try_once(payload, px, timeout):
     if not lines:
         if px:
             try:
-                _proxy_mark_bad(px)
+                if px != "V6": _proxy_mark_bad(px)  # #94U63
             except Exception:
                 pass
         raise EMError("easemate no output")
@@ -1025,10 +1035,16 @@ def _em_try_once(payload, px, timeout):
                 _EM_BURNED[px] = time.strftime("%Y-%m-%d", time.gmtime())
             except Exception:
                 pass
+        if acc and acc.get("email"):  # #94U63: ئەکاونتەکەش ئەمڕۆ سوتا
+            try:
+                EM_ST.setdefault("limits", {})[acc["email"]] = {"burn": time.strftime("%Y-%m-%d", time.gmtime())}
+                _em_save_acc()
+            except Exception:
+                pass
         raise EMError(obj.get("error") or "easemate 6101", obj.get("code"))
     if px:
         try:
-            _proxy_mark_bad(px)
+            if px != "V6": _proxy_mark_bad(px)  # #94U63
         except Exception:
             pass
     raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
@@ -1052,15 +1068,28 @@ def em_chat(messages, model_id, timeout=90, depth=0):
         except Exception:
             pass
         _empx = [None] + _fresh if len(_fresh) >= 2 else [None] + _er[:2]
+        if _EM_BURNED.get("V6") != _today:  # #94U63: v6-direct وەک ئەندام (کەناڵی جیاواز)
+            _empx = _empx[:1] + ["V6"] + _empx[1:]
     except Exception:
         pass
     import concurrent.futures as _cfw  # #94U59: race
+    _toks63 = []
+    try:
+        _toks63 = _em_tokens_fresh()
+    except Exception:
+        pass
+    _k63 = [0]
     _waves = [_empx[_i:_i + 3] for _i in range(0, len(_empx), 3)]  # شەپۆلی 3-یاڵە — یەکەم سەرکەوتن دەیباتەوە
     _nattempt = 0
     for _w in _waves:
         _ex59 = _cfw.ThreadPoolExecutor(max_workers=len(_w))
         try:
-            _futs = {_ex59.submit(_em_try_once, payload, _px, timeout): _px for _px in _w}
+            _jobs63 = []
+            for _px in _w:  # #94U63: ئەکاونت round-robin بە ئەندامان
+                _a63 = _toks63[_k63[0] % len(_toks63)] if _toks63 else None
+                _k63[0] += 1
+                _jobs63.append((_px, _a63))
+            _futs = {_ex59.submit(_em_try_once, payload, _px, timeout, _a): _px for _px, _a in _jobs63}
             try:
                 for _f in _cfw.as_completed(_futs, timeout=timeout + 15):
                     _nattempt += 1
@@ -1081,6 +1110,179 @@ def em_chat(messages, model_id, timeout=90, depth=0):
     print(f"[EM] هەموو IP ـەکان 6101 ({_nattempt} هەوڵ؛ سوتاوی ئەمڕۆ {len(_EM_BURNED)})", flush=True)
     raise _last
 
+
+# ══════════ EM POOL — §2.6b — ئەکاونتی easemate (signup سەلمێنراو #94U63) ══════════
+EM_ACC_FILE = os.path.join(DATA_DIR, "em_accounts.json")
+EM_ST = {"accounts": [], "idx": 0, "limits": {}, "signups": {}}
+EM_LOCK = threading.Lock()
+_EM_SEC = "e84yr70o0a5n08f5"  # SHA-1 key (لە chunk ی easemate دەرهێنراوە)
+_EM_AESK = b"08C%?0-aHhd!9Gvk"  # AES-128 key (crypto-util.js)
+_EM_AESIV = b"sgTyS&geTxg6Wkrv"  # AES IV
+_EM_API = "https://www.easemate.ai/lh-account-api"
+
+
+def _em_load_acc():
+    d = _json_load_safe(EM_ACC_FILE) or {}
+    EM_ST["accounts"] = d.get("accounts") or []
+    EM_ST["idx"] = int(d.get("idx") or 0)
+    EM_ST["limits"] = d.get("limits") or {}
+    EM_ST["signups"] = d.get("signups") or {}
+
+
+def _em_save_acc():
+    _json_save(EM_ACC_FILE, {"accounts": EM_ST.get("accounts") or [],
+                             "idx": EM_ST.get("idx") or 0,
+                             "limits": EM_ST.get("limits") or {},
+                             "signups": EM_ST.get("signups") or {}})
+
+
+_EM_SEED = [{"email": "em5hnolez8wk@uberip.com", "password": "EmX7kP9mQ!1a",
+             "token": "eyJ0eXAiOiJqd3QifQ.eyJzdWIiOiIxIiwiaXNzIjoiaHR0cDpcL1wvOiIsImV4cCI6MTc5MDEwODMwMiwiaWF0IjoxNzkwMDY1MTAyLCJuYmYiOjE3OTAwNjUxMDIsInVpZCI6Ijk2MDkzNjM1MjUxNDA0OCIsImVtYWlsIjoiZW01aG5vbGV6OHdrQHViZXJpcC5jb20iLCJzIjoid01pazBUIiwianRpIjoiMjA5YTA0MzU1MzlmNjM5Y2UwZGEyZjI4NDgwZmQ2ZTYifQ.ZDNkYzQ5ZDdkMjcxODBiNWZiYzNjZGNjMzA3Yjc5YjFiYWNkNjE2NQ", "uid": "960936352514048", "t": 0.0}]
+
+
+def _em_seed():
+    if not (EM_ST.get("accounts") or []):
+        import time as _t
+        EM_ST["accounts"] = [dict(a) for a in _EM_SEED]
+        EM_ST["accounts"][0]["t"] = _t.time()
+        _em_save_acc()
+        print(f"[EM-POOL] ئەکاونتی سەرەتایی ✅ {EM_ST['accounts'][0]['email']}", flush=True)
+
+
+def _em_shasign():
+    """#94U63: SHA-1 sign (Um: sort(name)+concat+key — سەلمێنراوە)"""
+    import hashlib as _h, random as _r, string as _s, time as _t
+    _ts = str(int(_t.time()))
+    _nc = "".join(_r.choices(_s.ascii_letters + _s.digits, k=20))
+    _raw = f"key={_EM_SEC}nonce={_nc}timestamp={_ts}web_app_key=account_web"
+    return {"sign": _h.sha1(_raw.encode()).hexdigest(), "nonce": _nc, "timestamp": _ts, "web_app_key": "account_web"}
+
+
+def _em_aes_oe(obj):
+    """#94U63: O-E blob — AES-128-CBC hex-UPPER (وەک crypto-util.js Zr)"""
+    import json as _j
+    from cryptography.hazmat.primitives.ciphers import Cipher as _C, algorithms as _A, modes as _M
+    from cryptography.hazmat.primitives import padding as _P
+    _pd = _P.PKCS7(128).padder()
+    _raw = _pd.update(_j.dumps(obj, separators=(",", ":")).encode()) + _pd.finalize()
+    _ec = _C(_A.AES(_EM_AESK), _M.CBC(_EM_AESIV)).encryptor()
+    return ((_ec.update(_raw) + _ec.finalize()).hex()).upper()
+
+
+def _em_headers():
+    import uuid as _u
+    _v = str(_u.uuid4())
+    return {"User-Agent": _rand_ua(), "Origin": "https://www.easemate.ai", "Referer": "https://www.easemate.ai/",
+            "client-type": "web", "client-name": "chatpdf", "product-code": "888",
+            "device-identifier": _v, "device-uuid": _v, "device-type": "web", "device-platform": "",
+            "Lang": "en-US", "Language": "en", "Site": "www.easemate.ai", "Content-Type": "application/json"}
+
+
+def _em_login(acc):
+    """#94U63: login (md5-password) → token ی نوێ — بۆ refresh"""
+    import hashlib as _h
+    try:
+        _s = requests.Session()
+        _body = {"email": acc.get("email"), "password": _h.md5((acc.get("password") or "").encode()).hexdigest(), **_em_shasign()}
+        r = _s.post(_EM_API + "/auth/login", json=_body, headers=_em_headers(), timeout=(10, 25))
+        j = r.json() or {}
+        if j.get("code") == 0 and (j.get("data") or {}).get("token"):
+            import time as _t
+            acc["token"] = j["data"]["token"]
+            acc["t"] = _t.time()
+            try:
+                with EM_LOCK:
+                    _em_save_acc()
+            except Exception:
+                pass
+            return acc["token"]
+    except Exception:
+        pass
+    return None
+
+
+def _em_tokens_fresh():
+    """#94U63: ئەکاونتە زیندووەکان (نەسوتاو + تۆکن <70کاتژمێر) + refresh ی 1 دانەی بەسەرچوو"""
+    import time as _t
+    _today = _lim_today()
+    _now = _t.time()
+    _lim = EM_ST.get("limits") or {}
+    _exh = EM_ST.get("exhausted") or {}
+    _out = []
+    _ref = False
+    for _a in (EM_ST.get("accounts") or []):
+        if not _pool_acc_alive(_a, _lim, _exh, _today, _now):
+            continue
+        if _now - (_a.get("t") or 0) > 70 * 3600 and not _ref:
+            try:
+                if _em_login(_a):
+                    _ref = True
+                else:
+                    continue
+            except Exception:
+                continue
+        if _a.get("token"):
+            _out.append({"email": _a.get("email"), "token": _a["token"]})
+    return _out
+
+
+def _em_signup_new():
+    """#94U63: سایناپی easemate — inbox→code→register (O-E) — زنجیرە سەلمێنراوە"""
+    import random as _r, string as _s, time as _t, re as _re
+    try:
+        today = _lim_today()
+        if len(EM_ST.get("accounts") or []) >= 10000:
+            return None
+        if not _sg_reserve(EM_ST, 10000, today, EM_LOCK):
+            return None
+        try:
+            _em_save_acc()
+        except Exception:
+            pass
+        email, _poll = _tmp_inbox()
+        if not email or not _poll:
+            return None
+        _t.sleep(_r.uniform(2, 6))
+        _pl = _px_list(6)
+        _cds = [p for p in _pl[1:] if p]
+        _px = _r.choice(_cds) if _cds else None
+        _sess = requests.Session()
+        _sess.headers.update(_em_headers())
+        if _px:
+            _sess.proxies.update({"http": _px, "https": _px})
+        r = _sess.post(_EM_API + "/auth/send-email-code",
+                       json={"email": email, "type": "user_register", **_em_shasign()}, timeout=(10, 25))
+        if '"code":0' not in r.text:
+            return None
+        _mail = _poll(14, 5) or ""
+        _code = None
+        for _pat in (r"verification code is:\s*(\d{4})", r">([0-9]{4})</span>"):
+            _m = _re.search(_pat, _mail, _re.S | _re.I)
+            if _m:
+                _code = _m.group(1)
+                break
+        if not _code:
+            return None
+        _apw = "Em" + "".join(_r.choices(_s.ascii_letters + _s.digits, k=6)) + "!1"
+        _g = {"email": email, "password": _apw, "email_code": _code, "register_url": ""}
+        r2 = _sess.post(_EM_API + "/auth/register", json={**_em_shasign()},
+                        headers={"O-E": _em_aes_oe(_g)}, timeout=(10, 25))
+        j = r2.json() or {}
+        if j.get("code") != 0 or not (j.get("data") or {}).get("token"):
+            return None
+        with EM_LOCK:
+            EM_ST["accounts"].append({"email": email, "password": _apw, "token": j["data"]["token"],
+                                      "uid": ((j.get("data") or {}).get("user") or {}).get("id"), "t": _t.time()})
+            _em_save_acc()
+        print(f"[EM-POOL] ئەکاونتی نوێ ✅ {email} → {len(EM_ST['accounts'])}", flush=True)
+        return j["data"]["token"]
+    except Exception as e:
+        print(f"[EM-POOL] signup: {str(e)[:70]}", flush=True)
+        return None
+
+
+_em_load_acc()
+_em_seed()
 
 # ════════════════════════════════════════════════════════════
 # ٢.٧) مێشکی chatbotchatapp.com — GPT-5 (بێ ساینئاپ، سنووری ٢-٤ نامە/ڕۆژ)
@@ -5727,7 +5929,8 @@ def _pool_daemon():
              ("NV", _m.NV_ST, _m._nv_signup_new, 10000, 1000),
              ("ALLE", _m.ALLE_ST, _m._alle_signup_new, 10000, 1000),
              ("AL", _m.AL_ST, _m._al_signup_new, 10000, 1000),
-             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000))  # #94U47؛ #94U48: ALLE+AL
+             ("AC", _m.AC_ST, _m._ac_signup_new, 10000, 1000),  # #94U47؛ #94U48: ALLE+AL
+             ("EM", _m.EM_ST, _m._em_signup_new, 10000, 25))  # #94U63: EM POOL v1 (25 → 1000 دوای سەلماندن)
     import concurrent.futures as _cf
     _was_catch = None
     while True:
@@ -5764,7 +5967,7 @@ def _pool_daemon():
                 time.sleep(30)
             else:
                 for _nm, _st, _fn, _tgt, _at in pools:
-                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (5 if _nm == "ALLE" else 20), 3, 6)  # #94U47؛ #94U48: ALLE بەچ 2
+                    _pool_fill_one(_nm, _st, _fn, _tgt, _at, (5 if _nm == "ALLE" else (2 if _nm == "EM" else 20)), 3, 6)  # #94U47؛ #94U48؛ #94U63: EM بەچ 2
                 time.sleep(90)  # #91: خێراتر — 90 چرکە نەک 120
         except Exception as e:
             print(f"[POOL] daemon: {str(e)[:60]}", flush=True)
@@ -7664,7 +7867,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat("alle_accounts.json", 10000), "al": _pstat("al_accounts.json", 10000)},  # #94U32b؛ #94U46؛ #94U47؛ #94U48
+                "pools": {"ca": _pstat("ca_accounts.json", 10000), "cb": _pstat("cb_accounts.json", 10000), "nv": _pstat("nv_accounts.json", 10000), "ac": _pstat("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat("alle_accounts.json", 10000), "al": _pstat("al_accounts.json", 10000), "em": _pstat("em_accounts.json", 10000)},  # #94U32b؛ #94U46؛ #94U47؛ #94U48
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),

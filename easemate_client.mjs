@@ -59,6 +59,12 @@ if (process.env.EM_PROXY) {
     } catch (e) { console.error('[em] proxy load fail:', e.message); }
   }
 }
+if (!process.env.EM_PROXY && process.env.EM_FAMILY === '6') {  // #94U63: IPv6 direct (کەناڵی کوانتای جیاواز ✅ سەلمێنرا)
+  try {
+    const { Agent, setGlobalDispatcher } = await import('undici');
+    setGlobalDispatcher(new Agent({ connect: { family: 6, timeout: 10000 } }));
+  } catch (e) { console.error('[em] v6 fail:', e.message); }
+}
 async function pfetch(url, opts = {}) {
   if (!_nf || !_nfAgent) return fetch(url, opts);
   const r = await _nf(url, { ...opts, agent: _nfAgent });
@@ -157,7 +163,7 @@ async function getSigns(payload) {
 let IID = null;
 
 function baseHeaders() {
-  return {
+  const h = {
     'client-type': 'web', 'client-name': 'chatpdf', 'product-code': '888',
     'device-identifier': VISITOR_ID, 'device-uuid': VISITOR_ID,
     'device-type': 'web', 'device-platform': '',
@@ -165,6 +171,8 @@ function baseHeaders() {
     'Origin': 'https://www.easemate.ai', 'Referer': 'https://www.easemate.ai/',
     'User-Agent': UA, 'content-type': 'application/json;charset=UTF-8',
   };
+  if (process.env.EM_TOKEN) h['Authorization'] = 'Bearer ' + process.env.EM_TOKEN;  // #94U63: pool accounts
+  return h;
 }
 
 async function post(path, body, timeoutMs = 30000) {
