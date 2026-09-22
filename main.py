@@ -1028,7 +1028,14 @@ def em_chat(messages, model_id, timeout=90, depth=0):
         code = str(obj.get("code") or "")
         if code == "6101" or "free tokens" in str(obj.get("error", "")).lower():
             _last = EMError(obj.get("error") or "easemate 6101", obj.get("code"))
-            continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو
+            continue  # لیمێتی ئەم IP ـە → IP ی داهاتوو (mark-bad نا — سبەی دەگەڕێتەوە)
+        if _px:  # #94U55: هەڵەی پرۆکسی (CF-403 و...) → خراپ + داهاتوو (raise تەنها دایرێکت)
+            try:
+                _proxy_mark_bad(_px)
+            except Exception:
+                pass
+            _last = EMError(obj.get("error") or "easemate failed", obj.get("code"))
+            continue
         raise EMError(obj.get("error") or "easemate failed", obj.get("code"))
     print(f"[EM] هەموو IP ـەکان 6101 ({_i + 1} هەوڵ)", flush=True)
     raise _last
@@ -2529,6 +2536,13 @@ def ak_chat(model_id, messages, timeout=110):
         code = str(obj.get("code") or "")
         if "429" in code:
             _last = EMError(obj.get("error") or "ak: 429", obj.get("code"))
+            continue
+        if _px:  # #94U55: هەڵەی پرۆکسی → خراپ + داهاتوو
+            try:
+                _proxy_mark_bad(_px)
+            except Exception:
+                pass
+            _last = EMError(obj.get("error") or "ak: failed", obj.get("code"))
             continue
         raise EMError(obj.get("error") or "ak: failed", obj.get("code"))
     if "429" in str(_last):
@@ -9450,7 +9464,7 @@ def self_heal_once():
     if fixed:
         print(f"[SELF-HEAL] 🔧 چاککردنەوە: {', '.join(fixed)}", flush=True)
     st = _HEAL_STATE["status"]
-    line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" for k, v in sorted(st.items()))
+    line = " ".join(f"{k}:{'✅' if v['ok'] else '❌'}" + ("" if v['ok'] else f"({str(v.get('err') or '')[:40]})") for k, v in sorted(st.items()))  # #94U55: هۆکاری ❌ لە لۆگ
     print(f"[SELF-HEAL] {line}", flush=True)
     _snapshot_save()
 
