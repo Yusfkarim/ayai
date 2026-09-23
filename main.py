@@ -11198,6 +11198,65 @@ def _state_persist_daemon():
         time.sleep(120)
 
 
+def _data_sync_daemon():
+    """#100b: هەڵمژینی /data بۆ لقەکەی data لە GitHub — کاتێک DATA_GIT_SYNC چالاک بێت.
+       لە کاتی دووبارە-دیپلۆدا (کۆنتەینەری کاتی) حەوزەکان لەدەست ناچن — لە بوتەوە گەڕانەوە."""
+    if not os.environ.get("DATA_GIT_SYNC"):
+        return
+    time.sleep(180)  # بوت: سەرەتا گەڕاندنەوە، پاشان پاڵنان
+    repo = os.environ.get("DATA_GIT_URL") or ""
+    if not repo:
+        print("[SYNC] DATA_GIT_URL نییە — سینک ناچالاکە", flush=True)
+        return
+    def _run(cmd, cwd=None):
+        return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=120)
+    # گەڕاندنەوەی سەرەتایی ئەگەر /data بەتاڵە:
+    try:
+        n = len([f for f in os.listdir(DATA_DIR) if f.endswith(".json")])
+        if n < 5:
+            print("[SYNC] /data بەتاڵە — گەڕاندنەوە لە GitHub…", flush=True)
+            _run(f"rm -rf /tmp/dsync && git clone --depth 1 --branch data {repo} /tmp/dsync")
+            src = "/tmp/dsync"
+            if os.path.isdir(src):
+                cnt = 0
+                for f in os.listdir(src):
+                    if f in (".git",) or f.startswith("."):
+                        continue
+                    try:
+                        shutil.copy2(os.path.join(src, f), os.path.join(DATA_DIR, f))
+                        cnt += 1
+                    except Exception:
+                        pass
+                print(f"[SYNC] ✅ {cnt} فایل گەڕایەوە", flush=True)
+    except Exception as e:
+        print(f"[SYNC] restore: {str(e)[:70]}", flush=True)
+    while True:
+        try:
+            time.sleep(1800)  # هەر ٣٠ خولەک
+            t = "/tmp/dsync-w"
+            _run(f"rm -rf {t} && git clone --depth 1 --branch data {repo} {t}")
+            if not os.path.isdir(os.path.join(t, ".git")):
+                continue
+            cnt = 0
+            for f in os.listdir(DATA_DIR):
+                if not (f.endswith(".json") or f.endswith(".txt")):
+                    continue
+                try:
+                    shutil.copy2(os.path.join(DATA_DIR, f), os.path.join(t, f))
+                    cnt += 1
+                except Exception:
+                    pass
+            _run("git config user.name data-bot && git config user.email bot@users.noreply.github.com", cwd=t)
+            _run("git add -A && git commit -m 'data sync'", cwd=t)
+            r = _run("git push origin data", cwd=t)
+            if r.returncode == 0:
+                print(f"[SYNC] ✅ پاڵدرا ({cnt} فایل)", flush=True)
+            else:
+                print(f"[SYNC] push: {(r.stderr or '')[:80]}", flush=True)
+        except Exception as e:
+            print(f"[SYNC] {str(e)[:70]}", flush=True)
+
+
 def _disk_guard_daemon():
     """#91F2-2: پارێزی دیسک — ئەگەر /data پڕ بێت → پاککردنەوەی کۆنەکان (قەت پڕ نابێت)"""
     time.sleep(600)
@@ -13391,6 +13450,9 @@ def _mc_seed():
 
 def _mc_mint_daemon():
     """مینتەری x-is-human — هەر ٤٥ خولەک براوزەر کرادەبێتەوە و دادەخرێت (مێمۆری-پارێزراو)"""
+    if os.environ.get("MC_MINT_OFF"):  # #100b: مینت لە GitHub Actions ە — بۆتی خۆڕایی بێ-براوزەر
+        print("[MC] مینتەری ناوخۆ کوژاوە (MC_MINT_OFF) — hih لە لقەکەی data خۆکاری نوێ دەبێتەوە", flush=True)
+        return
     time.sleep(MC_BOOT_DELAY)
     while True:
         tok = ""
@@ -13464,6 +13526,7 @@ def main():
     threading.Thread(target=_chaos_daemon, daemon=True).start()
     threading.Thread(target=_state_persist_daemon, daemon=True).start()
     threading.Thread(target=_disk_guard_daemon, daemon=True).start()
+    threading.Thread(target=_data_sync_daemon, daemon=True).start()  # #100b: هەڵمژینی /data بۆ GitHub (فری-هۆست)
     threading.Thread(target=_rescue_daemon, daemon=True).start()
     threading.Thread(target=_hot_model_daemon, daemon=True).start()
     threading.Thread(target=_usage_snapshot_daemon, daemon=True).start()
