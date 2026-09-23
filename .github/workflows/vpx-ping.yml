@@ -1,0 +1,13 @@
+name: vpx-ping
+# Keeps Vercel pools fresh on Hobby (Vercel cron alone = 1x/day).
+# Needs: repo Variable VPX_APP_URL (e.g. ayai-vpx-yusgsg.vercel.app) + Secret VPX_CRON.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - run: curl -s --max-time 320 "https://${{ vars.VPX_APP_URL }}/api/cron?secret=${{ secrets.VPX_CRON }}" | head -c 600
