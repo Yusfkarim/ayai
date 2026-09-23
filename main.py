@@ -8386,6 +8386,8 @@ def _api_call95(kind, cand, full, q):
         return cbox_chat(full, cand["model_id"])
     elif kind == "ach":
         return ach_chat(full, cand["model_id"])
+    elif kind == "mc":
+        return mc_chat(full, cand["model_id"])
     elif kind == "lr":
         return lr_chat(full, cand.get("model_id"))
     elif kind == "alle":
@@ -8403,7 +8405,7 @@ def _audit_dispatch95():
                  "duck_chat", "ak_chat", "ng_chat", "l7_chat", "g4f_chat", "ct_chat", "yl_chat",
                  "hk_chat", "hf_chat", "aka_chat", "hb_chat", "gk_chat", "gz_chat", "pi_chat",
                  "cb_chat", "ca_chat", "ac_chat", "nv_chat", "al_chat", "pia_chat", "cbox_chat",
-                 "alle_chat", "aiml_chat", "lr_chat", "pol_chat", "AIFreeChat"]
+                 "alle_chat", "aiml_chat", "lr_chat", "pol_chat", "AIFreeChat", "mc_chat"]
         _miss = [f for f in _need if not callable(globals().get(f))]
         if _miss:
             print(f"[AUDIT] ❌ dispatch شکاو: {_miss}", flush=True)
@@ -8546,7 +8548,7 @@ class APIHandler(http.server.BaseHTTPRequestHandler):
                 "self": _STS.get("last", ""),
                 "time": int(time.time()),
                 "models": len(dedupe_servers(BRAIN["servers"])) if BRAIN["servers"] else 0,
-                "pools": (_POOL_STATS_CACHE["data"] or {"ca": _pstat_calc("ca_accounts.json", 10000), "cb": _pstat_calc("cb_accounts.json", 10000), "nv": _pstat_calc("nv_accounts.json", 10000), "ac": _pstat_calc("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat_calc("alle_accounts.json", 10000), "al": _pstat_calc("al_accounts.json", 10000), "em": _pstat_calc("em_accounts.json", 10000)}),  # #96U4b: کاش — دیکریپت لە داواکاری لابرا
+                "pools": (_POOL_STATS_CACHE["data"] or {"ca": _pstat_calc("ca_accounts.json", 10000), "cb": _pstat_calc("cb_accounts.json", 10000), "nv": _pstat_calc("nv_accounts.json", 10000), "ac": _pstat_calc("ac_accounts.json", 10000), "rwd": _rwd_stat(), "alle": _pstat_calc("alle_accounts.json", 10000), "al": _pstat_calc("al_accounts.json", 10000), "em": _pstat_calc("em_accounts.json", 10000), "mc": _pstat_calc("mc_accounts.json", 20000)}),  # #96U4b: کاش — دیکریپت لە داواکاری لابرا؛ #98: mc
                 "sources": {k: {"ok": v.get("ok"), "age_s": int(time.time() - v.get("t", 0))} for k, v in st.items()},
                 "proxies": len(PROXY_ST.get("pool") or PROXY_ST.get("list") or []),
                 "proxies_res": sum(1 for v in (PROXY_ST.get("pool") or {}).values() if (v or {}).get("res")),
@@ -9140,6 +9142,10 @@ def detect_brain(allow_fallback=True):
     except Exception as e:
         print(f"[BRAIN] ach fail: {e}", flush=True)
     try:
+        servers += mc_servers()  # #98: MultiChats — ٧ مۆدێلی فری + حەوزی گەورە
+    except Exception as e:
+        print(f"[BRAIN] mc fail: {e}", flush=True)
+    try:
         servers += lr_servers()  # #96U3: lorka
     except Exception as e:
         print(f"[BRAIN] lr fail: {e}", flush=True)
@@ -9482,6 +9488,9 @@ def _revive_source(kind, err=None):
             elif kind == "ach":
                 _ach_new_account()
                 steps.append("account")
+            elif kind == "mc":
+                _mc_signup_new(True)
+                steps.append("account")
             elif kind == "rwd":  # #94U46: ناسنامەی داهاتوو (1000 زیندوو)
                 _rwd_next_identity()
                 steps.append("next-ident")
@@ -9572,6 +9581,9 @@ def _limit_recharge(kind, err):
         elif kind == "ach":
             threading.Thread(target=_ach_new_account, daemon=True).start()
             print(f"[LIMIT-RECHARGE] ach: ئەکاونتی نوێی AllChat (~٢٥چ)...", flush=True)
+        elif kind == "mc":
+            threading.Thread(target=_mc_signup_new, args=(True,), daemon=True).start()
+            print(f"[LIMIT-RECHARGE] mc: ئەکاونتی نوێی MultiChats (~١٥چ)...", flush=True)
         elif kind == "pia":
             threading.Thread(target=_pia_signup_new, daemon=True).start()
             print(f"[LIMIT-RECHARGE] pia: ئەکاونتی نوێ...", flush=True)
@@ -10115,6 +10127,7 @@ def handle_message(msg):
             ca, cb, nv, ac = _a("ca_accounts.json"), _a("cb_accounts.json"), _a("nv_accounts.json"), _a("ac_accounts.json")
             alle, al = _a("alle_accounts.json"), _a("al_accounts.json")  # #94U48
             em = _a("em_accounts.json")  # #96U1
+            _mcst = _pstat_calc("mc_accounts.json", 20000)  # #98
             try:  # #94U46: ناسنامە زیندووەکانی rewind
                 _rd = _json_load_safe(os.path.join(DATA_DIR, "rwd_pool.json")) or {}
                 _ri = _rd.get("idents") or []
@@ -10126,7 +10139,7 @@ def handle_message(msg):
             st = _HEAL_STATE.get("status", {})
             lines = [f"📊 <b>ڕاپۆرتی سیستەم</b>\n",
                      f"🤖 مۆدێڵ لە مێنیو: <b>{nmodels}</b>\n",
-                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000 · ALLE {alle}/1000 · AL {al}/1000 · EM {em}/1000\n",  # #94U38؛ #94U46؛ #94U48؛ #96U1
+                     f"👥 حەوز (زیندوو/ئامانج): CA {ca}/1000 · CB {cb}/1000 · NV {nv}/1000 · AC {ac}/1000 · RWD {rwd}/1000 · ALLE {alle}/1000 · AL {al}/1000 · EM {em}/1000 · MC {_mcst}/{MC_TARGET}\n",  # #94U38؛ #94U46؛ #94U48؛ #96U1؛ #98
                      "🩺 دوا پشکنینی خۆبەڕێوەبەری:"]
             if st:
                 for k in sorted(st):
@@ -10817,11 +10830,16 @@ def _daily_report():
                 except Exception:
                     nm = 0
                 _uptxt = f"{up // 3600} کاتژمێر و {(up % 3600) // 60} خولەک" if up >= 3600 else f"{up // 60} خولەک"
+                try:
+                    _mcd = _json_load_safe(os.path.join(DATA_DIR, "mc_accounts.json")) or {}
+                    _mcl = len(_mcd.get("accounts", [])) if isinstance(_mcd, dict) else 0
+                except Exception:
+                    _mcl = 0
                 msg = (f"🌅 <b>ڕاپۆرتی ڕۆژانەی سیستەمی خارق</b> — {day}\n"
                        f"⏱ کاراک: {_uptxt}\n"
                        f"🧠 مۆدێڵ: {nm}\n"
                        f"✅ سەرچاوەی زیندوو: {okn}/{len(st) or '—'}\n"
-                       f"💰 حەوز: CA {po['CA']} · CB {po['CB']} · NV {po['NV']}\n"
+                       f"💰 حەوز: CA {po['CA']} · CB {po['CB']} · NV {po['NV']} · MC {_mcl}\n"
                        f"⚡ داواکاری: {_PERF['req']} (تێکڕای وەڵام {avg:.1f} چرکە)")
                 sent_any = False
                 for cid in REPORT_CHAT_IDS:
@@ -12959,6 +12977,458 @@ def _cbox_daemon():
             time.sleep(300)
 
 
+# ══════════ MultiChats (multichats.ai) — §2.36 — Convex + x-is-human + حەوزی گەورە (#98) ══════════
+MC_API = "https://www.multichats.ai/api/chat"
+MC_CONVEX = "https://wary-cuttlefish-113.convex.cloud/api/action"
+MC_ACC_FILE = os.path.join(DATA_DIR, "mc_accounts.json")
+MC_HIH_FILE = os.path.join(DATA_DIR, "mc_hih.json")
+MC_LOCK = threading.Lock()
+MC_MODELS = [("gpt-5.4-nano", "GPT-5.4 Nano"),
+             ("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
+             ("gemini-2.5-flash", "Gemini 2.5 Flash"),
+             ("openai/gpt-oss-120b:exacto", "GPT-OSS 120B"),
+             ("meta-llama/llama-4-maverick", "Llama 4 Maverick"),
+             ("mistralai/mistral-small-3.2-24b-instruct", "Mistral Small 3.2"),
+             ("mistralai/mistral-small-2603", "Mistral Small 2603")]
+MC_ST = {"accounts": [], "idx": 0, "signups": {"date": "", "n": 0}}
+_MC_HIH = {"tok": "", "ts": 0}
+MC_TARGET = int(os.environ.get("MC_TARGET") or 1100)      # ئامانجی حەوز — >١٠٠٠ زیندوو
+MC_DAILY_CAP = int(os.environ.get("MC_DAILY_CAP") or 800) # ساینئەپ/ڕۆژ (پاراستنی mail.tm)
+MC_COOL_429 = int(os.environ.get("MC_COOL_429") or 420)   # سنووری خێرایی بۆ هەر ئەکاونتێکە
+MC_ACC_DAY = 45                                            # chatCount=٥٠/ڕۆژ — مارجن
+MC_BOOT_DELAY = 75
+
+
+def _mc_load():
+    d = _json_load_safe(MC_ACC_FILE) or {}
+    MC_ST["accounts"] = d.get("accounts") or []
+    MC_ST["idx"] = int(d.get("idx") or 0)
+    MC_ST["signups"] = d.get("signups") or {"date": "", "n": 0}
+    if not _MC_HIH.get("tok"):
+        d2 = _json_load_safe(MC_HIH_FILE) or {}
+        if d2.get("tok"):
+            _MC_HIH["tok"], _MC_HIH["ts"] = d2["tok"], float(d2.get("ts") or 0)
+
+
+def _mc_save():
+    _json_save(MC_ACC_FILE, {"accounts": MC_ST.get("accounts") or [],
+                             "idx": MC_ST.get("idx") or 0,
+                             "signups": MC_ST.get("signups") or {"date": "", "n": 0}})
+
+
+def _mc_convex(args):
+    """داواکاری Convex action — auth:signIn flow ەکان"""
+    r = requests.post(MC_CONVEX, json={"path": "auth:signIn", "format": "json", "args": args},
+                      headers={"Content-Type": "application/json", "Convex-Client": "npm-1.25.4"},
+                      timeout=(12, 30))
+    try:
+        return r.json()
+    except Exception:
+        return {}
+
+
+def _mc_mail_new(sess):
+    """ئیمەیڵی کاتی mail.tm — 429 → خستنەوە"""
+    em = "mchat" + uuid.uuid4().hex[:10] + "@uberip.com"
+    pw = "Xq" + uuid.uuid4().hex[:12] + "A!"
+    for i in range(3):
+        try:
+            sess.post("https://api.mail.tm/accounts", json={"address": em, "password": pw}, timeout=(12, 30))
+            time.sleep(3 if i == 0 else 1)
+            for j in range(2):
+                rt = sess.post("https://api.mail.tm/token", json={"address": em, "password": pw}, timeout=(12, 30))
+                if rt.status_code == 200 and (rt.json() or {}).get("token"):
+                    return em, pw, rt.json()["token"]
+                time.sleep(25 if rt.status_code == 429 else 4)
+            return em, pw, None
+        except Exception as e:
+            if i == 2:
+                print(f"[MC] mail: {str(e)[:70]}", flush=True)
+            time.sleep(5)
+    return em, pw, None
+
+
+def _mc_signup_new(force=False):
+    """ساینئەپی تەواوی multichats.ai — mail.tm → convex signUp → ٨-ژمارە → email-verification (~١٥چ)"""
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    with MC_LOCK:
+        sg = MC_ST.get("signups") or {"date": "", "n": 0}
+        if sg.get("date") != today:
+            sg = {"date": today, "n": 0}
+        if not force and int(sg.get("n") or 0) >= MC_DAILY_CAP:
+            return None
+    sess = requests.Session()
+    em, pw, mtok = _mc_mail_new(sess)
+    if not mtok:
+        return None
+    V = base64.urlsafe_b64encode(os.urandom(64)).rstrip(b"=").decode()
+    try:
+        _mc_convex([{"provider": "password", "params": {"email": em, "password": pw, "flow": "signUp"}, "verifier": V}])
+    except Exception:
+        pass
+    code = None
+    for _ in range(12):
+        time.sleep(5)
+        try:
+            ms = sess.get("https://api.mail.tm/messages", headers={"Authorization": f"Bearer {mtok}"}, timeout=(12, 30))
+            for it in (ms.json() or {}).get("hydra:member", []) if ms.status_code == 200 else []:
+                try:
+                    md = sess.get(f"https://api.mail.tm/messages/{it.get('id')}", headers={"Authorization": f"Bearer {mtok}"}, timeout=(12, 30))
+                    mm = re.search(r"\b(\d{8})\b", md.text or "")
+                    if mm:
+                        code = mm.group(1)
+                        break
+                except Exception:
+                    continue
+            if code:
+                break
+        except Exception:
+            continue
+    if not code:
+        print("[MC] کۆدەکە نەگەیشت", flush=True)
+        return None
+    try:
+        a2 = _mc_convex([{"provider": "password", "params": {"email": em, "password": pw, "flow": "email-verification", "code": code}, "verifier": V}])
+    except Exception as e:
+        print(f"[MC] verify: {str(e)[:60]}", flush=True)
+        return None
+    toks = ((a2.get("value") or {}).get("tokens") or {}) if isinstance(a2, dict) else {}
+    rt = toks.get("refreshToken")
+    if not rt:
+        print(f"[MC] verify بێ توکن: {str(a2)[:80]}", flush=True)
+        return None
+    acc = {"email": em, "pw": pw, "rt": rt, "tok": toks.get("token") or "", "ts": time.time(),
+           "n": 0, "day": today, "cool": 0, "dead": 0, "made": time.time()}
+    with MC_LOCK:
+        MC_ST["accounts"].append(acc)
+        sg = MC_ST.get("signups") or {"date": today, "n": 0}
+        if sg.get("date") != today:
+            sg = {"date": today, "n": 0}
+        sg["n"] = int(sg.get("n") or 0) + 1
+        MC_ST["signups"] = sg
+        _mc_save()
+        alive = len(_mc_alive())
+    if sg["n"] % 25 == 0 or alive in (1, 5, 10, 50, 100, 250, 500, 750, 1000):
+        print(f"[MC] حەوز: {alive} زیندوو | ئەمڕۆ {sg['n']} ساینئەپ", flush=True)
+    return acc
+
+
+def _mc_alive():
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    out = []
+    for a in (MC_ST.get("accounts") or []):
+        if a.get("dead"):
+            continue
+        if a.get("day") != today:
+            a["day"], a["n"] = today, 0  # کوانتا ڕۆژانە نوێ دەبێتەوە
+        if int(a.get("n") or 0) >= MC_ACC_DAY:
+            continue
+        out.append(a)
+    return out
+
+
+def _mc_pick():
+    accs = [a for a in _mc_alive() if time.time() >= float(a.get("cool") or 0)]
+    if not accs:
+        return None
+    a = accs[MC_ST.get("idx", 0) % len(accs)]
+    MC_ST["idx"] = (MC_ST.get("idx", 0) + 1) % max(1, len(accs))
+    return a
+
+
+def _mc_refresh(acc):
+    """نوێکردنەوەی JWT بە refreshToken — Convex auth:signIn"""
+    a = _mc_convex([{"refreshToken": acc.get("rt") or ""}])
+    t = (a.get("value") or {}) if isinstance(a, dict) else {}
+    t = t.get("tokens") or t
+    if isinstance(t, dict) and t.get("token"):
+        acc["tok"] = t["token"]
+        acc["ts"] = time.time()
+        if t.get("refreshToken"):
+            acc["rt"] = t["refreshToken"]
+        with MC_LOCK:
+            _mc_save()
+        return acc["tok"]
+    return None
+
+
+def _mc_token(acc):
+    """توکنی دروست — JWT ی ١ کاتژمێر: نوێکردنەوە پێش بەسەڕچوون"""
+    tok = acc.get("tok") or ""
+    if tok:
+        try:
+            pl = tok.split(".")[1]
+            pl += "=" * (-len(pl) % 4)
+            exp = (json.loads(base64.urlsafe_b64decode(pl)) or {}).get("exp") or 0
+            if exp - time.time() > 300:
+                return tok
+        except Exception:
+            pass
+    return _mc_refresh(acc)
+
+
+def _mc_hih(force=False):
+    """تۆکنی x-is-human — کاش ٤٠خ + فایلی پاشبنەما + مینتەری دەرەکی ئارەزوومەندانە"""
+    now = time.time()
+    if not force and _MC_HIH.get("tok") and now - float(_MC_HIH.get("ts") or 0) < 2400:
+        return _MC_HIH["tok"]
+    mu = os.environ.get("MC_MINTER_URL") or ""
+    if mu:
+        try:
+            r = requests.get(mu.rstrip("/") + "/hih", params={"key": os.environ.get("MC_MINTER_KEY") or ""},
+                             timeout=(8, 15))
+            if r.status_code == 200 and (r.json() or {}).get("x-is-human"):
+                _MC_HIH["tok"], _MC_HIH["ts"] = r.json()["x-is-human"], now
+                _json_save(MC_HIH_FILE, {"tok": _MC_HIH["tok"], "ts": now})
+                return _MC_HIH["tok"]
+        except Exception:
+            pass
+    d = _json_load_safe(MC_HIH_FILE) or {}
+    t = d.get("tok")
+    if t and now - float(d.get("ts") or 0) < 7200:
+        _MC_HIH["tok"], _MC_HIH["ts"] = t, float(d.get("ts") or 0)
+        return t
+    return _MC_HIH.get("tok") or ""
+
+
+def _mc_mint_once():
+    """مینتکردنی x-is-human — براوزەری ناوخۆیی (~١٥چ کۆمەڵەی مێمۆری، ڕۆژانە دوور لە هەر خولێک)"""
+    from playwright.sync_api import sync_playwright
+    got = {}
+    with sync_playwright() as p:
+        b = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        try:
+            ctx = b.new_context(viewport={"width": 1280, "height": 800})
+            pg = ctx.new_page()
+
+            def _rh(route):
+                try:
+                    h = route.request.headers
+                    if "x-is-human" in h and "v" not in got:
+                        got["v"] = h["x-is-human"]
+                    route.continue_()
+                except Exception:
+                    pass
+            pg.route("**/api/chat", _rh)
+            try:
+                pg.goto("https://www.multichats.ai/chat", wait_until="domcontentloaded", timeout=45000)
+                pg.wait_for_timeout(4000)
+                pg.evaluate("fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).catch(function(){})")
+                for _ in range(25):
+                    if got.get("v"):
+                        break
+                    pg.wait_for_timeout(1000)
+            finally:
+                try:
+                    pg.unroute("**/api/chat", _rh)
+                except Exception:
+                    pass
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                b.close()
+            except Exception:
+                pass
+    return got.get("v")
+
+
+class _McLimit(Exception):
+    pass
+
+
+class _McAuth(Exception):
+    pass
+
+
+class _McHih(Exception):
+    pass
+
+
+def _mc_call(acc, model, umsg, timeout):
+    """یەک داواکاری چات — کەمترین هێدەر: auth+ct+x-is-human؛ SSE ی ai-sdk v5"""
+    tok = _mc_token(acc)
+    if not tok:
+        raise _McAuth("no-token")
+    hih = _mc_hih()
+    if not hih:
+        raise _McHih("no-hih")
+    body = {"operation": "new", "threadId": str(uuid.uuid4()),
+            "newUserMessage": {"id": str(uuid.uuid4()),
+                               "parts": [{"type": "text", "text": umsg}], "attachments": []},
+            "responseMessageId": str(uuid.uuid4()), "streamId": str(uuid.uuid4()),
+            "model": model, "convexSessionId": str(uuid.uuid4()),
+            "modelParams": {"reasoningEffort": "default", "includeSearch": False, "includeImageGeneration": False},
+            "userInfo": {"timezone": "UTC", "languages": ["en-US"], "viewport": "1280x800"},
+            "selectedMemoryIds": [], "ephemeral": False}
+    r = requests.post(MC_API, json=body,
+                      headers={"authorization": f"Bearer {tok}", "content-type": "application/json",
+                               "x-is-human": hih},
+                      timeout=(12, timeout), stream=True)
+    if r.status_code == 429:
+        raise _McLimit("429")
+    if r.status_code == 401:
+        raise _McAuth("401")
+    if r.status_code in (402, 403):
+        raise _McLimit("sub")
+    if r.status_code >= 500:
+        raise _McHih("500")
+    parts = []
+    r.raw.decode_content = True
+    for raw in r.iter_lines(chunk_size=None):
+        if not raw:
+            continue
+        ln = raw.decode("utf-8", "ignore").strip() if isinstance(raw, bytes) else str(raw).strip()
+        if not ln.startswith("data:"):
+            continue
+        p = ln[5:].strip()
+        if p == "[DONE]":
+            break
+        try:
+            d = json.loads(p)
+        except Exception:
+            continue
+        t = d.get("type") if isinstance(d, dict) else None
+        if t == "text-delta":
+            parts.append(str(d.get("delta") or ""))
+        elif t == "error":
+            raise _McLimit(str(d.get("errorText") or "stream-err")[:90])
+        elif t == "finish":
+            break
+    ans = "".join(parts).strip()
+    if not ans:
+        raise _McLimit("empty")
+    return ans
+
+
+def mc_chat(messages, model_key="gemini-3.1-flash-lite", timeout=110, depth=0):
+    """چاتی MultiChats — مێژوو لەناو پرۆمپت + ڕۆتەیشنی ئەکاونت + نوێکردنەوەی hih خۆکار"""
+    if depth == 0 and not (MC_ST.get("accounts")):
+        _mc_load()
+    sys_txt = " ".join(str(m.get("content")) for m in messages if m.get("role") == "system")[:600]
+    rest = [m for m in messages if m.get("role") != "system"]
+    last = rest[-1] if rest else {"role": "user", "content": "سلام"}
+    tr = "\n".join(("بەکارهێنەر: " if m.get("role") == "user" else "وەڵام: ") + str(m.get("content"))[:700]
+                   for m in rest[:-1])[-3500:]
+    umsg = str(last.get("content"))[:6000]
+    if tr:
+        umsg = f"[چاتی پێشوو]\n{tr}\n\n[پرسیاری نوێ]\n{umsg}"
+    if sys_txt:
+        umsg = f"[رێنمایی کەسایەتی: {sys_txt}]\n\n{umsg}"
+    model = next((k for k, _n in MC_MODELS if norm_model(k) == norm_model(model_key)), model_key)
+    tries = 0
+    while tries < 5:
+        acc = _mc_pick()
+        if not acc:
+            threading.Thread(target=_mc_signup_new, daemon=True).start()
+            raise EMError("mc: حەوز بەتاڵە — چەند خولەکێکی تر حەوز پڕ دەبێتەوە")
+        try:
+            ans = _mc_call(acc, model, umsg, timeout)
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            if acc.get("day") != today:
+                acc["day"], acc["n"] = today, 0
+            acc["n"] = int(acc.get("n") or 0) + 1
+            if int(acc.get("n") or 0) >= MC_ACC_DAY:
+                acc["cool"] = time.time() + 3600  # کوانتای ڕۆژانە تەواو — تا بەیانی
+            with MC_LOCK:
+                _mc_save()
+            return ans
+        except _McHih:
+            _mc_hih(force=True)  # تۆکنی کۆن/نەگونجاو — مینتەر لە دوایین فایلەوە یان خۆی
+            tries += 1
+            time.sleep(1)
+        except _McAuth:
+            if not _mc_refresh(acc):
+                acc["dead"] = 1
+                with MC_LOCK:
+                    _mc_save()
+            tries += 1
+        except _McLimit as e:
+            acc["cool"] = time.time() + MC_COOL_429
+            with MC_LOCK:
+                _mc_save()
+            if len([a for a in _mc_alive()]) < max(3, MC_TARGET // 10):
+                threading.Thread(target=_mc_signup_new, daemon=True).start()
+            tries += 1
+            time.sleep(1)
+        except EMError:
+            raise
+        except Exception as e:
+            tries += 1
+            if tries >= 5:
+                raise EMError(f"mc: {str(e)[:80]}")
+            time.sleep(1)
+    raise EMError("mc: هەموو هەوڵەکان شکانیان خوارد")
+
+
+def mc_servers():
+    out = []
+    for slug, nm in MC_MODELS:
+        out.append({"id": f"mc-{slug}", "name": f"{nm} (MultiChats)", "model_id": slug, "kind": "mc"})
+    return out
+
+
+def _mc_seed():
+    """پڕکردنەوەی سەرەتایی — ٦ ئەکاونت لە دەستپێک (دوای ئارامیی بوت)"""
+    def _go():
+        try:
+            time.sleep(240)
+            _mc_load()
+            need = 6 - len(_mc_alive())
+            for _ in range(max(0, need)):
+                if len(_mc_alive()) >= 6:
+                    break
+                _mc_signup_new()
+                time.sleep(4)
+            print(f"[MC] حەوزی سەرەتایی: {len(_mc_alive())} ئەکاونت", flush=True)
+        except Exception as e:
+            print(f"[MC] seed: {str(e)[:70]}", flush=True)
+    threading.Thread(target=_go, daemon=True).start()
+
+
+def _mc_mint_daemon():
+    """مینتەری x-is-human — هەر ٤٥ خولەک براوزەر کرادەبێتەوە و دادەخرێت (مێمۆری-پارێزراو)"""
+    time.sleep(MC_BOOT_DELAY)
+    while True:
+        tok = ""
+        try:
+            tok = _mc_mint_once()
+        except Exception as e:
+            print(f"[MC] mint-err: {str(e)[:80]}", flush=True)
+        if tok:
+            _MC_HIH["tok"], _MC_HIH["ts"] = tok, time.time()
+            _json_save(MC_HIH_FILE, {"tok": tok, "ts": _MC_HIH["ts"]})
+            print(f"[MC] ✅ x-is-human نوێکرایەوە ({len(tok)} بایت)", flush=True)
+            time.sleep(2700)
+        else:
+            print("[MC] مینت شکاو — ٦٠خ دووبارە", flush=True)
+            time.sleep(60)
+
+
+def _mc_daemon():
+    """حەوز-بنیاتەر — بەردەوام تا MC_TARGET (>١٠٠٠)؛ پاشان چاککردنەوەی خۆکار"""
+    time.sleep(300)
+    _mc_load()
+    while True:
+        try:
+            today = time.strftime("%Y-%m-%d", time.gmtime())
+            sg = MC_ST.get("signups") or {"date": "", "n": 0}
+            if sg.get("date") != today:
+                sg = {"date": today, "n": 0}
+                MC_ST["signups"] = sg
+            alive = len(_mc_alive())
+            if alive < MC_TARGET and int(sg.get("n") or 0) < MC_DAILY_CAP:
+                _mc_signup_new()
+                time.sleep(8)
+            else:
+                time.sleep(120)
+        except Exception as e:
+            print(f"[MC] daemon: {str(e)[:60]}", flush=True)
+            time.sleep(60)
+
+
 def main():
     print("🔄 دەستپێکردنی بۆتی تێلەگرام…", flush=True)
     _check_code_integrity(is_boot=True)
@@ -13066,6 +13536,11 @@ def main():
     threading.Thread(target=_ach_daemon, daemon=True).start()  # #97: AllChat حەوز-بنیاتەر
     _ach_load()
     _ach_seed()
+    _mc_load()  # #98: MultiChats حەوزی گەورە
+    threading.Thread(target=_mc_daemon, daemon=True).start()
+    threading.Thread(target=_mc_mint_daemon, daemon=True).start()
+    _mc_seed()
+    print("🟢 MC حەوز-بنیاتەر + مینتەری x-is-human چالاکە", flush=True)
     print("🟢 بۆت کارا کەوت — چاوەڕێی نامەکانە…", flush=True)
 
     def _safe_handle_guarded(m):
