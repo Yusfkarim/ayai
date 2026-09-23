@@ -12866,7 +12866,8 @@ def _pool_stats_refresh():
                 "rwd": _rwd_stat(),
                 "alle": _pstat_calc("alle_accounts.json", 10000),
                 "al": _pstat_calc("al_accounts.json", 10000),
-                "em": _pstat_calc("em_accounts.json", 10000)}
+                "em": _pstat_calc("em_accounts.json", 10000),
+                "mc": _pstat_calc("mc_accounts.json", 20000)}
         _POOL_STATS_CACHE["data"] = data
         _POOL_STATS_CACHE["t"] = time.time()
     except Exception as e:
