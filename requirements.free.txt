@@ -1,5 +1,0 @@
-requests
-cryptography
-py-mini-racer
-json5
-curl_cffi
