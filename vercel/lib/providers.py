@@ -212,7 +212,19 @@ def chat_once(model_id, messages, timeout=110):
     raise RuntimeError("unknown model prefix: " + model_id)
 
 
+ALIASES = {
+    "gpt-5-mini": "ach-consensus", "gpt-5": "ach-consensus",
+    "gpt-5-code": "ach-code", "gpt-5-math": "ach-math",
+    "openai/gpt-4o-mini": "ach-gpt4o", "gpt-4o-mini": "ach-gpt4o",
+    "gemini-2.5-flash": "ach-gemini", "gemini-2.5-flash-lite": "ach-gemini",
+    "meta-llama/llama-3.1-8b-instruct": "ach-llama", "llama-3.1-8b": "ach-llama",
+    "openai/gpt-5.4-nano": "lr-nano", "gpt-5.4-nano": "lr-nano",
+    "openai": "pol-openai",
+}
+
+
 def chat(model_id, messages, timeout=110):
+    model_id = ALIASES.get(model_id, model_id)
     order = [model_id, "pol-openai", "lr-nano"]
     try:
         affs = aff_models()
