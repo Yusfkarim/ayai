@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الدكتور الذكي — مساعدك بلا قيود</title>
+<style>
+:root{--bg:#0b0e14;--panel:#11151f;--card:#171c29;--text:#e8ecf4;--muted:#8b93a7;--accent:#4f8cff;--accent2:#22c55e;--border:#232a3a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:Tahoma,'Segoe UI',system-ui,sans-serif;height:100vh;display:flex;flex-direction:column}
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:12px 18px;display:flex;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#4f8cff,#22c55e);display:flex;align-items:center;justify-content:center;font-size:20px}
+h1{font-size:17px}
+h1 small{display:block;color:var(--muted);font-size:11px;font-weight:400}
+select{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;max-width:220px}
+main{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.msg{max-width:78%;padding:12px 16px;border-radius:14px;line-height:1.8;white-space:pre-wrap;word-wrap:break-word;font-size:14.5px}
+.msg.user{align-self:flex-start;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-end;background:var(--card);border:1px solid var(--border);border-bottom-left-radius:4px}
+.msg.bot.thinking{color:var(--muted)}
+footer{background:var(--panel);border-top:1px solid var(--border);padding:12px 18px}
+.row{display:flex;gap:10px;max-width:900px;margin:0 auto}
+textarea{flex:1;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:12px 14px;font-size:14px;font-family:inherit;resize:none;min-height:48px;max-height:140px}
+button{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:0 22px;font-size:15px;cursor:pointer;font-family:inherit}
+button:disabled{opacity:.5}
+.intro{text-align:center;color:var(--muted);margin:auto;max-width:520px}
+.intro h2{color:var(--text);font-size:22px;margin-bottom:10px}
+.intro p{line-height:1.9;font-size:14px}
+@media(max-width:600px){.msg{max-width:92%}select{max-width:130px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🧠</div>
+  <h1>الدكتور الذكي <small>مساعدك العربي بلا قيود — مجاني</small></h1>
+  <select id="model"><option>جارٍ التحميل…</option></select>
+</header>
+<main id="chat">
+  <div class="intro">
+    <h2>مرحباً بك 👋</h2>
+    <p>مساعد ذكي يجيب بالعربية والكردية، مدعوم بعشرات النماذج المتقدمة.<br>اكتب سؤالك في الأسفل وابدأ فوراً — بدون حساب وبدون بطاقة.</p>
+  </div>
+</main>
+<footer>
+  <div class="row">
+    <textarea id="input" rows="1" placeholder="اكتب رسالتك هنا…"></textarea>
+    <button id="send">إرسال</button>
+  </div>
+</footer>
+<script>
+const chat=document.getElementById('chat'),input=document.getElementById('input'),send=document.getElementById('send'),modelSel=document.getElementById('model');
+let history=[],busy=false;
+fetch('https://yusfbot.apps.apply.build/v1/models',{headers:{'Authorization':'Bearer sk-yf-31c00f02aa9221b336d7b4a274bb375c'}}).then(r=>r.json()).then(d=>{
+  const ms=(d.data||[]).map(m=>m.id);
+  modelSel.innerHTML=ms.map(m=>`<option value="${m}">${m}</option>`).join('');
+  const pref=ms.find(m=>m.includes('gpt-4o-mini'))||ms.find(m=>m.includes('gpt'))||ms[0];
+  if(pref)modelSel.value=pref;
+}).catch(()=>{modelSel.innerHTML='<option>openai/gpt-4o-mini</option>'});
+function add(cls,text){const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
+async function ask(){
+  const t=input.value.trim();if(!t||busy)return;
+  busy=true;send.disabled=true;
+  if(chat.querySelector('.intro'))chat.querySelector('.intro').remove();
+  add('user',t);input.value='';input.style.height='auto';
+  const th=add('bot thinking','…جارٍ التفكير');
+  history.push({role:'user',content:t});
+  try{
+    const r=await fetch('https://yusfbot.apps.apply.build/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer sk-yf-31c00f02aa9221b336d7b4a274bb375c'},body:JSON.stringify({model:modelSel.value,messages:[{role:'system',content:'أنت «الدكتور الذكي»، مساعد عربي ذكي ودود. أجب دائماً بلغة المستخدم (عربي أو كردي) بشكل واضح ومنظم ومفيد.'},...history.slice(-16)]})});
+    const d=await r.json();
+    const txt=d?.choices?.[0]?.message?.content||d?.error||'تعذر الحصول على رد، حاول مجدداً.';
+    th.textContent=typeof txt==='string'?txt:JSON.stringify(txt).slice(0,300);
+    th.classList.remove('thinking');
+    history.push({role:'assistant',content:typeof txt==='string'?txt:'…'});
+  }catch(e){th.textContent='خطأ في الاتصال — حاول مجدداً.';th.classList.remove('thinking')}
+  busy=false;send.disabled=false;input.focus();
+}
+send.onclick=ask;
+input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
+input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px'});
+</script>
+</body>
+</html>
