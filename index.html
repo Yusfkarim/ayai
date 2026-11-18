@@ -54,16 +54,24 @@ button:disabled{opacity:.5}
 <script>
 const chat=document.getElementById('chat'),input=document.getElementById('input'),send=document.getElementById('send'),modelSel=document.getElementById('model');
 let history=[],busy=false;
-// 5 persona tiers (WormGPT.cam-style) — backed by Pollinations openai/openai-fast:
+// 5 tiers (wormgpt.cam-style) — backed by user's vpx API (235 models):
+const API_BASE='https://ayai-vpx-yusfkarim994-4936s-projects.vercel.app';
+const API_KEY='1f4a9e474ab616ad99e3f882a710a1a384126dc7b123a2c7';
 const TIERS={
- 'openai':      {label:'الدكتور الذكي ⭐ — متوازن (Balanced)', sys:''},
- 'openai-fast': {label:'الدكتور الذكي Plus ⚡ — سريع (Fast)', sys:''},
- 'docmax':      {label:'الدكتور الذكي Max 🧠 — تفكير عميق (Deep)', sys:'\nوضع التفكير العميق: قبل أن تجيب، فكّر خطوة بخطوة، حلّل جميع الاحتمالات، وقدّم خلاصة مدروسة ومفصلة.'},
- 'docagent':    {label:'الدكتور الذكي Agent 🤖 — مهام وأدوات', sys:'\nوضع الوكيل: عند تلقّي مهمة، قسّمها إلى خطوات مرقّمة، نفّذها واحداً تلو الآخر، واعرض النتيجة النهائية بشكل عملي مع الكود الجاهز إن وُجد.'},
- 'docvision':   {label:'الدكتور الذكي Vision 👁️ — صور', sys:'\nوضع الصور: إذا أُرسل رابط صورة (image_url) فحلّلها بدقة وصف تفاصيلها وأجب عنها.'}
+ 'alle-gemini-3-1-flash-lite': {label:'الدكتور الذكي ⭐ — متوازن (Balanced)', sys:''},
+ 'pol-openai-fast':            {label:'الدكتور الذكي Plus ⚡ — سريع (Fast)', sys:''},
+ 'deepseek-v4-1-flash-thinking':{label:'الدكتور الذكي Max 🧠 — تفكير عميق (Deep)', sys:'\nوضع التفكير العميق: قبل أن تجيب، فكّر خطوة بخطوة، حلّل جميع الاحتمالات، وقدّم خلاصة مدروسة ومفصلة.'},
+ 'kimi-k3-thinking':           {label:'الدكتور الذكي Agent 🤖 — مهام وأدوات', sys:'\nوضع الوكيل: عند تلقّي مهمة، قسّمها إلى خطوات مرقّمة، نفّذها واحداً تلو الآخر، واعرض النتيجة النهائية بشكل عملي مع الكود الجاهز إن وُجد.'},
+ 'nv-gemini-3-flash':          {label:'الدكتور الذكي Vision 👁️ — صور', sys:'\nوضع الصور: إذا أُرسل رابط صورة (image_url) فحلّلها بدقة وصف تفاصيلها وأجب عنها.'}
 };
-modelSel.innerHTML=Object.entries(TIERS).map(([v,t])=>`<option value="${v}">${t.label}</option>`).join('');
-modelSel.value='openai';
+let allModels=[];
+fetch(API_BASE+'/v1/models',{headers:{'Authorization':'Bearer '+API_KEY}}).then(r=>r.json()).then(d=>{
+  allModels=(d.data||[]).map(m=>m.id).filter(Boolean);
+  const extra=allModels.filter(x=>!TIERS[x]);
+  modelSel.innerHTML=Object.entries(TIERS).map(([v,t])=>`<option value="${v}">${t.label}</option>`).join('')
+    +(extra.length?`<optgroup label="— جميع الموديلات (${allModels.length}) —">`+extra.map(m=>`<option value="${m}">${m}</option>`).join('')+'</optgroup>':'');
+  modelSel.value='alle-gemini-3-1-flash-lite';
+}).catch(()=>{modelSel.innerHTML=Object.entries(TIERS).map(([v,t])=>`<option value="${v}">${t.label}</option>`).join('');modelSel.value='alle-gemini-3-1-flash-lite';});
 function add(cls,text){const d=document.createElement('div');d.className='msg '+cls;d.textContent=text;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
 async function ask(){
   const t=input.value.trim();if(!t||busy)return;
@@ -73,10 +81,10 @@ async function ask(){
   const th=add('bot thinking','…جارٍ التفكير');
   history.push({role:'user',content:t});
   try{
-    const tier=TIERS[modelSel.value]||TIERS['openai'];
-const realModel=modelSel.value==='openai-fast'?'openai-fast':'openai';
-const sysPrompt=(modelSel.value==='docmax'||modelSel.value==='docagent'||modelSel.value==='docvision')?(document.getElementById('sysbase').value+tier.sys):document.getElementById('sysbase').value;
-const r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:realModel,messages:[{role:'system',content:sysPrompt},...history.slice(-16)]})});
+    const tier=TIERS[modelSel.value]||{sys:''};
+const realModel=TIERS[modelSel.value]?modelSel.value:(allModels.includes(modelSel.value)?modelSel.value:'alle-gemini-3-1-flash-lite');
+const sysPrompt=tier.sys?(document.getElementById('sysbase').value+tier.sys):document.getElementById('sysbase').value;
+const r=await fetch(API_BASE+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},body:JSON.stringify({model:realModel,messages:[{role:'system',content:sysPrompt},...history.slice(-16)]})});
     const d=await r.json();
     const txt=d?.choices?.[0]?.message?.content||d?.error||'تعذر الحصول على رد، حاول مجدداً.';
     th.textContent=typeof txt==='string'?txt:JSON.stringify(txt).slice(0,300);
