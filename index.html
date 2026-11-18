@@ -55,8 +55,10 @@ button:disabled{opacity:.5}
 const chat=document.getElementById('chat'),input=document.getElementById('input'),send=document.getElementById('send'),modelSel=document.getElementById('model');
 let history=[],busy=false;
 // 5 tiers (wormgpt.cam-style) — backed by user's vpx API (235 models):
-const API_BASE='https://ayai-vpx-yusfkarim994-4936s-projects.vercel.app';
+const DOORS=['https://ayai-vpx-yusfkarim994-4936s-projects.vercel.app','https://aikurdi.vercel.app'];
+let API_BASE=DOORS[0];
 const API_KEY='1f4a9e474ab616ad99e3f882a710a1a384126dc7b123a2c7';
+function pickDoor(){return DOORS.find(d=>!d._bad)||DOORS[0];}
 const TIERS={
  'alle-gemini-3-1-flash-lite': {label:'الدكتور الذكي ⭐ — متوازن (Balanced)', sys:''},
  'pol-openai-fast':            {label:'الدكتور الذكي Plus ⚡ — سريع (Fast)', sys:''},
@@ -65,7 +67,7 @@ const TIERS={
  'nv-gemini-3-flash':          {label:'الدكتور الذكي Vision 👁️ — صور', sys:'\nوضع الصور: إذا أُرسل رابط صورة (image_url) فحلّلها بدقة وصف تفاصيلها وأجب عنها.'}
 };
 let allModels=[];
-fetch(API_BASE+'/v1/models',{headers:{'Authorization':'Bearer '+API_KEY}}).then(r=>r.json()).then(d=>{
+(async()=>{for(const d0 of DOORS){try{const rr=await fetch(d0+'/v1/models',{headers:{'Authorization':'Bearer '+API_KEY}});if(rr.ok){API_BASE=d0;return rr.json();}}catch(e){}}throw 0;})().then(d=>{
   allModels=(d.data||[]).map(m=>m.id).filter(Boolean);
   const extra=allModels.filter(x=>!TIERS[x]);
   modelSel.innerHTML=Object.entries(TIERS).map(([v,t])=>`<option value="${v}">${t.label}</option>`).join('')
@@ -84,7 +86,13 @@ async function ask(){
     const tier=TIERS[modelSel.value]||{sys:''};
 const realModel=TIERS[modelSel.value]?modelSel.value:(allModels.includes(modelSel.value)?modelSel.value:'alle-gemini-3-1-flash-lite');
 const sysPrompt=tier.sys?(document.getElementById('sysbase').value+tier.sys):document.getElementById('sysbase').value;
-const r=await fetch(API_BASE+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},body:JSON.stringify({model:realModel,messages:[{role:'system',content:sysPrompt},...history.slice(-16)]})});
+let r=null;
+try{
+  r=await fetch(API_BASE+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},body:JSON.stringify({model:realModel,messages:[{role:'system',content:sysPrompt},...history.slice(-16)]})});
+}catch(e){
+  const alt=DOORS.find(d=>d!==API_BASE);
+  if(alt){API_BASE=alt;r=await fetch(API_BASE+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},body:JSON.stringify({model:realModel,messages:[{role:'system',content:sysPrompt},...history.slice(-16)]})});}
+}
     const d=await r.json();
     const txt=d?.choices?.[0]?.message?.content||d?.error||'تعذر الحصول على رد، حاول مجدداً.';
     th.textContent=typeof txt==='string'?txt:JSON.stringify(txt).slice(0,300);
